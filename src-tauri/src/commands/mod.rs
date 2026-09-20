@@ -665,6 +665,57 @@ pub fn ignore(state: State<'_, AppState>, id: String, scope: IgnoreScope) -> Res
     store.forget_candidate(&id)
 }
 
+/// What Scuttle has been told to leave alone.
+///
+/// Flattened into one list because the settings screen shows them together;
+/// the `kind` is what `stop_ignoring` needs to find the row again.
+#[derive(Debug, Clone, Serialize)]
+pub struct IgnoredEntry {
+    pub kind: crate::scanning::IgnoreKind,
+    /// The stored value: a path, an app name, or a category slug.
+    pub value: String,
+    /// What to show a person. For a category this is its title.
+    pub label: String,
+}
+
+#[tauri::command]
+pub fn ignored(state: State<'_, AppState>) -> Result<Vec<IgnoredEntry>> {
+    let set = state.store().ignore_set()?;
+    let mut out = Vec::new();
+    for path in set.paths {
+        out.push(IgnoredEntry {
+            kind: crate::scanning::IgnoreKind::Path,
+            label: path.display().to_string(),
+            value: path.display().to_string(),
+        });
+    }
+    for app in set.apps {
+        out.push(IgnoredEntry {
+            kind: crate::scanning::IgnoreKind::App,
+            label: app.clone(),
+            value: app,
+        });
+    }
+    for category in set.categories {
+        out.push(IgnoredEntry {
+            kind: crate::scanning::IgnoreKind::Category,
+            label: format!("Everything in {}", category.title()),
+            value: category.slug().to_string(),
+        });
+    }
+    Ok(out)
+}
+
+/// Let one ignored thing be mentioned again. Touches no files.
+#[tauri::command]
+pub fn stop_ignoring(
+    state: State<'_, AppState>,
+    kind: crate::scanning::IgnoreKind,
+    value: String,
+) -> Result<()> {
+    state.store().unignore(kind, &value)
+}
+
 #[tauri::command]
 pub fn clear_ignores(state: State<'_, AppState>) -> Result<()> {
     state.store().clear_ignores()
@@ -681,6 +732,14 @@ pub fn reveal(state: State<'_, AppState>, id: String) -> Result<()> {
 pub fn reveal_quarantined(state: State<'_, AppState>, id: String) -> Result<()> {
     let record = state.store().quarantine_record(&id)?;
     state.platform().reveal(&record.stored_path)
+}
+
+/// Open the drawer's own folder, rather than one item inside it. Settings
+/// shows the location, so it needs a way to get there with nothing held.
+#[tauri::command]
+pub fn reveal_quarantine_root(state: State<'_, AppState>) -> Result<()> {
+    let root = state.platform().quarantine_root();
+    state.platform().reveal(&root)
 }
 
 /// Measure the volume.
@@ -829,8 +888,11 @@ pub fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static
         keep,
         ignore,
         clear_ignores,
+        ignored,
+        stop_ignoring,
         reveal,
         reveal_quarantined,
+        reveal_quarantine_root,
         space,
         settings,
         save_settings,

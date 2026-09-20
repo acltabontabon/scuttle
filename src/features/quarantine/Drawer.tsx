@@ -4,8 +4,8 @@ import { Unavailable, Waiting } from '@/components/Unavailable'
 
 import { useStore } from '@/app/store'
 import { api } from '@/lib/ipc'
-import { bytes, daysUntil, shortPath } from '@/lib/format'
-import { Glyph } from '@/visuals/Glyph'
+import { bytes } from '@/lib/format'
+import { DrawerItem } from './DrawerItem'
 import { Scuttle } from '@/visuals/Scuttle'
 
 import styles from './Drawer.module.css'
@@ -19,8 +19,8 @@ import styles from './Drawer.module.css'
  */
 export function Drawer() {
   const { drawer, refreshDrawer, restore, removePermanently, emptyDrawer, go } = useStore()
-  const [confirming, setConfirming] = useState<string | null>(null)
   const [emptying, setEmptying] = useState(false)
+  const [purging, setPurging] = useState(false)
   const [failed, setFailed] = useState(false)
 
   const load = () => {
@@ -58,18 +58,18 @@ export function Drawer() {
               {drawer.items.length} {drawer.items.length === 1 ? 'thing' : 'things'} ·{' '}
               {bytes(drawer.held_bytes)} held
             </p>
-            <p className={styles.line}>
-              Still on your disk, and still taking up that room. Put anything back
-              whenever you like.
-            </p>
             {/*
-              The policy as implemented, not as wished for: the sweep runs in
-              `commands::init`, which is app launch. Saying "after 14 days"
-              flat would be a promise Scuttle cannot keep while it is closed.
+              "Put anything back whenever you like" was not true — restoring
+              only works while the item is still here. And the policy is
+              stated as implemented: the sweep runs in `commands::init`, which
+              is app launch, so nothing is deleted at a particular hour.
             */}
+            <p className={styles.line}>
+              These files still take up disk space. Put them back before they expire.
+            </p>
             <p className={styles.policy}>
-              Anything still here {retention} days after it went in is deleted the next
-              time Scuttle starts.
+              Items expire after {retention} days and are deleted the next time Scuttle
+              starts.
             </p>
           </>
         )}
@@ -95,80 +95,22 @@ export function Drawer() {
       <div className={styles.drawer}>
         {drawer.items.length === 0 ? (
           <div className={styles.empty}>
-            <Scuttle mood="idle" size={70} />
+            <Scuttle mood="asleep" size={76} />
+            {/* The route back already sits in the footer a few lines down;
+                repeating it here was two links to the same place. */}
             <p className={styles.emptyLine}>Empty, and that is fine.</p>
           </div>
         ) : (
           <ul className={styles.shelfGrid}>
-            {drawer.items.map((item, index) => {
-              const left = daysUntil(item.expires_unix)
-              return (
-                <li
-                  key={item.id}
-                  className={styles.card}
-                  style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}
-                >
-                  <span className={styles.cardGlyph}>
-                    <Glyph category={item.category} size={22} />
-                  </span>
-                  <span className={styles.cardName} title={item.display_name}>
-                    {item.display_name}
-                  </span>
-                  <span className={styles.cardSize}>{bytes(item.size)}</span>
-
-                  <span className={styles.cardMeta}>
-                    {/*
-                      Reversed direction so a long path keeps its tail — the
-                      folder it sits in is the part worth reading, and the
-                      full path is still on the title.
-                    */}
-                    <span className={styles.cardFrom} title={item.original_path}>
-                      {shortPath(item.original_path)}
-                    </span>
-                    <span className={styles.cardExpiry} data-soon={left <= 2}>
-                      {left === 0 ? 'goes today' : `${left} ${left === 1 ? 'day' : 'days'} left`}
-                    </span>
-                  </span>
-
-                  <span className={styles.cardActions}>
-                    <button
-                      className={styles.cardAction}
-                      onClick={() => void restore(item.id)}
-                    >
-                      Put it back
-                    </button>
-                    <button
-                      className={`${styles.cardAction} ${styles.cardDanger}`}
-                      onClick={() => setConfirming(item.id)}
-                      aria-label={`Delete ${item.display_name} permanently`}
-                    >
-                      Delete permanently
-                    </button>
-                  </span>
-
-                  {confirming === item.id && (
-                    <div className={styles.confirm} role="alertdialog">
-                      <span className={styles.confirmText}>
-                        Delete {item.display_name} permanently? It does not go to the
-                        Trash and cannot be recovered.
-                      </span>
-                      <button
-                        className={styles.confirmYes}
-                        onClick={() => {
-                          setConfirming(null)
-                          void removePermanently(item.id)
-                        }}
-                      >
-                        Delete permanently
-                      </button>
-                      <button className={styles.confirmNo} onClick={() => setConfirming(null)}>
-                        Cancel
-                      </button>
-                    </div>
-                  )}
-                </li>
-              )
-            })}
+            {drawer.items.map((item, index) => (
+              <DrawerItem
+                key={item.id}
+                item={item}
+                index={index}
+                onRestore={restore}
+                onDelete={removePermanently}
+              />
+            ))}
           </ul>
         )}
       </div>
@@ -187,14 +129,23 @@ export function Drawer() {
           </span>
           <button
             className={styles.confirmYes}
+            disabled={purging}
             onClick={() => {
-              setEmptying(false)
-              void emptyDrawer()
+              if (purging) return
+              setPurging(true)
+              void emptyDrawer().finally(() => {
+                setPurging(false)
+                setEmptying(false)
+              })
             }}
           >
-            Delete permanently
+            {purging ? 'Deleting…' : `Delete all ${drawer.items.length} permanently`}
           </button>
-          <button className={styles.confirmNo} onClick={() => setEmptying(false)}>
+          <button
+            className={styles.confirmNo}
+            disabled={purging}
+            onClick={() => setEmptying(false)}
+          >
             Cancel
           </button>
         </div>
@@ -206,7 +157,7 @@ export function Drawer() {
           style={{ color: 'var(--ink-soft)' }}
           onClick={() => go({ name: 'findings' })}
         >
-          ← Back to the floor
+          ← Back to findings
         </button>
         {drawer.items.length > 0 && (
           <button
@@ -216,7 +167,7 @@ export function Drawer() {
               void api.revealQuarantined(drawer.items[0]!.id)
             }}
           >
-            Show me where the drawer lives
+            Open drawer folder
           </button>
         )}
       </div>

@@ -12,33 +12,70 @@
  * going spare. Multi-column keeps each group whole — `break-inside` below —
  * and lets the settings be read without scrolling for them.
  */
+/*
+ * Two real columns, not a `columns: 2` flow.
+ *
+ * Multi-column decides the order for you and walks the keyboard down one
+ * column and back up the next; these are two explicit columns, so scanning
+ * and file handling sit together on the left and preferences and tools on
+ * the right, in the order they are read.
+ */
 .inner {
-  max-width: 1100px;
+  max-width: 1080px;
   margin: 0 auto;
-  columns: 2;
-  column-gap: var(--air);
+}
+
+.masthead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--close) var(--step);
+  padding-bottom: var(--close);
+  margin-bottom: var(--gap);
+  border-bottom: var(--hair) solid var(--rule);
 }
 
 .title {
-  column-span: all;
   font-family: var(--serif);
   font-size: var(--type-loud);
   font-weight: 400;
-  margin-bottom: var(--step);
+}
+
+/*
+ * There is no save button because there is nothing to save: every change is
+ * written through immediately. Saying so once, quietly, is the whole of it —
+ * and the same line carries a failure when one happens.
+ */
+.autosave {
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  align-items: start;
+  gap: var(--step) var(--air);
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step);
+  min-width: 0;
 }
 
 .group {
-  break-inside: avoid;
-  /* A group must not be split across the fold of a column: half a heading in
-     one column and its switches in the next is worse than either. */
-  page-break-inside: avoid;
-  margin-bottom: var(--gap);
+  break-inside: auto;
+  margin-bottom: 0;
 }
 
-/* Multi-column counts the first child's margin from the top of each column,
-   which pushes the right-hand column out of alignment with the left. */
-.group:first-of-type {
-  margin-top: 0;
+.groupNote {
+  font-size: var(--type-whisper);
+  color: var(--ink-faint);
+  margin-top: calc(var(--tight) * -1);
+  margin-bottom: var(--close);
 }
 
 .groupTitle {
@@ -136,26 +173,73 @@
   padding: 0;
 }
 
+/*
+ * The folder name leads; the path sits underneath.
+ *
+ * Side by side, a path like ".../Application Support/Steam/steamapps" took
+ * the width the label needed and wrapped "Steam library" onto two lines.
+ * Stacked, the label always has the full row and the path can be elided
+ * without touching it.
+ */
 .place {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: var(--close);
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
   padding: var(--snug) 0;
   border-bottom: var(--hair) solid var(--rule);
   font-size: var(--type-small);
 }
 
-.placePath {
+/* The path is its own control, so opening it does not toggle the box. */
+.placePath,
+.placePathPlain {
+  display: block;
+  margin-left: calc(17px + var(--close));
   font-family: var(--mono);
   font-size: var(--type-whisper);
-  color: var(--ink-faint);
+  color: var(--ink-soft);
+  text-align: left;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.placePath {
+  border-bottom: var(--hair) solid transparent;
+  transition:
+    color var(--quick) var(--ease),
+    border-color var(--quick) var(--ease);
+}
+
+.placePath:hover {
+  color: var(--ink);
+  border-bottom-color: var(--ink-ghost);
+}
+
+/* Opened, the whole path wraps rather than widening the column. */
+.placePath[data-open] {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
+/*
+ * The box and its label are one control, so the whole name is clickable and
+ * the hit area is a comfortable size rather than seventeen pixels square.
+ */
 .check {
+  display: flex;
+  align-items: center;
+  gap: var(--close);
+  width: 100%;
+  padding: 2px 0;
+  text-align: left;
+  color: var(--ink);
+}
+
+.checkMark {
+  flex: none;
   width: 17px;
   height: 17px;
   border-radius: var(--round-tight);
@@ -166,18 +250,37 @@
   font-size: 11px;
   line-height: 1;
   color: transparent;
+  transition:
+    background var(--quick) var(--ease),
+    border-color var(--quick) var(--ease);
 }
 
-.check[aria-checked='true'] {
+.check[aria-checked='true'] .checkMark {
   background: var(--ink);
   border-color: var(--ink);
   color: var(--paper);
 }
 
+.check:hover .checkMark {
+  border-color: var(--ink-soft);
+}
+
+.placeLabel {
+  font-size: var(--type-small);
+  min-width: 0;
+}
+
 .link {
+  flex: none;
   font-size: var(--type-small);
   color: var(--ink-soft);
   border-bottom: var(--hair) solid var(--ink-ghost);
+  padding-bottom: 1px;
+}
+
+.link:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .link:hover {
   color: var(--ink);
@@ -189,17 +292,41 @@
   border-bottom-color: var(--clay);
 }
 
-.about {
-  margin-top: var(--air);
-  padding-top: var(--step);
-  border-top: var(--hair) solid var(--rule);
-  font-size: var(--type-small);
-  color: var(--ink-faint);
-  line-height: var(--leading-loose);
-}
-
 .aboutPath {
   font-family: var(--mono);
   font-size: var(--type-whisper);
-  overflow-wrap: anywhere;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- ignored items -------------------------------------------------------- */
+.ignoreList {
+  list-style: none;
+  margin: var(--close) 0 0;
+  padding: 0;
+}
+
+.ignoreItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: var(--close);
+  padding: var(--snug) 0;
+  border-bottom: var(--hair) solid var(--rule);
+}
+
+.ignoreLabel {
+  font-size: var(--type-small);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ignoreKind {
+  font-size: var(--type-whisper);
+  color: var(--ink-faint);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }

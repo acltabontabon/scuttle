@@ -20,6 +20,7 @@ import type {
   KeepChoice,
   Findings,
   HistoryEntry,
+  IgnoredEntry,
   Phase,
   Progress,
   PurgeOutcome,
@@ -89,10 +90,14 @@ export const api = {
   keep: (id: string) => invoke<void>('keep', { id }),
   ignore: (id: string, scope: 'path' | 'app' | 'category') =>
     invoke<void>('ignore', { id, scope }),
+  ignored: () => invoke<IgnoredEntry[]>('ignored'),
+  stopIgnoring: (kind: IgnoredEntry['kind'], value: string) =>
+    invoke<void>('stop_ignoring', { kind, value }),
   clearIgnores: () => invoke<void>('clear_ignores'),
 
   reveal: (id: string) => invoke<void>('reveal', { id }),
   revealQuarantined: (id: string) => invoke<void>('reveal_quarantined', { id }),
+  revealQuarantineRoot: () => invoke<void>('reveal_quarantine_root'),
 
   space: () => invoke<SpaceOverview>('space'),
   settings: () => invoke<Settings>('settings'),

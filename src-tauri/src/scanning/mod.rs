@@ -67,6 +67,15 @@ impl Default for ScanOptions {
     }
 }
 
+/// Which of the three ignore lists an entry belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IgnoreKind {
+    Path,
+    App,
+    Category,
+}
+
 /// Decisions the user has already made, so Scuttle stops asking.
 #[derive(Debug, Clone, Default)]
 pub struct IgnoreSet {

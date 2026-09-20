@@ -82,7 +82,10 @@ export function Preview() {
       space: SPACE,
       refreshSpace: ok,
       settings: { ...SETTINGS, appearance: theme },
-      updateSettings: async (next) => setTheme(next.appearance),
+      updateSettings: async (next) => {
+        setTheme(next.appearance)
+        return true
+      },
       note: null,
       say: () => {},
       dismissNote: () => {},
@@ -94,8 +97,8 @@ export function Preview() {
       emptyDrawer: noop,
       keep: noop,
       ignore: noop,
-      restore: noop,
-      removePermanently: noop,
+      restore: ok,
+      removePermanently: ok,
       reveal: noop,
     }
   }, [scene, detail, theme])

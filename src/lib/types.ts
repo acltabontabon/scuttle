@@ -236,6 +236,15 @@ export interface SpaceOverview {
   summary: string
 }
 
+/** Something Scuttle has been told to leave alone. Never a file operation. */
+export interface IgnoredEntry {
+  kind: 'path' | 'app' | 'category'
+  /** The stored value, used to find the row again. */
+  value: string
+  /** What to show a person. */
+  label: string
+}
+
 export interface Settings {
   scan_roots: string[]
   include_developer_debris: boolean

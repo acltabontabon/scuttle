@@ -112,7 +112,8 @@ export interface Store {
   refreshSpace: () => Promise<boolean>
 
   settings: Settings | null
-  updateSettings: (next: Settings) => Promise<void>
+  /** Reports whether the write actually landed. */
+  updateSettings: (next: Settings) => Promise<boolean>
 
   note: Note | null
   say: (text: string, options?: { tone?: Note['tone']; action?: Note['action'] }) => void
@@ -129,8 +130,13 @@ export interface Store {
   emptyDrawer: () => Promise<void>
   keep: (candidate: Candidate) => Promise<void>
   ignore: (candidate: Candidate, scope: 'path' | 'app' | 'category') => Promise<void>
-  restore: (id: string) => Promise<void>
-  removePermanently: (id: string) => Promise<void>
+  /**
+   * Both report whether the operation actually completed, so a caller can
+   * keep a control disabled until it has, and say what failed where it
+   * failed. Neither resolves before the file has moved.
+   */
+  restore: (id: string) => Promise<boolean>
+  removePermanently: (id: string) => Promise<boolean>
   reveal: (candidate: Candidate) => Promise<void>
 }
 
@@ -297,8 +303,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     async (next) => {
       try {
         setSettings(await api.saveSettings(next))
+        return true
       } catch (error) {
         say(readError(error), { tone: 'warn' })
+        return false
       }
     },
     [say],
@@ -495,8 +503,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ? 'Something was already there, so it went back under a new name.'
             : 'Back where it came from.',
         )
+        return true
       } catch (error) {
         say(readError(error), { tone: 'warn' })
+        return false
       }
     },
     [refreshDrawer, refreshFindings, say],
@@ -508,8 +518,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         await api.removePermanently(id)
         await refreshDrawer()
         say('Gone for good.')
+        return true
       } catch (error) {
         say(readError(error), { tone: 'warn' })
+        return false
       }
     },
     [refreshDrawer, say],

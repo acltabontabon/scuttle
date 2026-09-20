@@ -62,13 +62,17 @@
   min-height: 0;
   display: flex;
   padding: var(--step) var(--step);
-  background: linear-gradient(to bottom, var(--hollow), var(--paper-deep) 34%);
-  border: var(--hair) solid var(--ink-ghost);
-  border-top-width: 2px;
+  /*
+   * The depth now lives at the edge rather than across the whole interior:
+   * a lit top lip, a hairline, and a short inner shadow under it. The broad
+   * gradient fill made the tray darker than the slips resting in it, which
+   * inverted the thing it was meant to suggest.
+   */
+  background: color-mix(in srgb, var(--paper-deep) 55%, var(--paper));
+  border: var(--hair) solid var(--rule);
+  border-top: var(--hair) solid var(--ink-ghost);
   border-radius: var(--round-tight) var(--round-tight) var(--round-drawer) var(--round-drawer);
-  /* Still recessed, but a shallow drawer rather than a pit. The old inset
-     was heavy enough to read as a gradient rather than as depth. */
-  box-shadow: inset 0 9px 18px -14px rgba(40, 28, 16, 0.34);
+  box-shadow: inset 0 6px 10px -9px rgba(40, 28, 16, 0.3);
 }
 
 /* The lip, so the box reads as open towards the viewer. */
@@ -265,29 +269,29 @@
   border-top: var(--hair) solid var(--rule);
 }
 
+/*
+ * Sized like the action it is, rather than the loudest thing on the page.
+ * At 21px serif on a wide dark slab it out-shouted the drawer's own
+ * contents, which are what somebody came here to look at.
+ */
 .emptyAction {
-  padding: 12px var(--room);
+  padding: 7px var(--step);
   font-family: var(--serif);
-  font-size: var(--type-say);
+  font-size: var(--type-body);
   letter-spacing: 0.01em;
-  color: var(--paper);
-  background: var(--ink);
-  border-radius: var(--round-soft);
+  color: var(--ink);
+  background: var(--paper);
+  border: var(--hair) solid var(--ink-ghost);
+  border-radius: var(--round);
   font-variant-numeric: tabular-nums;
-  box-shadow: var(--lift-hover);
   transition:
-    transform var(--quick) var(--ease),
-    box-shadow var(--quick) var(--ease);
+    border-color var(--quick) var(--ease),
+    background var(--quick) var(--ease);
 }
 
 .emptyAction:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--lift-held);
-}
-
-.emptyAction:active {
-  transform: translateY(1px) scale(0.993);
-  box-shadow: var(--lift-resting);
+  background: var(--clay-soft);
+  border-color: var(--clay);
 }
 
 .emptyHint {
@@ -363,22 +367,38 @@
  * or the keyboard, because eight cards each shouting two buttons was most of
  * what made this screen so tall.
  */
+/*
+ * A slip resting in the tray: paper, a hairline, and nothing else. No shadow
+ * and no second container — the tray around it is already doing that job.
+ */
 .card {
   display: grid;
   grid-template-columns: 26px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 2px var(--close);
+  gap: 3px var(--close);
   padding: var(--close) var(--step) var(--close) var(--close);
-  background: var(--paper-raised);
+  background: var(--paper);
   border: var(--hair) solid var(--rule);
   border-radius: var(--round);
   animation: land 420ms var(--settle) backwards;
-  transition: border-color var(--quick) var(--ease);
+  transition:
+    border-color var(--quick) var(--ease),
+    opacity var(--quick) var(--ease);
 }
 
 .card:hover,
 .card:focus-within {
   border-color: var(--ink-ghost);
+}
+
+.card:focus-visible {
+  outline: 2px solid var(--honey);
+  outline-offset: 2px;
+}
+
+/* While something is happening to it, the slip stops inviting more input. */
+.card[data-busy] {
+  opacity: 0.72;
 }
 
 .cardGlyph {
@@ -414,15 +434,40 @@
   min-width: 0;
 }
 
+/*
+ * No `direction: rtl` here any more.
+ *
+ * It was a trick to keep the tail of a long path visible, and it quietly
+ * rewrote them: a leading "/" is a neutral character, so in an RTL context it
+ * reordered to the far end and every file was displayed as a directory —
+ * "…/Downloads/steam.dmg/". `shortPath` already elides the middle, and the
+ * full path is one keystroke away on the button itself.
+ */
 .cardFrom {
   font-family: var(--mono);
   font-size: var(--type-whisper);
-  color: var(--ink-faint);
+  color: var(--ink-soft);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  direction: rtl;
   text-align: left;
+  border-bottom: var(--hair) solid transparent;
+  transition:
+    color var(--quick) var(--ease),
+    border-color var(--quick) var(--ease);
+}
+
+.cardFrom:hover {
+  color: var(--ink);
+  border-bottom-color: var(--ink-ghost);
+}
+
+/* Expanded, the whole path is allowed the room to wrap. */
+.cardFrom[aria-expanded='true'] {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
 }
 
 .cardExpiry {
@@ -432,34 +477,74 @@
   white-space: nowrap;
 }
 
-.cardExpiry[data-soon='true'] {
+.cardExpiry[data-state='soon'] {
+  color: var(--honey-ink);
+}
+
+.cardExpiry[data-state='expired'] {
   color: var(--clay-ink);
 }
 
 .cardActions {
   grid-column: 2 / span 2;
   display: flex;
-  gap: var(--step);
-  margin-top: var(--tight);
+  align-items: center;
+  gap: var(--close);
+  margin-top: var(--snug);
 }
 
-.cardAction {
+/* Something you can fail to notice is not an action. The whole row of
+   metadata above this is text; these two have to look like they are not. */
+.card .restore {
+  padding: 5px var(--close);
+  font-size: var(--type-whisper);
+  color: var(--ink);
+  background: var(--paper-raised);
+  border: var(--hair) solid var(--ink-ghost);
+  border-radius: var(--round);
+  transition:
+    background var(--quick) var(--ease),
+    border-color var(--quick) var(--ease);
+}
+
+.card .restore:hover:not(:disabled) {
+  background: var(--moss-soft);
+  border-color: var(--moss);
+}
+
+/*
+ * Secondary to restoring, and unmistakably the destructive one. A clay
+ * underline rather than a filled red button: there is one of these on every
+ * slip, and eight red buttons would make the drawer look like a hazard.
+ */
+.card .forever {
+  padding: 5px var(--snug);
   font-size: var(--type-whisper);
   color: var(--ink-soft);
   border-bottom: var(--hair) solid transparent;
+  border-radius: 2px;
   transition:
     color var(--quick) var(--ease),
     border-color var(--quick) var(--ease);
 }
 
-.cardAction:hover {
-  color: var(--ink);
-  border-bottom-color: var(--moss);
-}
-
-.cardDanger:hover {
+.card .forever:hover:not(:disabled) {
   color: var(--clay-ink);
   border-bottom-color: var(--clay);
+}
+
+.card .restore:disabled,
+.card .forever:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* A failure belongs beside the thing it happened to. */
+.cardFailure {
+  grid-column: 1 / -1;
+  margin-top: var(--snug);
+  font-size: var(--type-whisper);
+  color: var(--clay-ink);
 }
 
 /* ---- confirming the whole drawer ------------------------------------------ */

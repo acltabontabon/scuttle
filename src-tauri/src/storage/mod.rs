@@ -18,7 +18,7 @@ use crate::model::{
     Category, CleanupCandidate, Confidence, GroupMember, RecommendedAction, Risk, StateFingerprint,
     TargetKind,
 };
-use crate::scanning::{IgnoreSet, ScanOptions, ScanSummary};
+use crate::scanning::{IgnoreKind, IgnoreSet, ScanOptions, ScanSummary};
 use crate::Result;
 
 /// The user's preferences. Small on purpose.
@@ -388,6 +388,24 @@ impl Store {
             "INSERT OR REPLACE INTO ignored_categories (category, created_unix) VALUES (?1, ?2)",
             params![category.slug(), now_unix],
         )?;
+        Ok(())
+    }
+
+    /// Stop ignoring one entry, whichever kind it is.
+    ///
+    /// The three tables are keyed by their own value — a path, a lowercased
+    /// app name, a category slug — so one delete per kind is all this needs.
+    /// Nothing here touches a file: an ignore is only a note saying "do not
+    /// mention this again", and removing it makes the thing eligible to turn
+    /// up in the next rummage.
+    pub fn unignore(&self, kind: IgnoreKind, value: &str) -> Result<()> {
+        let conn = self.lock();
+        let sql = match kind {
+            IgnoreKind::Path => "DELETE FROM ignored_paths WHERE path = ?1",
+            IgnoreKind::App => "DELETE FROM ignored_apps WHERE name = ?1",
+            IgnoreKind::Category => "DELETE FROM ignored_categories WHERE category = ?1",
+        };
+        conn.execute(sql, params![value])?;
         Ok(())
     }
 
