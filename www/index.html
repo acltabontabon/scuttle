@@ -34,7 +34,9 @@
   <body>
     <a class="skip" href="#main">Skip to content</a>
 
-    <header class="masthead">
+    <div class="masthead-sentinel" aria-hidden="true"></div>
+
+    <header class="masthead" id="masthead">
       <a class="wordmark" href="#main" aria-label="Scuttle, home">
         <svg class="mark" viewBox="0 0 24 20" width="26" height="22" aria-hidden="true" focusable="false">
           <path d="M12 3 C17 3 20 6.4 20 11 L20 14.6 L4 14.6 L4 11 C4 6.4 7 3 12 3 Z" fill="currentColor" />
@@ -62,7 +64,7 @@
              everything the page has to say is said in the text. -->
         <div class="strewn" id="strewn" aria-hidden="true"></div>
 
-        <div class="hero-words">
+        <div class="hero-words stagger">
           <p class="overline">macOS &amp; Windows · free &amp; open source</p>
           <h1>A little creature<br /><span class="h1-swash">for the files</span><br />you forgot about.</h1>
 
@@ -143,7 +145,7 @@
       <!-- ---------------------------------------------------------------
            The real workflow, in four beats, each composed differently.
       ---------------------------------------------------------------- -->
-        <svg class="ink-rule" viewBox="0 0 600 12" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+        <svg class="ink-rule reveal" viewBox="0 0 600 12" preserveAspectRatio="none" aria-hidden="true" focusable="false">
           <path d="M2 7.2 C62 3.4 118 9.4 176 6.2 C238 2.8 292 9.8 352 6.6 C414 3.2 468 9.2 528 5.8 C556 4.2 578 6.4 598 5.2" />
         </svg>
 
@@ -152,7 +154,7 @@
 
         <!-- 1. Find it — the piles, drawn the way the app draws them. -->
         <article class="beat beat-find reveal">
-          <div class="beat-words">
+          <div class="beat-words stagger">
             <p class="beat-number"><span class="beat-figure" aria-hidden="true">1</span>One</p>
             <h3>It rummages</h3>
             <p>
@@ -173,7 +175,7 @@
 
         <!-- 2. Review it — the evidence, quoted from the real interface. -->
         <article class="beat beat-review reveal">
-          <div class="beat-words">
+          <div class="beat-words stagger">
             <p class="beat-number"><span class="beat-figure" aria-hidden="true">2</span>Two</p>
             <h3>It shows its working</h3>
             <p>
@@ -213,7 +215,7 @@
 
         <!-- 3. The drawer — a shallow drawer that actually opens. -->
         <article class="beat beat-drawer reveal">
-          <div class="beat-words">
+          <div class="beat-words stagger">
             <p class="beat-number"><span class="beat-figure" aria-hidden="true">3</span>Three</p>
             <h3>It goes in the drawer</h3>
             <p>
@@ -276,7 +278,7 @@
 
         <!-- 4. Let it go. -->
         <article class="beat beat-go reveal">
-          <div class="beat-words">
+          <div class="beat-words stagger">
             <p class="beat-number"><span class="beat-figure" aria-hidden="true">4</span>Four</p>
             <h3>Or you let it go</h3>
             <p>
@@ -310,14 +312,14 @@
       <!-- ---------------------------------------------------------------
            Questions people actually have.
       ---------------------------------------------------------------- -->
-        <svg class="ink-rule" viewBox="0 0 600 12" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+        <svg class="ink-rule reveal" viewBox="0 0 600 12" preserveAspectRatio="none" aria-hidden="true" focusable="false">
           <path d="M2 7.2 C62 3.4 118 9.4 176 6.2 C238 2.8 292 9.8 352 6.6 C414 3.2 468 9.2 528 5.8 C556 4.2 578 6.4 598 5.2" />
         </svg>
 
       <section class="questions" id="questions">
         <h2 class="section-heading">Reasonable questions</h2>
 
-        <div class="qa reveal">
+        <div class="qa reveal stagger">
           <div class="q">
             <h3>What does it look for?</h3>
             <p>

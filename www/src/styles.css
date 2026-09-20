@@ -281,7 +281,7 @@ img { height: auto; }
 }
 
 @keyframes driftIn {
-  from { opacity: 0; transform: translateY(18px) rotate(-10deg); }
+  from { transform: translateY(18px) rotate(-10deg); }
 }
 
 .hero-words, .hero-shot { position: relative; z-index: 1; }
@@ -646,8 +646,11 @@ img { height: auto; }
 /* Each object drops in and settles, once, when the pile scrolls into view. */
 .revealed .pile svg { animation: settle 640ms var(--settle) backwards; }
 
+/* Transform only, deliberately: if this animation is throttled or never
+   runs, the object is merely in the wrong place for a moment rather than
+   absent. The same reasoning as the hero above. */
 @keyframes settle {
-  from { transform: translateY(-20px) rotate(-14deg); opacity: 0; }
+  from { transform: translateY(-20px) rotate(-14deg); }
 }
 
 /* ---- 2. the evidence ----------------------------------------------------- */
@@ -1058,4 +1061,178 @@ img { height: auto; }
   .reveal { opacity: 1; transform: none; }
   .closing.revealed .creature { animation: none; }
   .frame:hover { transform: rotate(-0.5deg); }
+}
+
+/* ==========================================================================
+ * Arriving, more carefully
+ *
+ * The page is read by scrolling, so scrolling is the one interaction worth
+ * spending effort on. Three things happen as you move down it: the masthead
+ * settles onto the paper once you leave the top, each section's parts arrive
+ * in the order you would read them rather than all at once, and the hero's
+ * scenery drifts a little against the text.
+ *
+ * All of it is transform and opacity, so none of it touches layout, and the
+ * scroll-linked parts run on the compositor through `animation-timeline`
+ * where the browser has it. Everything collapses to the finished page under
+ * `prefers-reduced-motion`, at the bottom of this file.
+ * ========================================================================== */
+
+.masthead-sentinel { position: absolute; top: 0; height: 1px; width: 1px; }
+
+.masthead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  transition:
+    background-color 320ms var(--ease),
+    border-color 320ms var(--ease),
+    padding 320ms var(--ease),
+    backdrop-filter 320ms var(--ease);
+  border-bottom: 1px solid transparent;
+}
+/* Once the top of the page is behind you, the bar stops being part of the
+   hero and becomes a shelf: a little tighter, faintly frosted, with a
+   hairline where it meets what is scrolling underneath. */
+.masthead[data-stuck='true'] {
+  padding-top: var(--close);
+  padding-bottom: var(--close);
+  background-color: color-mix(in srgb, var(--paper) 82%, transparent);
+  backdrop-filter: blur(14px) saturate(120%);
+  border-bottom-color: var(--rule);
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .masthead[data-stuck='true'] { background-color: var(--paper); }
+}
+
+/* ---- staggered arrival ---------------------------------------------------
+ * Children of a revealed block come in one after another, about a frame and
+ * a half apart. Slow enough to read as a sequence, fast enough that nobody
+ * is waiting for the page.
+ */
+
+.stagger > * {
+  opacity: 0;
+  transform: translateY(14px);
+}
+.revealed.stagger > *,
+.revealed .stagger > * {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 620ms var(--ease) var(--step-delay, 0ms),
+    transform 680ms var(--settle) var(--step-delay, 0ms);
+}
+.stagger > *:nth-child(1) { --step-delay: 0ms; }
+.stagger > *:nth-child(2) { --step-delay: 70ms; }
+.stagger > *:nth-child(3) { --step-delay: 140ms; }
+.stagger > *:nth-child(4) { --step-delay: 210ms; }
+.stagger > *:nth-child(5) { --step-delay: 280ms; }
+.stagger > *:nth-child(6) { --step-delay: 350ms; }
+.stagger > *:nth-child(n + 7) { --step-delay: 420ms; }
+
+/* The hero is above the fold, so `setUpReveals` marks it on load and it uses
+   the same class-driven transition as everything else.
+ *
+ * It used to run a keyframe animation with `backwards` fill instead, which
+ * meant the words were invisible until that animation completed — and an
+ * animation that is throttled, paused or never started leaves the first
+ * thing anybody reads permanently blank. Visibility now comes from a class,
+ * and a class can be applied by the safety timer.
+ */
+
+/* The art beside each block comes in just behind the words. */
+.beat .evidence,
+.beat .drawer-scene,
+.beat .go-art,
+.beat .beat-art {
+  opacity: 0;
+  transform: translateY(20px) scale(0.988);
+}
+.beat.revealed .evidence,
+.beat.revealed .drawer-scene,
+.beat.revealed .go-art,
+.beat.revealed .beat-art {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 700ms var(--ease) 160ms,
+    transform 760ms var(--settle) 160ms;
+}
+
+/* ---- the rule draws itself ----------------------------------------------- */
+
+.ink-rule path {
+  stroke-dasharray: 620;
+  stroke-dashoffset: 620;
+}
+.ink-rule.revealed path {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 1100ms var(--ease);
+}
+
+/* ---- scroll-linked drift -------------------------------------------------
+ * Only where the browser can run it off the main thread. There is no
+ * JavaScript fallback on purpose: a parallax worth a scroll handler is a
+ * parallax not worth having.
+ */
+
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    /* Scoped to `exit`, so at the top of the page — where everyone starts —
+       the composition is exactly as designed, and the drift only happens as
+       the hero leaves, which is the only time anyone can see it anyway. */
+    .hero-shot {
+      animation: driftUp linear both;
+      animation-timeline: view();
+      animation-range: exit 0% exit 100%;
+    }
+    @keyframes driftUp {
+      from { transform: none; }
+      to   { transform: translateY(-40px); }
+    }
+
+    /* The scenery moves further than the screenshot, which is what makes the
+       hero read as having depth rather than as one flat picture. */
+    .strewn svg {
+      animation: driftIn 900ms var(--settle) backwards, scenery linear both;
+      animation-timeline: auto, view();
+      animation-range: normal, exit 0% exit 100%;
+    }
+    /* Further than the screenshot, which is what gives the hero depth rather
+       than making it one flat picture sliding about. */
+    @keyframes scenery {
+      from { translate: 0 0; }
+      to   { translate: 0 -72px; }
+    }
+
+    /* Each pile settles onto its line as it comes up the screen. */
+    .piles { animation: floorSettle linear both; animation-timeline: view(); animation-range: entry 10% entry 90%; }
+    @keyframes floorSettle {
+      from { transform: translateY(14px); }
+      to   { transform: none; }
+    }
+  }
+}
+
+/* ---- less motion, again --------------------------------------------------
+ * Repeated after the rules above so it wins on order as well as intent.
+ */
+
+@media (prefers-reduced-motion: reduce) {
+  .stagger > *,
+  .revealed.stagger > *,
+  .revealed .stagger > *,
+  .beat .evidence,
+  .beat .drawer-scene,
+  .beat .go-art,
+  .beat .beat-art {
+    opacity: 1;
+    transform: none;
+    transition: none;
+    animation: none;
+  }
+  .hero-words.stagger > * { animation: none; }
+  .ink-rule path { stroke-dashoffset: 0; transition: none; }
+  .masthead { transition: none; }
 }

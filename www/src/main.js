@@ -169,8 +169,27 @@ function setUpDemo() {
  * load-bearing.
  * -------------------------------------------------------------------------- */
 
+/**
+ * The masthead settles onto the paper once the top of the page is behind you.
+ *
+ * Watched through a one-pixel sentinel rather than a scroll listener, so
+ * there is no handler running on every frame of every scroll.
+ */
+function setUpMasthead() {
+  const bar = document.getElementById('masthead');
+  const sentinel = document.querySelector('.masthead-sentinel');
+  if (!bar || !sentinel || !('IntersectionObserver' in window)) return;
+
+  new IntersectionObserver(
+    ([entry]) => {
+      bar.dataset.stuck = String(!entry.isIntersecting);
+    },
+    { threshold: 0 },
+  ).observe(sentinel);
+}
+
 function setUpReveals() {
-  const targets = document.querySelectorAll('.reveal, .piles');
+  const targets = document.querySelectorAll('.reveal, .piles, .stagger');
   if (stillness.matches || !('IntersectionObserver' in window)) {
     for (const target of targets) target.classList.add('revealed');
     return;
@@ -198,9 +217,12 @@ function setUpReveals() {
   // never quite intersects, a jump straight to an anchor — everything is
   // visible shortly after the page settles. The animation is a nicety; the
   // words are not.
+  // Short, because the hero is inside this: anything above the fold has to be
+  // readable now, not in a moment. The observer will normally have got there
+  // first, and adding the class twice costs nothing.
   window.setTimeout(() => {
     for (const target of targets) target.classList.add('revealed');
-  }, 2500);
+  }, 1200);
 }
 
 /* --------------------------------------------------------------------------
@@ -232,7 +254,15 @@ function drawStrewn() {
   ).join('');
 }
 
-for (const start of [drawPiles, drawStrewn, setUpReveals, setUpDrawer, setUpDemo, setUpDownloads]) {
+for (const start of [
+  drawPiles,
+  drawStrewn,
+  setUpMasthead,
+  setUpReveals,
+  setUpDrawer,
+  setUpDemo,
+  setUpDownloads,
+]) {
   try {
     start();
   } catch (error) {
