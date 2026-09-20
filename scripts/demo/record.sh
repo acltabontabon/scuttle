@@ -106,10 +106,16 @@ appjob=$!
 # Wait for the interface to be there rather than guessing at a sleep: the
 # window appears before the webview has published its accessibility tree, and
 # clicking into the gap fails with a confusing "invalid index".
-for _ in $(seq 1 30); do
-  if "$here/ui.sh" list 2> /dev/null | grep -q Rummage; then break; fi
+ready=no
+for _ in $(seq 1 45); do
+  if "$here/ui.sh" list 2> /dev/null | grep -q Rummage; then ready=yes; break; fi
   sleep 1
 done
+if [[ "$ready" != yes ]]; then
+  echo '::error::Scuttle never showed a Rummage button. Its log:' >&2
+  tail -20 "$work/app.log" >&2
+  exit 1
+fi
 
 osascript > /dev/null <<APPLESCRIPT
 tell application "System Events" to tell process "Scuttle"

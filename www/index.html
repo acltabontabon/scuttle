@@ -69,17 +69,13 @@
           <h1>A little creature<br /><span class="h1-swash">for the files</span><br />you forgot about.</h1>
 
           <p class="lede">
-            Your computer keeps things. Installers from last spring, eleven
-            attempts at the same screenshot, folders belonging to software you
-            removed months ago. <strong>Scuttle</strong> rummages through the
-            corners where all of that collects, and shows you what turned up —
-            along with why it noticed.
+            Installers from last spring. Eleven goes at the same screenshot.
+            Folders left behind by software you removed months ago.
+            <strong>Scuttle</strong> goes through the corners where that
+            collects and shows you what turned up, with the reason it noticed.
           </p>
 
-          <p class="lede-quiet">
-            It never deletes anything on its own. Most of what it finds is
-            yours to keep; the point is to see it.
-          </p>
+          <p class="lede-quiet">It never deletes anything on its own.</p>
 
           <!-- Filled in by downloads.js. The markup below is what someone
                gets with JavaScript off or broken: a real, working link. -->
@@ -117,11 +113,9 @@
           </div>
 
           <p class="signing">
-            Free and open source, under
             <a href="https://github.com/acltabontabon/scuttle/blob/main/LICENSE">Apache 2.0</a>.
-            There are no code-signing certificates behind these builds, so macOS
-            and Windows will each warn you once —
-            <a href="#prompt">here is what you will see</a>.
+            No code-signing certificates behind these builds, so macOS and
+            Windows each warn you once — <a href="#prompt">what you will see</a>.
           </p>
         </div>
 
@@ -131,7 +125,7 @@
             <!-- Replaced with the demo loop by main.js once the poster has
                  loaded, and never when the visitor has asked for less motion. -->
             <img id="hero-media" src="./media/findings.png" width="1180" height="800"
-                 alt="Scuttle's findings screen: 117 MB in large serif type, “worth reviewing, across 4 piles. Nothing has been touched.”, and four loose hand-drawn heaps labelled Installers, Ghosts, Screenshots and Copies, each with its size and how many things are in it."
+                 alt="Scuttle's findings screen: 1.21 GB in large serif type, “worth reviewing, across 4 piles. Nothing has been touched.”, four loose hand-drawn heaps labelled Installers, Ghosts, Copies and Screenshots with their sizes, and 301,264 files examined along the bottom."
                  fetchpriority="high" />
             <button type="button" class="play" id="hero-play" hidden>
               <span class="play-icon" aria-hidden="true"></span>
@@ -158,14 +152,12 @@
             <p class="beat-number"><span class="beat-figure" aria-hidden="true">1</span>One</p>
             <h3>It rummages</h3>
             <p>
-              Press the button and Scuttle walks the folders you have enabled —
-              Downloads, the Desktop, application support and cache
-              directories, screenshot folders, Steam and Epic libraries where
-              they exist. What it finds settles into piles you can dig through.
+              Press the button. Scuttle walks the folders you have enabled —
+              Downloads, Desktop, application support, caches, screenshots,
+              Steam and Epic — and what it finds settles into piles.
             </p>
             <p class="beat-aside">
-              It narrates as it goes, and a rummage of a tidy machine comes
-              back saying so.
+              A rummage of a tidy machine comes back saying so.
             </p>
           </div>
           <div class="beat-art" aria-hidden="true">
@@ -179,15 +171,13 @@
             <p class="beat-number"><span class="beat-figure" aria-hidden="true">2</span>Two</p>
             <h3>It shows its working</h3>
             <p>
-              Every finding carries the evidence behind it, and a confidence
-              separate from a risk. Scuttle can be completely certain about
-              what something is and still have no business suggesting you
-              remove it.
+              Every finding carries its evidence, and a confidence separate
+              from a risk. Scuttle can be certain what something is and still
+              have no business suggesting you remove it.
             </p>
             <p class="beat-aside">
-              When it cannot work out what something is, it says
-              <em>“Scuttle has no idea what this is. You decide.”</em> rather
-              than guessing.
+              When it cannot tell, it says <em>“Scuttle has no idea what this
+              is. You decide.”</em>
             </p>
           </div>
           <figure class="evidence" role="figure" aria-label="An example finding as Scuttle presents it">
@@ -219,15 +209,14 @@
             <p class="beat-number"><span class="beat-figure" aria-hidden="true">3</span>Three</p>
             <h3>It goes in the drawer</h3>
             <p>
-              Nothing you pick is deleted. It moves to a holding folder and
-              Scuttle writes down where it came from, so putting it back is one
-              button — into exactly the folder it left, recreated if you have
-              since deleted it, and never on top of something that has taken
-              its name.
+              Nothing you pick is deleted. It moves to a holding folder, and
+              Scuttle writes down where it came from — so putting it back is
+              one button, into the folder it left, recreated if you have since
+              deleted it.
             </p>
             <p class="beat-aside">
-              The drawer is still on your disk, so it has not freed any space
-              yet. Scuttle says so on the drawer screen, in those words.
+              The drawer is still on your disk. No space has come back yet,
+              and Scuttle says so.
             </p>
           </div>
 
@@ -238,7 +227,7 @@
                      from the recording rather than drawn. -->
                 <div class="drawer-contents">
                   <img id="drawer-media" src="./media/drawer.png" width="1180" height="800"
-                       alt="Scuttle's drawer screen: “1 thing · 24.5 MB held”, the note that these files still take up disk space and should be put back before they expire, and one held folder showing where it came from, how long it has left, and buttons to put it back or delete it permanently." />
+                       alt="Scuttle's drawer screen: “1 thing · 278 MB held”, the note that these files still take up disk space and should be put back before they expire, and one held folder showing where it came from, how long it has left, and buttons to put it back or delete it permanently." />
                 </div>
               </div>
               <div class="drawer-front">
@@ -261,14 +250,12 @@
             <h3>Or you let it go</h3>
             <p>
               Emptying the drawer is the only thing that frees the space, and
-              the only thing that destroys anything. Items do not go to the
-              Trash or the Recycle Bin — the confirmation says exactly that
-              before you agree to it.
+              the only thing that destroys anything. Nothing goes to the Trash,
+              and the confirmation says so before you agree to it.
             </p>
             <p class="beat-aside">
-              Anything you leave in the drawer expires after the window you
-              choose — 7, 14 or 30 days — and is removed the next time Scuttle
-              starts.
+              Whatever you leave expires after 7, 14 or 30 days — your choice —
+              and goes at the next start.
             </p>
           </div>
           <div class="go-art">
@@ -301,11 +288,10 @@
           <div class="q">
             <h3>What does it look for?</h3>
             <p>
-              Leftovers from software that is no longer installed, screenshots
-              nobody looked at again, installers that already did their job,
-              byte-identical duplicates, caches it can attribute to the
-              application that made them, unusually large files, and developer
-              build debris if you switch it on. Anything it notices but cannot
+              Leftovers from software you removed, screenshots nobody looked
+              at again, installers that already did their job, byte-identical
+              copies, caches it can trace to the app that made them, unusually
+              large files, and build debris if you switch it on. What it cannot
               name goes into a pile called Oddments rather than being dressed
               up as a conclusion.
             </p>
@@ -314,12 +300,11 @@
           <div class="q">
             <h3>Does it delete anything by itself?</h3>
             <p>
-              No. Picking something moves it to the drawer, and emptying the
-              drawer is a separate, confirmed action you take. Scuttle also
-              refuses to touch whole categories of place outright — keys,
-              password vaults, browser profiles, mail, repositories,
-              cloud-sync folders — and those are not merely hidden from the
-              results, they are never walked at all.
+              No. Picking something moves it to the drawer; emptying the
+              drawer is a separate action you confirm. Whole categories of
+              place are refused outright — keys, password vaults, browser
+              profiles, mail, repositories, cloud-sync folders — and not merely
+              hidden from the results. They are never walked at all.
             </p>
           </div>
 
@@ -327,8 +312,8 @@
             <h3>Does putting something in the drawer free up space?</h3>
             <p>
               Not yet. The drawer is a folder on the same disk, so a held file
-              still occupies exactly what it did before. The space comes back
-              when you empty the drawer, and not a moment earlier.
+              takes up exactly what it did before. The space comes back when
+              you empty the drawer, and not a moment earlier.
             </p>
           </div>
 
@@ -336,50 +321,44 @@
             <h3>Can I get something back?</h3>
             <p>
               Yes — that is what the drawer is for. <em>Put it back</em>
-              returns a file to where it came from. If the folder it lived in
-              has since gone, Scuttle recreates it; if something else has taken
-              its name, Scuttle restores it alongside rather than over the top,
-              and tells you where it went.
+              returns a file to where it came from. If that folder has since
+              gone, Scuttle recreates it; if something has taken its name,
+              Scuttle restores alongside rather than over the top, and says
+              where.
             </p>
           </div>
 
           <div class="q">
             <h3>Does it work offline?</h3>
             <p>
-              It only works offline, in effect. There is no account, no server
-              and no telemetry, and Scuttle makes no network requests of its
-              own — it does not even check whether it is out of date. Findings
-              and drawer records live in one database on your machine, and full
-              paths are never written to its logs.
+              Only, in effect. No account, no server, no telemetry, and no
+              network requests of its own — it does not even check whether it
+              is out of date. Findings live in one database on your machine,
+              and full paths never reach its logs.
             </p>
           </div>
 
           <div class="q" id="prompt">
             <h3>Why does my Mac or PC warn me about it?</h3>
             <p>
-              Because Scuttle is built without paid code-signing certificates,
-              so neither operating system can tell you who made it. The macOS
-              builds are not Developer&nbsp;ID signed or notarized, and the
-              Windows installer is unsigned.
+              There are no paid code-signing certificates behind it, so
+              neither system can tell you who made it. Once each:
             </p>
             <p>
-              <b>On macOS</b>, open it once from Applications, then go to
-              System&nbsp;Settings → Privacy&nbsp;&amp;&nbsp;Security, scroll to
-              Security, and click <b>Open Anyway</b>. That button appears only
-              after you have tried to open the app, and only for about an hour
-              afterwards.
+              <b>macOS</b> — open it from Applications, then
+              System&nbsp;Settings → Privacy&nbsp;&amp;&nbsp;Security →
+              <b>Open Anyway</b>. That button only appears after you have tried
+              to open the app, and only for about an hour.
             </p>
             <p>
-              <b>On Windows</b>, SmartScreen will say it stopped an
-              unrecognised app: click <b>More info</b>, then <b>Run anyway</b>.
-              It installs for your account only, so there is no administrator
-              prompt.
+              <b>Windows</b> — SmartScreen says it stopped an unrecognised app:
+              <b>More info</b>, then <b>Run anyway</b>. No administrator prompt.
             </p>
             <p class="q-foot">
-              You will not be asked to switch anything off. The
+              Nothing here asks you to switch a protection off. The
               <a href="https://github.com/acltabontabon/scuttle#installing">installation notes</a>
-              go through both in more detail, including how to tell an ordinary
-              warning from a genuinely broken download.
+              go further, including how to tell an ordinary warning from a
+              genuinely broken download.
             </p>
           </div>
         </div>

@@ -11,24 +11,26 @@
 # paused to be followed is a demo nobody follows; one that idles is a demo
 # nobody finishes.
 
-beat 2.0                            # the home screen: a creature and a button
+beat 1.8                            # the home screen: a creature and a button
 
 ui click "Rummage"
-beat 3.8                            # the scan says what it is looking through,
-                                    # then hands over to the findings itself
-beat 3.0                            # the piles settle onto their floor
+beat 6.0                            # the rummage itself: which area it is in,
+                                    # the count climbing, the creature busy —
+                                    # then it hands over to the findings on
+                                    # its own, a moment after it finishes
+beat 2.8                            # the piles settle onto their floor
 
 ui click "Ghosts —"                 # into the pile of leftovers
-beat 2.6                            # two of them, each with its evidence
+beat 2.4                            # two of them, each with its evidence
 
 ui click "Select com.harborlight"   # tick one, and the meter starts counting
-beat 1.5
+beat 1.3
 
 ui click "Put it in the drawer"     # nothing is deleted; it is out of the way
-beat 2.4
+beat 2.2
 
 ui click "Drawer 1"                 # where it went, and where it came from
-beat 2.8
+beat 2.6
 
 ui click "Put it back"              # and back to exactly where it was
-beat 2.4
+beat 2.2

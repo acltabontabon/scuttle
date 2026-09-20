@@ -118,7 +118,7 @@ export async function setUpDownloads() {
     const warning = document.createElement('p');
     warning.className = 'download-warning';
     warning.textContent =
-      'Scuttle has not had its first release yet. You can build it from source in the meantime — the README has the four commands.';
+      'No release yet. You can build it from source in the meantime — the README has the commands.';
     root.append(warning);
     return;
   }
