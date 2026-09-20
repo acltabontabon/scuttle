@@ -160,7 +160,10 @@ function main() {
   // the changelog rather than with a broken image.
   const parts = [];
   for (const [file, alt] of [
-    ['demo.gif', 'Scuttle finding, reviewing and restoring files'],
+    [
+      'demo.gif',
+      'A run through Scuttle: the rummage working through 301,264 files, the findings settling into four piles, one leftover folder going into the drawer and then coming back out again',
+    ],
     ['findings.png', "Scuttle's findings, drawn as four piles on a paper floor"],
   ]) {
     if (existsSync(join(root, 'docs/media', file))) {

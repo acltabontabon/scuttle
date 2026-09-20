@@ -10,11 +10,18 @@ major version is 0, a minor bump may change behaviour.
 
 Nothing yet.
 
-## [0.1.0] - 2026-09-20
+## [0.1.0-alpha.1] - 2026-09-21
 
-The first public release. Scuttle rummages through the forgotten corners of your
-computer, shows you what turned up and why it noticed, and never removes anything
-on its own.
+The first public build. Scuttle rummages through the forgotten corners of your
+computer, shows you what turned up and why it noticed, and never removes
+anything on its own.
+
+An alpha because of where it has been, not what it does: everything below is
+finished and tested, on two operating systems, over fixture filesystems that
+cover the awkward cases. What it has not had is a few hundred real machines,
+which is the only thing that finds the rest. Treat emptying the drawer with
+the seriousness the confirmation asks for — it is the one action that cannot
+be undone.
 
 ### Added
 
@@ -53,6 +60,9 @@ on its own.
 - macOS and Windows support, from one platform layer with a real implementation
   on each: `.app` bundles and `Info.plist` on macOS, the uninstall registry in
   both WOW64 views on Windows.
+- A recorded run of the whole thing, filmed from the real application against
+  300,000 invented files — it leads this release, and the
+  [README](https://github.com/acltabontabon/scuttle#readme).
 
 ### Known limitations
 
@@ -77,5 +87,5 @@ on its own.
   because it also holds logins, cookies and history. Firefox, which keeps its
   cache somewhere else, is covered.
 
-[Unreleased]: https://github.com/acltabontabon/scuttle/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/acltabontabon/scuttle/releases/tag/v0.1.0
+[Unreleased]: https://github.com/acltabontabon/scuttle/compare/v0.1.0-alpha.1...HEAD
+[0.1.0-alpha.1]: https://github.com/acltabontabon/scuttle/releases/tag/v0.1.0-alpha.1
