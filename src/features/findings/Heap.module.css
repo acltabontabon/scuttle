@@ -1,0 +1,138 @@
+/*
+ * A heap: several drawn objects resting on a surface, with a label under them.
+ *
+ * Not a card. There is no border, no background and no container — the objects
+ * simply sit on the paper, and the only thing that appears on hover is a
+ * shadow, because a shadow is what a thing you can pick up has.
+ */
+.heap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--close);
+  padding: var(--close);
+  border-radius: var(--round-soft);
+  transition:
+    transform var(--normal) var(--settle),
+    background var(--normal) var(--ease);
+}
+
+.heap:hover,
+.heap:focus-visible {
+  transform: translateY(-4px);
+  background: color-mix(in srgb, var(--paper-raised) 70%, transparent);
+}
+
+.objects {
+  position: relative;
+  width: 138px;
+  height: 86px;
+  color: var(--ink);
+}
+
+.object {
+  position: absolute;
+  transition: transform var(--normal) var(--settle);
+}
+
+/* The topmost object lifts a little further, as though being picked out. */
+.heap:hover .object:last-child {
+  transform: translate(var(--x), calc(var(--y) - 7px)) rotate(var(--r));
+}
+
+/*
+ * The ground the objects rest on. It sits directly beneath them and is blurred
+ * hard: a crisp ellipse reads as a drawn shape, a diffuse one reads as light.
+ */
+.shadow {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  width: 84px;
+  height: 14px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: var(--ground);
+  filter: blur(7px);
+  opacity: 0.55;
+  transition: opacity var(--normal) var(--ease), transform var(--normal) var(--ease);
+}
+
+.heap:hover .shadow {
+  opacity: 0.8;
+  transform: translateX(-50%) scale(1.14, 0.9);
+}
+
+.label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-align: center;
+}
+
+.name {
+  font-family: var(--serif);
+  font-size: var(--type-read);
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+
+.size {
+  font-size: var(--type-small);
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.count {
+  font-size: var(--type-whisper);
+  color: var(--ink-faint);
+  letter-spacing: 0.03em;
+}
+
+/* A pile with nothing Scuttle would act on is quieter than one that has. */
+.heap[data-actionable='0'] .name {
+  color: var(--ink-soft);
+}
+
+/* Each object settles into place when the pile first appears. */
+@keyframes settle {
+  from {
+    opacity: 0;
+    transform: translate(var(--x), calc(var(--y) - 22px)) rotate(0deg);
+  }
+  70% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: translate(var(--x), var(--y)) rotate(var(--r));
+  }
+}
+
+/* A small puff of dust as it lands. */
+.dust {
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  width: 44px;
+  height: 44px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  border: var(--hair) solid var(--ink-ghost);
+  opacity: 0;
+  animation: puff 620ms var(--ease) forwards;
+  pointer-events: none;
+}
+
+@keyframes puff {
+  0% {
+    opacity: 0.5;
+    transform: translateX(-50%) scale(0.2);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) scale(1.5);
+  }
+}

@@ -1,0 +1,79 @@
+.workbench {
+  display: grid;
+  grid-template-columns: 210px 1fr;
+  height: 100%;
+  background: #12100e;
+}
+
+.rail {
+  overflow-y: auto;
+  padding: 14px 10px;
+  color: #cfc4b4;
+  font-family: var(--sans);
+  font-size: 12px;
+  border-right: 1px solid #2c261f;
+}
+
+.railTitle {
+  margin: 14px 8px 6px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6f6558;
+}
+
+.railItem {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  text-align: left;
+  border-radius: 4px;
+  color: #cfc4b4;
+}
+
+.railItem:hover {
+  background: #221d18;
+}
+
+.railItem[aria-current='true'] {
+  background: #2f2721;
+  color: #f0c274;
+}
+
+.railRow {
+  display: flex;
+  gap: 4px;
+  padding: 0 8px;
+}
+
+.railChip {
+  flex: 1;
+  padding: 5px 4px;
+  border-radius: 4px;
+  background: #221d18;
+  color: #cfc4b4;
+  font-size: 11px;
+}
+
+.railChip[aria-current='true'] {
+  background: #f0c274;
+  color: #221d18;
+}
+
+/* A window-shaped frame, so proportions are judged the way they will ship. */
+.window {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  overflow: auto;
+}
+
+.window > * {
+  width: 1080px;
+  height: 760px;
+  max-width: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+  background: var(--paper);
+}

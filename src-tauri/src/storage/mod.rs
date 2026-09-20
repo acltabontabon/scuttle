@@ -1,0 +1,1045 @@
+//! Local persistence, behind a repository boundary.
+//!
+//! Scuttle stores what it needs to answer "what did you find, what did I
+//! decide, and what is still recoverable" — and nothing else. There is no
+//! index of every file on the machine. Everything here stays on the machine.
+
+pub mod migrations;
+
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
+
+use crate::error::ScuttleError;
+use crate::evidence::{Evidence, EvidenceKind};
+use crate::model::{
+    Category, CleanupCandidate, Confidence, GroupMember, RecommendedAction, Risk, StateFingerprint,
+    TargetKind,
+};
+use crate::scanning::{IgnoreSet, ScanOptions, ScanSummary};
+use crate::Result;
+
+/// The user's preferences. Small on purpose.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Settings {
+    /// Empty means "wherever the platform says is sensible".
+    ///
+    /// There is deliberately no separate exclusion list: telling Scuttle to
+    /// leave a particular path alone is what the ignore list is for, and that
+    /// has an interface. Two overlapping mechanisms would mean two places to
+    /// look when Scuttle does not do what you expected.
+    pub scan_roots: Vec<PathBuf>,
+    pub include_developer_debris: bool,
+    /// 7, 14 or 30.
+    pub quarantine_retention_days: u32,
+    pub heavy_threshold: u64,
+    /// "system", "light" or "dark".
+    pub appearance: String,
+    /// `None` follows the operating system.
+    pub reduced_motion: Option<bool>,
+    pub has_rummaged_before: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            scan_roots: Vec::new(),
+            include_developer_debris: false,
+            quarantine_retention_days: 14,
+            heavy_threshold: 1024 * 1024 * 1024,
+            appearance: "system".into(),
+            reduced_motion: None,
+            has_rummaged_before: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuarantineStatus {
+    /// Sitting in the drawer, recoverable.
+    Held,
+    /// Put back where it came from.
+    Restored,
+    /// Gone for good.
+    Removed,
+}
+
+impl QuarantineStatus {
+    fn as_str(&self) -> &'static str {
+        match self {
+            QuarantineStatus::Held => "held",
+            QuarantineStatus::Restored => "restored",
+            QuarantineStatus::Removed => "removed",
+        }
+    }
+    fn parse(s: &str) -> QuarantineStatus {
+        match s {
+            "restored" => QuarantineStatus::Restored,
+            "removed" => QuarantineStatus::Removed,
+            _ => QuarantineStatus::Held,
+        }
+    }
+}
+
+/// One thing in the drawer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuarantineRecord {
+    pub id: String,
+    pub finding_id: Option<String>,
+    pub original_path: PathBuf,
+    pub stored_path: PathBuf,
+    pub display_name: String,
+    pub category: Category,
+    pub size: u64,
+    pub content_hash: Option<String>,
+    /// The reasons Scuttle gave at the time, frozen. If the detector changes
+    /// its mind later, the record of what the user was told does not.
+    pub evidence: Vec<Evidence>,
+    pub quarantined_unix: i64,
+    pub expires_unix: i64,
+    pub status: QuarantineStatus,
+    pub resolved_unix: Option<i64>,
+}
+
+/// A summary of a past rummage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanRecord {
+    pub id: String,
+    pub started_unix: i64,
+    pub finished_unix: Option<i64>,
+    pub roots: Vec<PathBuf>,
+    pub files_seen: u64,
+    pub bytes_seen: u64,
+    pub candidates_found: u64,
+    pub reclaimable_bytes: u64,
+    pub duration_ms: u64,
+    pub cancelled: bool,
+}
+
+/// Something the user did, kept so the app can say what happened.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    pub id: String,
+    pub action: String,
+    pub display_name: String,
+    pub category: Category,
+    pub size: u64,
+    pub at_unix: i64,
+    pub outcome: String,
+}
+
+/// The repository. Every SQL statement in Scuttle lives behind this type.
+pub struct Store {
+    conn: Mutex<Connection>,
+}
+
+impl Store {
+    pub fn open(path: &Path) -> Result<Store> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut conn = Connection::open(path)?;
+        Store::prepare(&mut conn)?;
+        Ok(Store {
+            conn: Mutex::new(conn),
+        })
+    }
+
+    pub fn in_memory() -> Result<Store> {
+        let mut conn = Connection::open_in_memory()?;
+        Store::prepare(&mut conn)?;
+        Ok(Store {
+            conn: Mutex::new(conn),
+        })
+    }
+
+    fn prepare(conn: &mut Connection) -> Result<()> {
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA foreign_keys = ON;",
+        )?;
+        migrations::apply(conn)?;
+        Ok(())
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
+        // A poisoned lock means another thread panicked mid-write. The
+        // database itself is transactional, so recovering the guard is safe
+        // and far better than taking the whole app down.
+        self.conn.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    // ---- scans ---------------------------------------------------------
+
+    pub fn begin_scan(
+        &self,
+        scan_id: &str,
+        options: &ScanOptions,
+        started_unix: i64,
+    ) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "INSERT INTO scan_runs (id, started_unix, roots) VALUES (?1, ?2, ?3)",
+            params![
+                scan_id,
+                started_unix,
+                serde_json::to_string(&options.roots)?
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn finish_scan(&self, summary: &ScanSummary, finished_unix: i64) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "UPDATE scan_runs SET finished_unix = ?2, files_seen = ?3, bytes_seen = ?4,
+                candidates_found = ?5, reclaimable_bytes = ?6, duration_ms = ?7,
+                cancelled = ?8, hiccups = ?9
+             WHERE id = ?1",
+            params![
+                summary.scan_id,
+                finished_unix,
+                summary.files_seen,
+                summary.bytes_seen,
+                summary.candidates_found,
+                summary.reclaimable_bytes,
+                summary.duration_ms,
+                summary.cancelled as i32,
+                serde_json::to_string(&summary.hiccups)?,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// The most recent completed rummage.
+    pub fn latest_scan(&self) -> Result<Option<ScanRecord>> {
+        let conn = self.lock();
+        let record = conn
+            .query_row(
+                "SELECT id, started_unix, finished_unix, roots, files_seen, bytes_seen,
+                        candidates_found, reclaimable_bytes, duration_ms, cancelled
+                 FROM scan_runs WHERE finished_unix IS NOT NULL
+                 ORDER BY started_unix DESC LIMIT 1",
+                [],
+                |row| {
+                    Ok(ScanRecord {
+                        id: row.get(0)?,
+                        started_unix: row.get(1)?,
+                        finished_unix: row.get(2)?,
+                        roots: serde_json::from_str(&row.get::<_, String>(3)?).unwrap_or_default(),
+                        files_seen: row.get(4)?,
+                        bytes_seen: row.get(5)?,
+                        candidates_found: row.get(6)?,
+                        reclaimable_bytes: row.get(7)?,
+                        duration_ms: row.get(8)?,
+                        cancelled: row.get::<_, i32>(9)? != 0,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(record)
+    }
+
+    /// Keep the last few scans and drop the rest. Scuttle is not an archive.
+    pub fn prune_scans(&self, keep: usize) -> Result<usize> {
+        let conn = self.lock();
+        let removed = conn.execute(
+            "DELETE FROM scan_runs WHERE id NOT IN (
+                 SELECT id FROM scan_runs ORDER BY started_unix DESC LIMIT ?1
+             )",
+            params![keep as i64],
+        )?;
+        Ok(removed)
+    }
+
+    // ---- findings ------------------------------------------------------
+
+    pub fn save_candidates(&self, scan_id: &str, candidates: &[CleanupCandidate]) -> Result<()> {
+        let mut conn = self.lock();
+        let tx = conn.transaction()?;
+        for candidate in candidates {
+            tx.execute(
+                "INSERT OR REPLACE INTO findings (id, scan_id, detector, category, target_kind,
+                    path, display_name, associated_app, size, confidence, risk,
+                    recommended_action, remark, modified_unix, accessed_unix, created_unix,
+                    fingerprint, group_members)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
+                params![
+                    candidate.id,
+                    scan_id,
+                    candidate.detector,
+                    candidate.category.slug(),
+                    target_kind_str(candidate.target_kind),
+                    path_to_text(&candidate.path),
+                    candidate.display_name,
+                    candidate.associated_app,
+                    candidate.size,
+                    confidence_str(candidate.confidence),
+                    risk_str(candidate.risk),
+                    action_str(candidate.recommended_action),
+                    candidate.remark,
+                    candidate.modified_unix,
+                    candidate.accessed_unix,
+                    candidate.created_unix,
+                    serde_json::to_string(&candidate.fingerprint)?,
+                    serde_json::to_string(&candidate.group)?,
+                ],
+            )?;
+            for (position, evidence) in candidate.evidence.iter().enumerate() {
+                tx.execute(
+                    "INSERT OR REPLACE INTO finding_evidence
+                        (finding_id, position, kind, summary, weight, negative, risk_floor)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                    params![
+                        candidate.id,
+                        position as i64,
+                        serde_json::to_string(&evidence.kind)?,
+                        evidence.summary,
+                        evidence.weight,
+                        evidence.negative as i32,
+                        evidence.risk_floor.map(risk_str),
+                    ],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn candidates_for_scan(&self, scan_id: &str) -> Result<Vec<CleanupCandidate>> {
+        let conn = self.lock();
+        let mut statement = conn.prepare(
+            "SELECT id, detector, category, target_kind, path, display_name, associated_app,
+                    size, confidence, risk, recommended_action, remark, modified_unix,
+                    accessed_unix, created_unix, fingerprint, group_members
+             FROM findings WHERE scan_id = ?1 ORDER BY size DESC",
+        )?;
+        let rows = statement.query_map(params![scan_id], row_to_candidate)?;
+        let mut out = Vec::new();
+        for row in rows {
+            let mut candidate = row?;
+            candidate.evidence = read_evidence(&conn, &candidate.id)?;
+            out.push(candidate);
+        }
+        Ok(out)
+    }
+
+    pub fn candidate(&self, id: &str) -> Result<CleanupCandidate> {
+        let conn = self.lock();
+        let mut candidate = conn
+            .query_row(
+                "SELECT id, detector, category, target_kind, path, display_name, associated_app,
+                        size, confidence, risk, recommended_action, remark, modified_unix,
+                        accessed_unix, created_unix, fingerprint, group_members
+                 FROM findings WHERE id = ?1",
+                params![id],
+                row_to_candidate,
+            )
+            .optional()?
+            .ok_or_else(|| ScuttleError::not_found("That finding"))?;
+        candidate.evidence = read_evidence(&conn, id)?;
+        Ok(candidate)
+    }
+
+    /// Forget a finding entirely, so a "keep" decision does not leave it
+    /// sitting in the results.
+    pub fn forget_candidate(&self, id: &str) -> Result<()> {
+        let conn = self.lock();
+        conn.execute("DELETE FROM findings WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    // ---- ignores -------------------------------------------------------
+
+    pub fn ignore_path(&self, path: &Path, now_unix: i64) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "INSERT OR REPLACE INTO ignored_paths (path, created_unix) VALUES (?1, ?2)",
+            params![path_to_text(path), now_unix],
+        )?;
+        Ok(())
+    }
+
+    pub fn ignore_app(&self, name: &str, now_unix: i64) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "INSERT OR REPLACE INTO ignored_apps (name, created_unix) VALUES (?1, ?2)",
+            params![name.to_lowercase(), now_unix],
+        )?;
+        Ok(())
+    }
+
+    pub fn ignore_category(&self, category: Category, now_unix: i64) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "INSERT OR REPLACE INTO ignored_categories (category, created_unix) VALUES (?1, ?2)",
+            params![category.slug(), now_unix],
+        )?;
+        Ok(())
+    }
+
+    pub fn clear_ignores(&self) -> Result<()> {
+        let conn = self.lock();
+        conn.execute_batch(
+            "DELETE FROM ignored_paths; DELETE FROM ignored_apps; DELETE FROM ignored_categories;",
+        )?;
+        Ok(())
+    }
+
+    pub fn ignore_set(&self) -> Result<IgnoreSet> {
+        let conn = self.lock();
+        let collect = |sql: &str| -> Result<Vec<String>> {
+            let mut statement = conn.prepare(sql)?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            Ok(rows.filter_map(std::result::Result::ok).collect())
+        };
+        Ok(IgnoreSet {
+            paths: collect("SELECT path FROM ignored_paths")?
+                .into_iter()
+                .map(PathBuf::from)
+                .collect(),
+            apps: collect("SELECT name FROM ignored_apps")?,
+            categories: collect("SELECT category FROM ignored_categories")?
+                .iter()
+                .filter_map(|s| Category::from_slug(s))
+                .collect(),
+        })
+    }
+
+    // ---- quarantine ----------------------------------------------------
+
+    pub fn insert_quarantine(&self, record: &QuarantineRecord) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "INSERT INTO quarantine_items (id, finding_id, original_path, stored_path,
+                display_name, category, size, content_hash, evidence, quarantined_unix,
+                expires_unix, status, resolved_unix)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+            params![
+                record.id,
+                record.finding_id,
+                path_to_text(&record.original_path),
+                path_to_text(&record.stored_path),
+                record.display_name,
+                record.category.slug(),
+                record.size,
+                record.content_hash,
+                serde_json::to_string(&record.evidence)?,
+                record.quarantined_unix,
+                record.expires_unix,
+                record.status.as_str(),
+                record.resolved_unix,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn quarantine_record(&self, id: &str) -> Result<QuarantineRecord> {
+        let conn = self.lock();
+        conn.query_row(
+            "SELECT id, finding_id, original_path, stored_path, display_name, category, size,
+                    content_hash, evidence, quarantined_unix, expires_unix, status, resolved_unix
+             FROM quarantine_items WHERE id = ?1",
+            params![id],
+            row_to_quarantine,
+        )
+        .optional()?
+        .ok_or_else(|| ScuttleError::not_found("That quarantined item"))
+    }
+
+    /// Everything still in the drawer, newest first.
+    pub fn held_quarantine(&self) -> Result<Vec<QuarantineRecord>> {
+        let conn = self.lock();
+        let mut statement = conn.prepare(
+            "SELECT id, finding_id, original_path, stored_path, display_name, category, size,
+                    content_hash, evidence, quarantined_unix, expires_unix, status, resolved_unix
+             FROM quarantine_items WHERE status = 'held' ORDER BY quarantined_unix DESC",
+        )?;
+        let rows = statement.query_map([], row_to_quarantine)?;
+        Ok(rows.filter_map(std::result::Result::ok).collect())
+    }
+
+    pub fn expired_quarantine(&self, now_unix: i64) -> Result<Vec<QuarantineRecord>> {
+        let conn = self.lock();
+        let mut statement = conn.prepare(
+            "SELECT id, finding_id, original_path, stored_path, display_name, category, size,
+                    content_hash, evidence, quarantined_unix, expires_unix, status, resolved_unix
+             FROM quarantine_items WHERE status = 'held' AND expires_unix <= ?1",
+        )?;
+        let rows = statement.query_map(params![now_unix], row_to_quarantine)?;
+        Ok(rows.filter_map(std::result::Result::ok).collect())
+    }
+
+    pub fn set_quarantine_status(
+        &self,
+        id: &str,
+        status: QuarantineStatus,
+        resolved_unix: i64,
+    ) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "UPDATE quarantine_items SET status = ?2, resolved_unix = ?3 WHERE id = ?1",
+            params![id, status.as_str(), resolved_unix],
+        )?;
+        Ok(())
+    }
+
+    // ---- history -------------------------------------------------------
+
+    pub fn record_history(&self, entry: &HistoryEntry) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "INSERT INTO cleanup_history (id, action, display_name, category, size, at_unix, outcome)
+             VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            params![
+                entry.id,
+                entry.action,
+                entry.display_name,
+                entry.category.slug(),
+                entry.size,
+                entry.at_unix,
+                entry.outcome,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn history(&self, limit: usize) -> Result<Vec<HistoryEntry>> {
+        let conn = self.lock();
+        let mut statement = conn.prepare(
+            "SELECT id, action, display_name, category, size, at_unix, outcome
+             FROM cleanup_history ORDER BY at_unix DESC LIMIT ?1",
+        )?;
+        let rows = statement.query_map(params![limit as i64], |row| {
+            Ok(HistoryEntry {
+                id: row.get(0)?,
+                action: row.get(1)?,
+                display_name: row.get(2)?,
+                category: Category::from_slug(&row.get::<_, String>(3)?)
+                    .unwrap_or(Category::Oddments),
+                size: row.get(4)?,
+                at_unix: row.get(5)?,
+                outcome: row.get(6)?,
+            })
+        })?;
+        Ok(rows.filter_map(std::result::Result::ok).collect())
+    }
+
+    // ---- settings ------------------------------------------------------
+
+    pub fn settings(&self) -> Result<Settings> {
+        let conn = self.lock();
+        let raw: Option<String> = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'settings'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(raw
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default())
+    }
+
+    pub fn save_settings(&self, settings: &Settings) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('settings', ?1)",
+            params![serde_json::to_string(settings)?],
+        )?;
+        Ok(())
+    }
+}
+
+// ---- row mapping --------------------------------------------------------
+
+fn row_to_candidate(row: &rusqlite::Row<'_>) -> rusqlite::Result<CleanupCandidate> {
+    Ok(CleanupCandidate {
+        id: row.get(0)?,
+        detector: row.get(1)?,
+        category: Category::from_slug(&row.get::<_, String>(2)?).unwrap_or(Category::Oddments),
+        target_kind: parse_target_kind(&row.get::<_, String>(3)?),
+        path: PathBuf::from(row.get::<_, String>(4)?),
+        display_name: row.get(5)?,
+        associated_app: row.get(6)?,
+        size: row.get(7)?,
+        confidence: parse_confidence(&row.get::<_, String>(8)?),
+        risk: parse_risk(&row.get::<_, String>(9)?),
+        recommended_action: parse_action(&row.get::<_, String>(10)?),
+        remark: row.get(11)?,
+        modified_unix: row.get(12)?,
+        accessed_unix: row.get(13)?,
+        created_unix: row.get(14)?,
+        fingerprint: serde_json::from_str::<StateFingerprint>(&row.get::<_, String>(15)?)
+            .unwrap_or_default(),
+        group: serde_json::from_str::<Vec<GroupMember>>(&row.get::<_, String>(16)?)
+            .unwrap_or_default(),
+        evidence: Vec::new(),
+    })
+}
+
+fn read_evidence(conn: &Connection, finding_id: &str) -> Result<Vec<Evidence>> {
+    let mut statement = conn.prepare(
+        "SELECT kind, summary, weight, negative, risk_floor
+         FROM finding_evidence WHERE finding_id = ?1 ORDER BY position",
+    )?;
+    let rows = statement.query_map(params![finding_id], |row| {
+        let kind: String = row.get(0)?;
+        Ok(Evidence {
+            kind: serde_json::from_str::<EvidenceKind>(&kind).unwrap_or(
+                EvidenceKind::Unclassified {
+                    reason: "a reason Scuttle can no longer read".into(),
+                },
+            ),
+            summary: row.get(1)?,
+            weight: row.get(2)?,
+            negative: row.get::<_, i32>(3)? != 0,
+            risk_floor: row.get::<_, Option<String>>(4)?.map(|s| parse_risk(&s)),
+        })
+    })?;
+    Ok(rows.filter_map(std::result::Result::ok).collect())
+}
+
+fn row_to_quarantine(row: &rusqlite::Row<'_>) -> rusqlite::Result<QuarantineRecord> {
+    Ok(QuarantineRecord {
+        id: row.get(0)?,
+        finding_id: row.get(1)?,
+        original_path: PathBuf::from(row.get::<_, String>(2)?),
+        stored_path: PathBuf::from(row.get::<_, String>(3)?),
+        display_name: row.get(4)?,
+        category: Category::from_slug(&row.get::<_, String>(5)?).unwrap_or(Category::Oddments),
+        size: row.get(6)?,
+        content_hash: row.get(7)?,
+        evidence: serde_json::from_str(&row.get::<_, String>(8)?).unwrap_or_default(),
+        quarantined_unix: row.get(9)?,
+        expires_unix: row.get(10)?,
+        status: QuarantineStatus::parse(&row.get::<_, String>(11)?),
+        resolved_unix: row.get(12)?,
+    })
+}
+
+/// Paths are stored lossily-but-stably. A path that cannot round-trip through
+/// UTF-8 is rare, and the safety layer re-validates the stored text against
+/// the live filesystem before anything is acted on.
+fn path_to_text(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+fn target_kind_str(kind: TargetKind) -> &'static str {
+    match kind {
+        TargetKind::File => "file",
+        TargetKind::Directory => "directory",
+    }
+}
+fn parse_target_kind(s: &str) -> TargetKind {
+    match s {
+        "directory" => TargetKind::Directory,
+        _ => TargetKind::File,
+    }
+}
+fn confidence_str(c: Confidence) -> &'static str {
+    match c {
+        Confidence::Low => "low",
+        Confidence::Medium => "medium",
+        Confidence::High => "high",
+    }
+}
+fn parse_confidence(s: &str) -> Confidence {
+    match s {
+        "high" => Confidence::High,
+        "medium" => Confidence::Medium,
+        _ => Confidence::Low,
+    }
+}
+fn risk_str(r: Risk) -> &'static str {
+    match r {
+        Risk::Low => "low",
+        Risk::Moderate => "moderate",
+        Risk::High => "high",
+        Risk::Protected => "protected",
+    }
+}
+fn parse_risk(s: &str) -> Risk {
+    match s {
+        "low" => Risk::Low,
+        "moderate" => Risk::Moderate,
+        "high" => Risk::High,
+        // An unreadable risk level defaults to the most cautious answer.
+        _ => Risk::Protected,
+    }
+}
+fn action_str(a: RecommendedAction) -> &'static str {
+    match a {
+        RecommendedAction::Quarantine => "quarantine",
+        RecommendedAction::Review => "review",
+        RecommendedAction::InspectOnly => "inspect_only",
+    }
+}
+fn parse_action(s: &str) -> RecommendedAction {
+    match s {
+        "quarantine" => RecommendedAction::Quarantine,
+        "review" => RecommendedAction::Review,
+        _ => RecommendedAction::InspectOnly,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::evidence::ev;
+
+    fn candidate(id: &str, path: &str) -> CleanupCandidate {
+        CleanupCandidate {
+            id: id.into(),
+            detector: "installers".into(),
+            category: Category::Installers,
+            target_kind: TargetKind::File,
+            path: PathBuf::from(path),
+            display_name: "Chrome.dmg".into(),
+            associated_app: Some("Google Chrome".into()),
+            size: 212_000_000,
+            confidence: Confidence::High,
+            risk: Risk::Low,
+            recommended_action: RecommendedAction::Quarantine,
+            evidence: vec![
+                ev(EvidenceKind::InstallerFormat { ext: "dmg".into() }),
+                ev(EvidenceKind::InstalledAppSupersedes {
+                    app: "Google Chrome".into(),
+                }),
+                ev(EvidenceKind::UntouchedFor { days: 184 }),
+            ],
+            remark: Some("Google Chrome is already installed.".into()),
+            modified_unix: Some(1_700_000_000),
+            accessed_unix: Some(1_700_000_001),
+            created_unix: None,
+            group: vec![GroupMember {
+                path: PathBuf::from("/other/Chrome.dmg"),
+                size: 212_000_000,
+                modified_unix: Some(1_700_000_000),
+                suggested_keep: true,
+            }],
+            fingerprint: StateFingerprint {
+                size: 212_000_000,
+                modified_unix: Some(1_700_000_000),
+                is_dir: false,
+                child_count: None,
+            },
+        }
+    }
+
+    fn store_with_scan() -> Store {
+        let store = Store::in_memory().unwrap();
+        store
+            .begin_scan(
+                "s1",
+                &ScanOptions {
+                    roots: vec!["/tmp".into()],
+                    ..Default::default()
+                },
+                100,
+            )
+            .unwrap();
+        store
+    }
+
+    #[test]
+    fn a_candidate_survives_a_round_trip_intact() {
+        let store = store_with_scan();
+        let original = candidate("f1", "/Users/x/Downloads/Chrome.dmg");
+        store
+            .save_candidates("s1", std::slice::from_ref(&original))
+            .unwrap();
+
+        let read = store.candidate("f1").unwrap();
+        assert_eq!(read.display_name, original.display_name);
+        assert_eq!(read.path, original.path);
+        assert_eq!(read.size, original.size);
+        assert_eq!(read.confidence, original.confidence);
+        assert_eq!(read.risk, original.risk);
+        assert_eq!(read.recommended_action, original.recommended_action);
+        assert_eq!(read.fingerprint, original.fingerprint);
+        assert_eq!(read.group.len(), 1);
+        assert!(read.group[0].suggested_keep);
+    }
+
+    #[test]
+    fn evidence_keeps_its_order_and_its_sentences() {
+        let store = store_with_scan();
+        let original = candidate("f1", "/x/Chrome.dmg");
+        store
+            .save_candidates("s1", std::slice::from_ref(&original))
+            .unwrap();
+        let read = store.candidate("f1").unwrap();
+
+        assert_eq!(read.evidence.len(), 3);
+        assert_eq!(read.evidence, original.evidence);
+        assert!(read.evidence[2].summary.contains("184 days"));
+    }
+
+    #[test]
+    fn an_unreadable_risk_level_falls_back_to_the_most_cautious_answer() {
+        // Corruption or a future schema must never read as "safe to delete".
+        assert_eq!(parse_risk("something-from-the-future"), Risk::Protected);
+        assert_eq!(
+            parse_action("something-from-the-future"),
+            RecommendedAction::InspectOnly
+        );
+    }
+
+    #[test]
+    fn a_missing_finding_is_not_found_rather_than_a_crash() {
+        let store = Store::in_memory().unwrap();
+        let err = store.candidate("nope").unwrap_err();
+        assert_eq!(err.code(), "not_found");
+    }
+
+    #[test]
+    fn ignores_round_trip_and_can_be_cleared() {
+        let store = Store::in_memory().unwrap();
+        store.ignore_path(Path::new("/Users/x/Keep"), 1).unwrap();
+        store.ignore_app("Old Game", 1).unwrap();
+        store.ignore_category(Category::Screenshots, 1).unwrap();
+
+        let ignores = store.ignore_set().unwrap();
+        assert_eq!(ignores.paths, vec![PathBuf::from("/Users/x/Keep")]);
+        assert_eq!(
+            ignores.apps,
+            vec!["old game".to_string()],
+            "app names are folded"
+        );
+        assert_eq!(ignores.categories, vec![Category::Screenshots]);
+
+        store.clear_ignores().unwrap();
+        let ignores = store.ignore_set().unwrap();
+        assert!(
+            ignores.paths.is_empty() && ignores.apps.is_empty() && ignores.categories.is_empty()
+        );
+    }
+
+    #[test]
+    fn ignoring_the_same_thing_twice_is_harmless() {
+        let store = Store::in_memory().unwrap();
+        store.ignore_path(Path::new("/x"), 1).unwrap();
+        store.ignore_path(Path::new("/x"), 2).unwrap();
+        assert_eq!(store.ignore_set().unwrap().paths.len(), 1);
+    }
+
+    #[test]
+    fn a_quarantine_record_keeps_the_evidence_it_was_given() {
+        let store = Store::in_memory().unwrap();
+        let record = QuarantineRecord {
+            id: "q1".into(),
+            finding_id: Some("f1".into()),
+            original_path: "/Users/x/Downloads/Chrome.dmg".into(),
+            stored_path: "/Users/x/.scuttle/quarantine/q1/Chrome.dmg".into(),
+            display_name: "Chrome.dmg".into(),
+            category: Category::Installers,
+            size: 1000,
+            content_hash: Some("abc".into()),
+            evidence: vec![ev(EvidenceKind::InstallerFormat { ext: "dmg".into() })],
+            quarantined_unix: 500,
+            expires_unix: 500 + 14 * 86_400,
+            status: QuarantineStatus::Held,
+            resolved_unix: None,
+        };
+        store.insert_quarantine(&record).unwrap();
+
+        let held = store.held_quarantine().unwrap();
+        assert_eq!(held.len(), 1);
+        assert_eq!(held[0].evidence.len(), 1);
+        assert_eq!(held[0].original_path, record.original_path);
+
+        store
+            .set_quarantine_status("q1", QuarantineStatus::Restored, 900)
+            .unwrap();
+        assert!(store.held_quarantine().unwrap().is_empty());
+        assert_eq!(
+            store.quarantine_record("q1").unwrap().status,
+            QuarantineStatus::Restored
+        );
+    }
+
+    #[test]
+    fn expiry_only_returns_things_still_being_held() {
+        let store = Store::in_memory().unwrap();
+        for (id, expires, status) in [
+            ("q1", 100, QuarantineStatus::Held),
+            ("q2", 100, QuarantineStatus::Restored),
+            ("q3", 9_999, QuarantineStatus::Held),
+        ] {
+            store
+                .insert_quarantine(&QuarantineRecord {
+                    id: id.into(),
+                    finding_id: None,
+                    original_path: "/a".into(),
+                    stored_path: "/b".into(),
+                    display_name: id.into(),
+                    category: Category::Caches,
+                    size: 1,
+                    content_hash: None,
+                    evidence: vec![],
+                    quarantined_unix: 0,
+                    expires_unix: expires,
+                    status,
+                    resolved_unix: None,
+                })
+                .unwrap();
+        }
+        let expired = store.expired_quarantine(500).unwrap();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].id, "q1");
+    }
+
+    #[test]
+    fn settings_default_until_they_are_saved() {
+        let store = Store::in_memory().unwrap();
+        let defaults = store.settings().unwrap();
+        assert_eq!(defaults.quarantine_retention_days, 14);
+        assert!(!defaults.include_developer_debris);
+
+        let updated = Settings {
+            quarantine_retention_days: 30,
+            include_developer_debris: true,
+            ..defaults
+        };
+        store.save_settings(&updated).unwrap();
+        let read = store.settings().unwrap();
+        assert_eq!(read.quarantine_retention_days, 30);
+        assert!(read.include_developer_debris);
+    }
+
+    #[test]
+    fn settings_saved_by_an_older_version_still_load() {
+        // `sound` and `excluded_paths` were dropped. Anyone who ran an earlier
+        // build has them sitting in their database; reading it must not reset
+        // every other preference they set.
+        let store = Store::in_memory().unwrap();
+        let conn = store.lock();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('settings', ?1)",
+            params![
+                r#"{"scan_roots":["/Users/x/Downloads"],"excluded_paths":["/Users/x/Secret"],
+                    "include_developer_debris":true,"quarantine_retention_days":30,
+                    "heavy_threshold":123,"appearance":"dark","reduced_motion":true,
+                    "sound":true,"has_rummaged_before":true}"#
+            ],
+        )
+        .unwrap();
+        drop(conn);
+
+        let settings = store.settings().unwrap();
+        assert_eq!(settings.quarantine_retention_days, 30);
+        assert_eq!(settings.appearance, "dark");
+        assert_eq!(settings.heavy_threshold, 123);
+        assert!(settings.include_developer_debris);
+        assert_eq!(settings.reduced_motion, Some(true));
+        assert_eq!(
+            settings.scan_roots,
+            vec![PathBuf::from("/Users/x/Downloads")]
+        );
+    }
+
+    #[test]
+    fn settings_from_a_newer_version_fall_back_rather_than_vanish() {
+        // A downgrade, or a corrupted row: defaults beat losing the file.
+        let store = Store::in_memory().unwrap();
+        let conn = store.lock();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('settings', ?1)",
+            params!["{ not json at all"],
+        )
+        .unwrap();
+        drop(conn);
+
+        let settings = store.settings().unwrap();
+        assert_eq!(settings.quarantine_retention_days, 14);
+    }
+
+    #[test]
+    fn forgetting_a_finding_takes_its_evidence_with_it() {
+        let store = store_with_scan();
+        store
+            .save_candidates("s1", &[candidate("f1", "/x")])
+            .unwrap();
+        store.forget_candidate("f1").unwrap();
+        assert_eq!(store.candidate("f1").unwrap_err().code(), "not_found");
+        assert!(store.candidates_for_scan("s1").unwrap().is_empty());
+    }
+
+    #[test]
+    fn pruning_keeps_only_the_most_recent_scans() {
+        let store = Store::in_memory().unwrap();
+        for i in 0..5 {
+            store
+                .begin_scan(&format!("s{i}"), &ScanOptions::default(), i as i64 * 100)
+                .unwrap();
+        }
+        store.prune_scans(2).unwrap();
+        let conn = store.lock();
+        let count: u32 = conn
+            .query_row("SELECT count(*) FROM scan_runs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn the_latest_scan_ignores_ones_that_never_finished() {
+        let store = Store::in_memory().unwrap();
+        store
+            .begin_scan("done", &ScanOptions::default(), 100)
+            .unwrap();
+        store
+            .finish_scan(
+                &ScanSummary {
+                    scan_id: "done".into(),
+                    files_seen: 10,
+                    bytes_seen: 20,
+                    candidates_found: 1,
+                    reclaimable_bytes: 5,
+                    duration_ms: 3,
+                    walk_ms: 1,
+                    probe_ms: 1,
+                    finish_ms: 1,
+                    cancelled: false,
+                    hiccups: Default::default(),
+                },
+                200,
+            )
+            .unwrap();
+        store
+            .begin_scan("abandoned", &ScanOptions::default(), 300)
+            .unwrap();
+
+        let latest = store.latest_scan().unwrap().unwrap();
+        assert_eq!(latest.id, "done");
+        assert_eq!(latest.files_seen, 10);
+    }
+
+    #[test]
+    fn history_comes_back_newest_first() {
+        let store = Store::in_memory().unwrap();
+        for (id, at) in [("h1", 100), ("h2", 300), ("h3", 200)] {
+            store
+                .record_history(&HistoryEntry {
+                    id: id.into(),
+                    action: "quarantine".into(),
+                    display_name: id.into(),
+                    category: Category::Installers,
+                    size: 1,
+                    at_unix: at,
+                    outcome: "ok".into(),
+                })
+                .unwrap();
+        }
+        let history = store.history(10).unwrap();
+        assert_eq!(
+            history.iter().map(|h| h.id.as_str()).collect::<Vec<_>>(),
+            vec!["h2", "h3", "h1"]
+        );
+    }
+}

@@ -1,0 +1,152 @@
+.pile {
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--gap) var(--room) var(--sky);
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--step);
+  max-width: 760px;
+  margin: 0 auto var(--room);
+}
+
+.headText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--tight);
+}
+
+.back {
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+  margin-bottom: var(--snug);
+  align-self: flex-start;
+}
+.back:hover {
+  color: var(--ink);
+}
+
+.title {
+  font-family: var(--serif);
+  font-size: var(--type-loud);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+.blurb {
+  font-size: var(--type-body);
+  color: var(--ink-soft);
+}
+
+.tally {
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The list.
+ *
+ * Rows separated by hairlines rather than wrapped in cards: the containment a
+ * card provides is not needed here, and eight nested boxes would bury the one
+ * thing that matters, which is what each object is and why it turned up.
+ */
+.items {
+  max-width: 760px;
+  margin: 0 auto;
+  list-style: none;
+  padding: 0;
+}
+
+.item {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: baseline;
+  gap: var(--step);
+  width: 100%;
+  padding: var(--step) var(--close);
+  margin: 0 calc(var(--close) * -1);
+  text-align: left;
+  border-radius: var(--round);
+  border-bottom: var(--hair) solid var(--rule);
+  transition: background var(--quick) var(--ease);
+}
+
+.item:hover,
+.item:focus-visible {
+  background: var(--paper-raised);
+}
+
+.itemGlyph {
+  grid-row: span 2;
+  align-self: center;
+  color: var(--ink-soft);
+}
+
+.itemName {
+  font-size: var(--type-read);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemSize {
+  font-size: var(--type-body);
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.itemRemark {
+  grid-column: 2;
+  font-size: var(--type-small);
+  color: var(--ink-soft);
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemVerdict {
+  grid-column: 3;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: var(--type-whisper);
+  letter-spacing: 0.03em;
+  color: var(--ink-faint);
+}
+
+/* A single dot carries risk; the word beside it carries the same thing, so
+   the signal is never colour alone. */
+.riskDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+.riskDot[data-risk='low'] {
+  background: var(--risk-low);
+}
+.riskDot[data-risk='moderate'] {
+  background: var(--risk-moderate);
+}
+.riskDot[data-risk='high'],
+.riskDot[data-risk='protected'] {
+  background: var(--clay);
+}
+
+.more {
+  max-width: 760px;
+  margin: var(--step) auto 0;
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+  text-align: center;
+}

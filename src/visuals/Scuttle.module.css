@@ -1,0 +1,268 @@
+/*
+ * The creature.
+ *
+ * Every animation here is tied to something real: Scuttle only shuffles while
+ * a scan is actually running, only sleeps when a scan actually found nothing,
+ * only strains when an object is actually enormous. Nothing loops for
+ * decoration, and reduced-motion callers get a still creature that still
+ * reads correctly, because the mood is expressed in pose as well as movement.
+ */
+
+.scuttle {
+  display: block;
+  overflow: visible;
+  color: var(--ink);
+}
+
+.shell {
+  fill: currentColor;
+  transform-origin: 50px 46px;
+}
+
+.eye {
+  fill: var(--honey);
+  transform-origin: center;
+  transform-box: fill-box;
+}
+
+.leg,
+.claw {
+  stroke: currentColor;
+  stroke-width: 5.5;
+  stroke-linecap: round;
+  fill: none;
+}
+
+/*
+ * Legs rotate about the point where they meet the shell, which is what makes
+ * the shuffle read as walking. The origin is given in viewBox units per leg,
+ * so `view-box` is required here — `fill-box` would measure each stroke's own
+ * bounding box instead, and would also re-anchor the mirroring transform on
+ * the right-hand pair.
+ */
+.leg {
+  transform-box: view-box;
+}
+
+.claw {
+  transform-box: fill-box;
+}
+
+.clawLeft,
+.clawRight {
+  stroke-width: 5;
+}
+
+.pincer {
+  fill: currentColor;
+}
+
+/* ---- idle: barely alive, which is the point ---------------------------- */
+.idle .shell {
+  animation: breathe 5.2s var(--ease) infinite;
+}
+.idle .eye {
+  animation: blink 6.7s steps(1, end) infinite;
+}
+.idle .eye:nth-of-type(2) {
+  animation-delay: 0.08s;
+}
+
+/* ---- rummaging: legs shuffle, body dips forward ------------------------ */
+.rummaging .shell {
+  animation: scurry 0.44s var(--ease) infinite;
+}
+.rummaging .legFront {
+  animation: shuffle 0.3s ease-in-out infinite;
+}
+.rummaging .legMiddle {
+  animation: shuffle 0.3s ease-in-out infinite;
+  animation-delay: 0.1s;
+}
+.rummaging .legBack {
+  animation: shuffle 0.3s ease-in-out infinite;
+  animation-delay: 0.2s;
+}
+.rummaging .clawLeft,
+.rummaging .clawRight {
+  animation: grope 0.62s ease-in-out infinite alternate;
+}
+
+/* ---- found: one small hop, then still ---------------------------------- */
+.found .shell {
+  animation: hop 0.6s var(--settle) 1;
+}
+.found .eye {
+  animation: widen 0.6s var(--settle) 1;
+}
+
+/* ---- asleep: sunk down, eyes closed ------------------------------------ */
+.asleep .shell {
+  transform: translateY(3px) scaleY(0.9);
+  animation: snooze 4.4s var(--ease) infinite;
+}
+.asleep .eye {
+  /* Squashed to a line rather than hidden, so the pose still reads. */
+  transform: scaleY(0.12);
+}
+.asleep .clawLeft,
+.asleep .clawRight {
+  transform: translateY(7px) rotate(24deg);
+}
+
+/* ---- shrug: claws up, body lifted -------------------------------------- */
+.shrug .clawLeft {
+  transform: translate(-3px, -7px) rotate(-20deg);
+}
+.shrug .clawRight {
+  transform: translate(3px, -7px) rotate(20deg);
+}
+.shrug .shell {
+  transform: translateY(-2px);
+}
+
+/* ---- disappointed: sagging, looking down -------------------------------- */
+.disappointed .shell {
+  transform: translateY(4px) scaleY(0.94);
+}
+.disappointed .eye {
+  transform: translateY(3px) scaleY(0.62);
+}
+.disappointed .clawLeft,
+.disappointed .clawRight {
+  transform: translateY(9px) rotate(30deg);
+}
+
+/* ---- straining: leaning back under something absurd --------------------- */
+.straining .shell {
+  animation: strain 0.28s ease-in-out infinite alternate;
+}
+.straining .clawLeft {
+  transform: translate(2px, -10px) rotate(-38deg);
+}
+.straining .clawRight {
+  transform: translate(-2px, -10px) rotate(38deg);
+}
+.straining .eye {
+  transform: scaleY(0.55);
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    transform: translateY(0) scaleY(1);
+  }
+  50% {
+    transform: translateY(-1.4px) scaleY(1.025);
+  }
+}
+
+@keyframes blink {
+  0%,
+  95%,
+  100% {
+    transform: scaleY(1);
+  }
+  96%,
+  98% {
+    transform: scaleY(0.1);
+  }
+}
+
+@keyframes scurry {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-1.2deg);
+  }
+  50% {
+    transform: translateY(-2.2px) rotate(1.2deg);
+  }
+}
+
+@keyframes shuffle {
+  0%,
+  100% {
+    transform: rotate(-11deg);
+  }
+  50% {
+    transform: rotate(11deg);
+  }
+}
+
+@keyframes grope {
+  from {
+    transform: rotate(-9deg);
+  }
+  to {
+    transform: rotate(9deg);
+  }
+}
+
+@keyframes hop {
+  0% {
+    transform: translateY(0);
+  }
+  35% {
+    transform: translateY(-9px) scaleY(1.06);
+  }
+  70% {
+    transform: translateY(1px) scaleY(0.95);
+  }
+  100% {
+    transform: translateY(0) scaleY(1);
+  }
+}
+
+@keyframes widen {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.35);
+  }
+}
+
+@keyframes snooze {
+  0%,
+  100% {
+    transform: translateY(3px) scaleY(0.9);
+  }
+  50% {
+    transform: translateY(1px) scaleY(0.95);
+  }
+}
+
+@keyframes strain {
+  from {
+    transform: rotate(-2.5deg) translateY(0);
+  }
+  to {
+    transform: rotate(2.5deg) translateY(-1px);
+  }
+}
+
+/* The little z's only exist while asleep. */
+.snore {
+  fill: var(--ink-faint);
+  font-family: var(--serif);
+  font-size: 15px;
+  animation: drift 3.4s ease-in-out infinite;
+}
+.snore:nth-of-type(2) {
+  animation-delay: 1.1s;
+}
+
+@keyframes drift {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.7);
+  }
+  30% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(9px, -20px) scale(1.1);
+  }
+}

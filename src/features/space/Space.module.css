@@ -1,0 +1,168 @@
+.room {
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--gap) var(--room) var(--sky);
+}
+
+.inner {
+  max-width: 780px;
+  margin: 0 auto;
+}
+
+.summary {
+  font-family: var(--serif);
+  font-size: var(--type-say);
+  line-height: var(--leading-loose);
+  white-space: pre-line;
+  margin-bottom: var(--room);
+  max-width: 38ch;
+}
+
+/*
+ * One band, split proportionally.
+ *
+ * Not a pie chart, not a treemap, not six sparklines. A single horizontal
+ * measure with the labels written underneath is the most honest shape for
+ * "here is roughly where it went" — and it degrades gracefully when the
+ * measurement was truncated.
+ */
+.band {
+  display: flex;
+  height: 44px;
+  border-radius: var(--round);
+  overflow: hidden;
+  border: var(--hair) solid var(--rule);
+  background: var(--paper-deep);
+}
+
+.segment {
+  position: relative;
+  min-width: 3px;
+  transition: filter var(--quick) var(--ease);
+}
+
+.segment:hover {
+  filter: brightness(1.08);
+}
+
+.legend {
+  list-style: none;
+  margin: var(--step) 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--close) var(--step);
+}
+
+.legendItem {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  align-items: baseline;
+  gap: var(--snug);
+  font-size: var(--type-small);
+  padding-bottom: var(--snug);
+  border-bottom: var(--hair) solid var(--rule);
+}
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  align-self: center;
+}
+
+.legendLabel {
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.legendValue {
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.section {
+  margin-top: var(--air);
+}
+
+.sectionTitle {
+  font-family: var(--serif);
+  font-size: var(--type-say);
+  font-weight: 400;
+  margin-bottom: var(--close);
+}
+
+.sectionNote {
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+  margin-bottom: var(--step);
+  max-width: 54ch;
+}
+
+.tallies {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tally {
+  display: grid;
+  grid-template-columns: 1fr 120px auto;
+  align-items: center;
+  gap: var(--step);
+  width: 100%;
+  padding: var(--close) 0;
+  text-align: left;
+  border-bottom: var(--hair) solid var(--rule);
+  color: var(--ink);
+  transition: padding-left var(--quick) var(--ease);
+}
+
+.tally:hover {
+  padding-left: var(--snug);
+}
+
+.tallyLabel {
+  font-size: var(--type-read);
+}
+
+.tallyBar {
+  height: 5px;
+  border-radius: 99px;
+  background: var(--hollow);
+  overflow: hidden;
+}
+
+.tallyFill {
+  display: block;
+  height: 100%;
+  background: var(--honey);
+  border-radius: 99px;
+}
+
+.tallyValue {
+  font-size: var(--type-small);
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.footnote {
+  margin-top: var(--gap);
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+  line-height: var(--leading-normal);
+  max-width: 56ch;
+}
+
+.pending {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--close);
+  padding: var(--sky) 0;
+  color: var(--ink-faint);
+  font-size: var(--type-small);
+}

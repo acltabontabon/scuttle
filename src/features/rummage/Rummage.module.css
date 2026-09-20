@@ -1,0 +1,263 @@
+.stage {
+  position: relative;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  height: 100%;
+  padding: 0 var(--room) var(--room);
+}
+
+.centre {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--room);
+  text-align: center;
+  min-height: 0;
+}
+
+.title {
+  font-family: var(--serif);
+  font-size: var(--type-roar);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: var(--leading-tight);
+  margin: 0;
+}
+
+.line {
+  font-size: var(--type-say);
+  color: var(--ink-soft);
+  font-family: var(--serif);
+  max-width: 28ch;
+  line-height: var(--leading-normal);
+}
+
+/*
+ * The one action. A soft-edged slab rather than a pill, sitting on the paper
+ * with a little weight to it — it should feel like something you press, not
+ * something you click.
+ */
+.rummage {
+  position: relative;
+  padding: 16px var(--air);
+  font-family: var(--serif);
+  font-size: var(--type-say);
+  letter-spacing: 0.01em;
+  color: var(--paper);
+  background: var(--ink);
+  border-radius: var(--round-soft);
+  box-shadow: var(--lift-hover);
+  transition:
+    transform var(--quick) var(--ease),
+    box-shadow var(--quick) var(--ease),
+    background var(--quick) var(--ease);
+}
+
+.rummage:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--lift-held);
+}
+
+.rummage:active {
+  transform: translateY(1px) scale(0.993);
+  box-shadow: var(--lift-resting);
+}
+
+.rummage:disabled {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
+  box-shadow: var(--lift-resting);
+}
+
+/* ---- while rummaging ---------------------------------------------------- */
+.working {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--step);
+  min-height: 132px;
+  justify-content: center;
+}
+
+.phase {
+  font-family: var(--serif);
+  font-size: var(--type-loud);
+  font-weight: 400;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  /* Each new phase fades in where the last one was. */
+  animation: phaseIn var(--slow) var(--ease);
+}
+
+.counts {
+  display: flex;
+  gap: var(--step);
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.countValue {
+  color: var(--ink-soft);
+}
+
+.stopRow {
+  display: flex;
+  gap: var(--step);
+  align-items: center;
+}
+
+.stop {
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+  border-bottom: var(--hair) solid var(--ink-ghost);
+  padding-bottom: 1px;
+  transition: color var(--quick) var(--ease), border-color var(--quick) var(--ease);
+}
+
+.stop:hover {
+  color: var(--clay-ink);
+  border-bottom-color: var(--clay);
+}
+
+.detailToggle {
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+  border-bottom: var(--hair) solid transparent;
+}
+.detailToggle:hover {
+  color: var(--ink-soft);
+  border-bottom-color: var(--ink-ghost);
+}
+
+/* Technical progress, behind a disclosure because almost nobody wants it. */
+.technical {
+  margin-top: var(--close);
+  font-family: var(--mono);
+  font-size: var(--type-whisper);
+  color: var(--ink-faint);
+  line-height: var(--leading-loose);
+  text-align: left;
+  min-width: 320px;
+}
+
+.technical dt {
+  display: inline;
+  color: var(--ink-ghost);
+}
+.technical dd {
+  display: inline;
+  margin: 0 var(--close) 0 var(--tight);
+  color: var(--ink-soft);
+}
+
+/* ---- things turning up while it works ----------------------------------- */
+.catch {
+  display: flex;
+  align-items: center;
+  gap: var(--snug);
+  font-size: var(--type-small);
+  color: var(--ink-soft);
+  animation: catchIn var(--slow) var(--settle);
+}
+
+.catchName {
+  max-width: 34ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catchSize {
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- the floor the creature walks along --------------------------------- */
+.floor {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 118px;
+}
+
+.floorLine {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 22px;
+  height: var(--hair);
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--ink-ghost) 18%,
+    var(--ink-ghost) 82%,
+    transparent
+  );
+  opacity: 0.55;
+}
+
+.creature {
+  position: absolute;
+  bottom: 22px;
+  transition: transform var(--slow) var(--ease);
+}
+
+/* While working it paces the floor, slowly and without urgency. */
+.creature[data-pacing='true'] {
+  animation: pace 9.5s ease-in-out infinite;
+}
+
+.roots {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: var(--type-whisper);
+  color: var(--ink-ghost);
+  letter-spacing: 0.04em;
+}
+
+@keyframes phaseIn {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes catchIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pace {
+  0% {
+    transform: translateX(-180px) scaleX(1);
+  }
+  46% {
+    transform: translateX(180px) scaleX(1);
+  }
+  50% {
+    transform: translateX(180px) scaleX(-1);
+  }
+  96% {
+    transform: translateX(-180px) scaleX(-1);
+  }
+  100% {
+    transform: translateX(-180px) scaleX(1);
+  }
+}

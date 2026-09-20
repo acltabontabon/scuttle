@@ -1,0 +1,184 @@
+.room {
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--gap) var(--room) var(--sky);
+}
+
+.inner {
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.title {
+  font-family: var(--serif);
+  font-size: var(--type-loud);
+  font-weight: 400;
+  margin-bottom: var(--room);
+}
+
+.group {
+  margin-bottom: var(--air);
+}
+
+.groupTitle {
+  font-size: var(--type-whisper);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  padding-bottom: var(--snug);
+  border-bottom: var(--hair) solid var(--rule);
+  margin-bottom: var(--step);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: var(--step);
+  padding: var(--close) 0;
+}
+
+.rowText {
+  min-width: 0;
+}
+
+.rowLabel {
+  font-size: var(--type-read);
+  color: var(--ink);
+}
+
+.rowHint {
+  margin-top: 2px;
+  font-size: var(--type-small);
+  color: var(--ink-soft);
+  line-height: var(--leading-normal);
+}
+
+/* ---- a switch that looks handmade rather than shipped with a framework --- */
+.switch {
+  flex: none;
+  width: 42px;
+  height: 24px;
+  padding: 3px;
+  border-radius: 99px;
+  background: var(--hollow);
+  border: var(--hair) solid var(--ink-ghost);
+  transition: background var(--normal) var(--ease), border-color var(--normal) var(--ease);
+}
+
+.switch[aria-checked='true'] {
+  background: var(--moss);
+  border-color: var(--moss);
+}
+
+.knob {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--paper-raised);
+  box-shadow: var(--lift-resting);
+  transition: transform var(--normal) var(--settle);
+}
+
+.switch[aria-checked='true'] .knob {
+  transform: translateX(18px);
+}
+
+/* ---- segmented choice ---------------------------------------------------- */
+.choices {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--hollow);
+  border-radius: var(--round);
+}
+
+.choice {
+  padding: 5px var(--close);
+  font-size: var(--type-small);
+  border-radius: var(--round-tight);
+  color: var(--ink-soft);
+  transition: background var(--quick) var(--ease), color var(--quick) var(--ease);
+}
+
+.choice[aria-pressed='true'] {
+  background: var(--paper-raised);
+  color: var(--ink);
+  box-shadow: var(--lift-resting);
+}
+
+/* ---- scan locations ------------------------------------------------------ */
+.places {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.place {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--close);
+  padding: var(--snug) 0;
+  border-bottom: var(--hair) solid var(--rule);
+  font-size: var(--type-small);
+}
+
+.placePath {
+  font-family: var(--mono);
+  font-size: var(--type-whisper);
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.check {
+  width: 17px;
+  height: 17px;
+  border-radius: var(--round-tight);
+  border: var(--hair) solid var(--ink-ghost);
+  background: var(--paper-raised);
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  line-height: 1;
+  color: transparent;
+}
+
+.check[aria-checked='true'] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+
+.link {
+  font-size: var(--type-small);
+  color: var(--ink-soft);
+  border-bottom: var(--hair) solid var(--ink-ghost);
+}
+.link:hover {
+  color: var(--ink);
+  border-bottom-color: var(--honey);
+}
+
+.danger:hover {
+  color: var(--clay-ink);
+  border-bottom-color: var(--clay);
+}
+
+.about {
+  margin-top: var(--air);
+  padding-top: var(--step);
+  border-top: var(--hair) solid var(--rule);
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+  line-height: var(--leading-loose);
+}
+
+.aboutPath {
+  font-family: var(--mono);
+  font-size: var(--type-whisper);
+  overflow-wrap: anywhere;
+}

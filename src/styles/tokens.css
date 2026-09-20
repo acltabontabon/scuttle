@@ -1,0 +1,187 @@
+/*
+ * Scuttle's design tokens.
+ *
+ * Small on purpose. Everything in the interface is built from what is here,
+ * and if something needs a value that is not here, the right move is usually
+ * to reconsider the something.
+ */
+
+:root {
+  /* ---- surfaces ---------------------------------------------------------
+   * Warm paper, not white. The floor Scuttle empties its pockets onto.
+   */
+  --paper: #f3ece0;
+  --paper-deep: #ebe2d3;
+  --paper-raised: #f8f3e9;
+  --hollow: #e2d7c4;
+  /* Hairline separators. Distinct from --hollow because a recessed fill and a
+     border want to move in opposite directions from the surface: in dark mode
+     --hollow is darker than the paper, which made every rule in the interface
+     invisible at 1.09:1. */
+  --rule: #d8cdb9;
+
+  /* ---- ink ------------------------------------------------------------- */
+  --ink: #2b2520;
+  --ink-soft: #6b6055;
+  --ink-faint: #75695c;
+  --ink-ghost: #b3a595;
+
+  /* ---- accents ----------------------------------------------------------
+   * Honey for attention, moss for things that are fine, clay for things that
+   * are not. Three colours, each with one job.
+   */
+  --honey: #d99a2b;
+  --honey-soft: #f2dcae;
+  --moss: #5d7d63;
+  --moss-soft: #d9e3d5;
+  --clay: #b0543a;
+  --clay-soft: #f0d9d0;
+
+  /* ---- accents as text ---------------------------------------------------
+   * The accents above are tuned for fills, dots, bars and borders, which only
+   * need to be distinguishable. Used as small text on paper they fail AA
+   * badly — honey manages 2.08:1. These darker siblings are what type is set
+   * in; nothing else should use them.
+   */
+  --honey-ink: #8c6319;
+  --moss-ink: #54715a;
+  --clay-ink: #aa5138;
+
+  /* ---- meaning ---------------------------------------------------------- */
+  --confidence-high: var(--ink);
+  --confidence-medium: var(--ink-soft);
+  --confidence-low: var(--ink-faint);
+  --risk-low: var(--moss);
+  --risk-moderate: var(--honey);
+  --risk-high: var(--clay);
+
+  /* ---- spacing: a 4px base, named for how it reads ---------------------- */
+  --hair: 1px;
+  --tight: 4px;
+  --snug: 8px;
+  --close: 12px;
+  --step: 20px;
+  --gap: 32px;
+  --room: 52px;
+  --air: 84px;
+  --sky: 136px;
+
+  /* ---- type -------------------------------------------------------------
+   * A warm old-style serif for anything that carries voice, a plain system
+   * sans for anything that carries data. No webfonts: nothing to download,
+   * nothing to block, and the app looks native on both platforms.
+   */
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+
+  --type-whisper: 11px;
+  --type-small: 12.5px;
+  --type-body: 14px;
+  --type-read: 16px;
+  --type-say: 21px;
+  --type-loud: 30px;
+  --type-shout: 46px;
+  --type-roar: 68px;
+
+  --leading-tight: 1.15;
+  --leading-normal: 1.5;
+  --leading-loose: 1.7;
+
+  /* ---- shape ------------------------------------------------------------
+   * Radii are small. Scuttle is not made of pills.
+   */
+  --round-tight: 3px;
+  --round: 6px;
+  --round-soft: 10px;
+  --round-drawer: 16px;
+
+  /* ---- depth ------------------------------------------------------------
+   * Objects sitting on a surface, lit warmly from above.
+   */
+  /* The shadow an object casts on the paper. Not derived from --ink: in dark
+     mode --ink is the light colour, and the shadow would become a glow. */
+  --ground: rgba(64, 48, 32, 0.28);
+
+  --lift-resting: 0 1px 2px rgba(64, 48, 32, 0.08);
+  --lift-hover: 0 4px 14px rgba(64, 48, 32, 0.13);
+  --lift-held: 0 12px 34px rgba(58, 42, 28, 0.20);
+  --lift-sheet: -18px 0 48px rgba(52, 38, 24, 0.16);
+
+  /* ---- motion -----------------------------------------------------------
+   * Two curves. `--settle` has a little overshoot, for things coming to rest.
+   */
+  --quick: 130ms;
+  --normal: 240ms;
+  --slow: 420ms;
+  --ease: cubic-bezier(0.32, 0.72, 0.28, 1);
+  --settle: cubic-bezier(0.22, 1.2, 0.36, 1);
+}
+
+/*
+ * Dark mode is a different room, not an inverted one: the paper becomes worn
+ * leather, the ink becomes lamplight. The accents keep their jobs and their
+ * warmth. No pure black, no neon.
+ */
+:root[data-theme="dark"] {
+  --paper: #1d1916;
+  --paper-deep: #171310;
+  --paper-raised: #262019;
+  --hollow: #120f0d;
+  --rule: #423930;
+
+  --ink: #ece2d3;
+  --ink-soft: #b0a290;
+  --ink-faint: #8d806f;
+  --ink-ghost: #5f5548;
+
+  --honey: #e5ae4d;
+  --honey-soft: #4a3a1c;
+  --moss: #8cab8a;
+  --moss-soft: #2b3628;
+  --clay: #d98263;
+  --clay-soft: #402219;
+
+  /* Against the dark ground these already clear AA, so type uses them as-is. */
+  --honey-ink: #e5ae4d;
+  --moss-ink: #8cab8a;
+  --clay-ink: #d98263;
+
+  --ground: rgba(0, 0, 0, 0.55);
+  --lift-resting: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --lift-hover: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --lift-held: 0 14px 38px rgba(0, 0, 0, 0.6);
+  --lift-sheet: -18px 0 48px rgba(0, 0, 0, 0.5);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #1d1916;
+    --paper-deep: #171310;
+    --paper-raised: #262019;
+    --hollow: #120f0d;
+    --rule: #423930;
+
+    --ink: #ece2d3;
+    --ink-soft: #b0a290;
+    --ink-faint: #8d806f;
+    --ink-ghost: #5f5548;
+
+    --honey: #e5ae4d;
+    --honey-soft: #4a3a1c;
+    --moss: #8cab8a;
+    --moss-soft: #2b3628;
+    --clay: #d98263;
+    --clay-soft: #402219;
+
+    --honey-ink: #e5ae4d;
+    --moss-ink: #8cab8a;
+    --clay-ink: #d98263;
+
+    --ground: rgba(0, 0, 0, 0.55);
+    --lift-resting: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --lift-hover: 0 4px 16px rgba(0, 0, 0, 0.5);
+    --lift-held: 0 14px 38px rgba(0, 0, 0, 0.6);
+    --lift-sheet: -18px 0 48px rgba(0, 0, 0, 0.5);
+  }
+}

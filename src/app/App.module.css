@@ -1,0 +1,144 @@
+.shell {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100%;
+  overflow: hidden;
+}
+
+/*
+ * The window's own title bar is hidden, so this strip both stands in for it
+ * and provides the drag region. It is not a toolbar and does not gain buttons.
+ */
+.bar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 14px var(--room) 0 var(--room);
+  height: 52px;
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+/* Room for the traffic lights on macOS. */
+.bar[data-platform='macos'] {
+  padding-left: 92px;
+}
+
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--serif);
+  font-size: var(--type-read);
+  letter-spacing: 0.01em;
+  color: var(--ink);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.wordmarkDot {
+  color: var(--ink-faint);
+}
+
+.nav {
+  display: flex;
+  align-items: baseline;
+  gap: var(--step);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.navLink {
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+  letter-spacing: 0.02em;
+  padding-bottom: 2px;
+  border-bottom: var(--hair) solid transparent;
+  transition: color var(--quick) var(--ease), border-color var(--quick) var(--ease);
+}
+
+.navLink:hover {
+  color: var(--ink-soft);
+}
+
+.navLink[aria-current='page'] {
+  color: var(--ink);
+  border-bottom-color: var(--honey);
+}
+
+.navCount {
+  display: inline-block;
+  margin-left: 5px;
+  font-size: var(--type-whisper);
+  color: var(--honey-ink);
+}
+
+.stage {
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ---- the note: one line, bottom centre, never a notification ------------ */
+.note {
+  position: fixed;
+  left: 50%;
+  bottom: var(--gap);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: var(--step);
+  max-width: min(620px, calc(100vw - var(--air)));
+  padding: 11px var(--step);
+  background: var(--paper-raised);
+  color: var(--ink);
+  border: var(--hair) solid var(--rule);
+  border-radius: var(--round-soft);
+  box-shadow: var(--lift-held);
+  font-size: var(--type-body);
+  transform: translate(-50%, 0);
+  animation: noteIn var(--normal) var(--settle);
+}
+
+.note[data-tone='warn'] {
+  border-color: var(--clay);
+  background: var(--clay-soft);
+}
+
+.noteText {
+  flex: 1;
+  min-width: 0;
+}
+
+.noteAction {
+  flex: none;
+  font-size: var(--type-small);
+  color: var(--ink);
+  border-bottom: var(--hair) solid var(--honey);
+  padding-bottom: 1px;
+}
+
+.noteDismiss {
+  flex: none;
+  color: var(--ink-faint);
+  font-size: var(--type-read);
+  line-height: 1;
+}
+
+.noteDismiss:hover {
+  color: var(--ink);
+}
+
+@keyframes noteIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 14px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}

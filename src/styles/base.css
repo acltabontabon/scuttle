@@ -1,0 +1,136 @@
+@import "./tokens.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#scuttle-root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: var(--type-body);
+  line-height: var(--leading-normal);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* This is a desktop application, not a document. */
+  overflow: hidden;
+  user-select: none;
+  cursor: default;
+}
+
+/*
+ * The paper has a grain. It is almost invisible and entirely the point:
+ * a flat fill reads as a web page, a grained one reads as a surface.
+ */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.4;
+  background-image: radial-gradient(
+      circle at 20% 15%,
+      rgba(217, 154, 43, 0.06),
+      transparent 55%
+    ),
+    radial-gradient(circle at 85% 80%, rgba(93, 125, 99, 0.05), transparent 50%);
+}
+
+h1,
+h2,
+h3,
+p,
+figure {
+  margin: 0;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+/*
+ * Focus is always visible and always the same shape, so keyboard users get a
+ * consistent signal rather than whatever each component felt like.
+ */
+:focus-visible {
+  outline: 2px solid var(--honey);
+  outline-offset: 3px;
+  border-radius: var(--round-tight);
+}
+
+::selection {
+  background: var(--honey-soft);
+  color: var(--ink);
+}
+
+/* Text that is genuinely content can be selected. */
+.selectable {
+  user-select: text;
+  cursor: text;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/*
+ * Reduced motion: nothing moves, everything still changes. Transitions are
+ * flattened rather than removed, so state changes remain perceptible.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+:root[data-motion="still"] *,
+:root[data-motion="still"] *::before,
+:root[data-motion="still"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* Scrollbars, made quiet. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--ink-ghost);
+  border-radius: 99px;
+  border: 3px solid var(--paper);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-faint);
+}

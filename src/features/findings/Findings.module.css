@@ -1,0 +1,132 @@
+.floor {
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--gap) var(--room) var(--sky);
+}
+
+.opening {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tight);
+  max-width: 38ch;
+  margin: 0 0 var(--room) 4%;
+}
+
+.total {
+  font-family: var(--serif);
+  font-size: var(--type-shout);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: var(--leading-tight);
+}
+
+.totalUnit {
+  color: var(--ink-faint);
+  font-size: 0.6em;
+  margin-left: 0.18em;
+}
+
+.aside {
+  font-size: var(--type-body);
+  color: var(--ink-soft);
+}
+
+.hiccups {
+  margin-top: var(--snug);
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+}
+
+/*
+ * The scatter.
+ *
+ * A grid supplies the bones so the layout survives any number of piles and any
+ * window size; per-pile offsets and alternating vertical rhythm break the grid
+ * up again so it never reads as one.
+ */
+.scatter {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--gap) var(--step);
+  align-items: start;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.slot {
+  display: flex;
+  justify-content: center;
+}
+
+/* Every other column sits lower, which is what stops the row reading as a row. */
+.slot:nth-child(even) {
+  margin-top: var(--gap);
+}
+.slot:nth-child(3n) {
+  margin-top: var(--close);
+}
+
+.again {
+  display: flex;
+  justify-content: center;
+  gap: var(--step);
+  margin-top: var(--air);
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+}
+
+.againLink {
+  color: var(--ink-soft);
+  border-bottom: var(--hair) solid var(--ink-ghost);
+  padding-bottom: 1px;
+}
+.againLink:hover {
+  color: var(--ink);
+  border-bottom-color: var(--honey);
+}
+
+/* ---- nothing found ------------------------------------------------------ */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--step);
+  height: 100%;
+  text-align: center;
+  padding-bottom: var(--air);
+}
+
+.emptyTitle {
+  font-family: var(--serif);
+  font-size: var(--type-loud);
+  font-weight: 400;
+}
+
+.emptyLine {
+  font-size: var(--type-read);
+  color: var(--ink-soft);
+  max-width: 34ch;
+  font-family: var(--serif);
+}
+
+.sock {
+  display: flex;
+  align-items: center;
+  gap: var(--snug);
+  margin-top: var(--step);
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+  animation: offer 900ms var(--settle) 400ms backwards;
+}
+
+@keyframes offer {
+  from {
+    opacity: 0;
+    transform: translateY(14px) rotate(-8deg);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotate(0);
+  }
+}
