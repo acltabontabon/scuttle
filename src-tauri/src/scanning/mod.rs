@@ -905,10 +905,15 @@ mod tests {
 
     #[test]
     fn ignored_paths_are_never_raised_again() {
-        let h = harness_with(IgnoreSet {
-            paths: vec![PathBuf::from("/")],
+        // An ancestor of the finding, rather than the filesystem root: "/" is
+        // not an ancestor of anything on Windows, where an absolute path
+        // carries a drive prefix, so the ignore silently failed to match
+        // there and the finding came through.
+        let mut h = harness();
+        h.ctx.ignores = IgnoreSet {
+            paths: vec![h.home.clone()],
             ..Default::default()
-        });
+        };
         let file = h.home.join("Downloads/thing.dmg");
         std::fs::write(&file, "x").unwrap();
         let finding = Finding::new(

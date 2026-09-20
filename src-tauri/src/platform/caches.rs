@@ -487,9 +487,23 @@ mod tests {
     use super::*;
     use crate::safety::ProtectedPaths;
 
+    /// A home directory shaped like the platform the test is running on.
+    ///
+    /// `/Users/testuser` is not an absolute path on Windows — an absolute
+    /// path there needs a drive letter or a UNC prefix — so a literal Unix
+    /// home made these assertions fail for a reason that had nothing to do
+    /// with what they were checking.
+    fn test_home(user: &str) -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from(format!("C:\\Users\\{user}"))
+        } else {
+            PathBuf::from(format!("/Users/{user}"))
+        }
+    }
+
     #[test]
     fn every_rule_names_an_owner_and_a_label() {
-        for rule in all_rules_for_home(Path::new("/Users/testuser")) {
+        for rule in all_rules_for_home(&test_home("testuser")) {
             assert!(!rule.owner.is_empty());
             assert!(!rule.label.is_empty());
             assert!(rule.path.is_absolute());
@@ -500,9 +514,9 @@ mod tests {
     fn no_cache_rule_points_at_a_protected_path() {
         // A rule that collided with the protected table would be a rule that
         // could never fire — and a sign someone had written a dangerous one.
-        let home = Path::new("/Users/testuser");
-        let protected = ProtectedPaths::for_home(home);
-        for rule in all_rules_for_home(home) {
+        let home = test_home("testuser");
+        let protected = ProtectedPaths::for_home(&home);
+        for rule in all_rules_for_home(&home) {
             assert!(
                 !protected.is_protected(&rule.path),
                 "cache rule for {} points into protected territory: {}",
@@ -514,9 +528,9 @@ mod tests {
 
     #[test]
     fn no_cache_rule_is_dangerously_shallow() {
-        let home = Path::new("/Users/testuser");
-        let protected = ProtectedPaths::for_home(home);
-        for rule in all_rules_for_home(home) {
+        let home = test_home("testuser");
+        let protected = ProtectedPaths::for_home(&home);
+        for rule in all_rules_for_home(&home) {
             assert!(
                 !protected.is_too_shallow(&rule.path),
                 "{} is too close to a root",
@@ -527,10 +541,11 @@ mod tests {
 
     #[test]
     fn rules_are_scoped_to_the_home_they_were_built_for() {
-        let rules = all_rules_for_home(Path::new("/Users/alice"));
+        let home = test_home("alice");
+        let rules = all_rules_for_home(&home);
         for rule in rules {
             assert!(
-                rule.path.starts_with("/Users/alice"),
+                rule.path.starts_with(&home),
                 "{} escaped the home directory",
                 rule.path.display()
             );
@@ -539,17 +554,18 @@ mod tests {
 
     #[test]
     fn matching_uses_component_containment() {
-        let rules = all_rules_for_home(Path::new("/Users/testuser"));
+        let home = test_home("testuser");
+        let rules = all_rules_for_home(&home);
         if let Some(rule) = rules.first() {
             assert!(rule.matches(&rule.path));
             assert!(rule.matches(&rule.path.join("deep/inside")));
-            assert!(!rule.matches(Path::new("/Users/testuser/somewhere-else")));
+            assert!(!rule.matches(&home.join("somewhere-else")));
         }
     }
 
     #[test]
     fn nonexistent_directories_are_filtered_out() {
-        let rules = rules_for_home(Path::new("/definitely/not/a/real/home"));
+        let rules = rules_for_home(&test_home("definitely-not-a-real-user"));
         assert!(rules.is_empty());
     }
 
