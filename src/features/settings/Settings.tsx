@@ -3,7 +3,20 @@ import { useCallback, useEffect, useState } from 'react'
 import { useStore } from '@/app/store'
 import { api } from '@/lib/ipc'
 import { bytes, shortPath } from '@/lib/format'
+import { platform } from '@/lib/platform'
+import {
+  CHECKS_HINT,
+  NOTIFY_HINT,
+  keepInTrayHint,
+  keepInTrayLabel,
+  launchAtLoginHint,
+  launchAtLoginTrouble,
+  pauseState,
+  standing,
+  trouble,
+} from '@/features/background/phrasing'
 import type {
+  BackgroundStatus,
   IgnoredEntry,
   RootDescription,
   Settings as SettingsShape,
@@ -27,7 +40,14 @@ import styles from './Settings.module.css'
  * and the order the keyboard walks.
  */
 export function Settings() {
-  const { settings, updateSettings, say } = useStore()
+  const {
+    settings,
+    updateSettings,
+    say,
+    background,
+    pauseBackground,
+    setLaunchAtLogin,
+  } = useStore()
   const [roots, setRoots] = useState<RootDescription[]>([])
   const [ignored, setIgnored] = useState<IgnoredEntry[] | null>(null)
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
@@ -192,6 +212,15 @@ export function Settings() {
               />
             </section>
 
+            <BackgroundGroup
+              settings={settings}
+              status={background}
+              patch={patch}
+              onPause={pauseBackground}
+              onLaunchAtLogin={setLaunchAtLogin}
+              say={say}
+            />
+
             <Ignored entries={ignored} onChanged={loadIgnored} say={say} />
 
             <section className={styles.group}>
@@ -343,28 +372,175 @@ function Choice<T extends string | number>({
   )
 }
 
+/**
+ * Staying in the menu bar, and what may follow from it.
+ *
+ * Three nested decisions, each off by default and each disabled until the one
+ * above it is on — because a check cannot happen if closing the window quits,
+ * and there is nothing to notify about if no checks happen. The backend
+ * enforces the same rule, so this is the interface agreeing rather than the
+ * interface deciding.
+ *
+ * Launch at login sits apart on purpose. Staying in the menu bar is not
+ * permission to start with the machine, and the two are never bundled.
+ */
+function BackgroundGroup({
+  settings,
+  status,
+  patch,
+  onPause,
+  onLaunchAtLogin,
+  say,
+}: {
+  settings: SettingsShape
+  status: BackgroundStatus | null
+  patch: (changes: Partial<SettingsShape>) => Promise<void>
+  onPause: (paused: boolean) => Promise<void>
+  onLaunchAtLogin: (enabled: boolean) => Promise<void>
+  say: (text: string, options?: { tone?: 'warn' }) => void
+}) {
+  const os = platform()
+  // The core sends its own clock with the status, so nothing here has to ask
+  // the browser what time it is during a render.
+  const now = status?.now_unix ?? 0
+  const pause = pauseState(status?.paused_until_unix ?? 0, now)
+  const wrong = status ? trouble(status, os) : null
+  const loginTrouble = status ? launchAtLoginTrouble(status) : null
+
+  /**
+   * Turning the tray on explains itself once, at the moment the decision is
+   * made. Explaining at the first close instead would mean either delaying
+   * the close or saying it after the window had already gone.
+   */
+  const onMode = async (value: boolean) => {
+    await patch({
+      background_mode: value,
+      ...(value && !settings.background_intro_seen ? { background_intro_seen: true } : {}),
+    })
+    if (value && !settings.background_intro_seen) {
+      say(
+        `Closing the window will now leave Scuttle in the ${
+          os === 'windows' ? 'system tray' : 'menu bar'
+        }. Quit it from there when you want it gone.`,
+      )
+    }
+  }
+
+  /**
+   * Notifications are asked for at the moment they are switched on, which is
+   * the only moment the request makes sense to anybody. A refusal leaves the
+   * rest of background mode working and the toggle honestly off.
+   */
+  const onNotify = async (value: boolean) => {
+    if (!value) {
+      await patch({ background_notify: false })
+      return
+    }
+    const allowed = await api.requestNotificationPermission()
+    await patch({ background_notify: allowed })
+    if (!allowed) {
+      say('Your system is not allowing notifications, so that stays off.', { tone: 'warn' })
+    }
+  }
+
+  return (
+    <section className={styles.group}>
+      <h3 className={styles.groupTitle}>When the window is closed</h3>
+      <p className={styles.groupNote}>
+        {status ? standing(status, now) : 'Off. Closing the window quits Scuttle.'}
+      </p>
+
+      <Toggle
+        label={keepInTrayLabel(os)}
+        hint={keepInTrayHint(os)}
+        checked={settings.background_mode}
+        onChange={(value) => void onMode(value)}
+      />
+
+      {wrong && <p className={styles.trouble}>{wrong}</p>}
+
+      <Toggle
+        label="Check occasionally in the background"
+        hint={CHECKS_HINT}
+        checked={settings.background_checks}
+        disabled={!settings.background_mode}
+        disabledHint={`Needs ${keepInTrayLabel(os).toLowerCase()}, since a check can only happen while Scuttle is still running.`}
+        onChange={(value) => void patch({ background_checks: value })}
+      />
+
+      {settings.background_checks && (
+        <div className={styles.row}>
+          <div className={styles.rowText}>
+            <div className={styles.rowLabel}>
+              {pause.paused ? 'Paused' : 'Checking when the machine is free'}
+            </div>
+            <p className={styles.rowHint}>
+              {pause.paused
+                ? 'Nothing will be looked at until tomorrow.'
+                : 'You can stop it until tomorrow without turning it off.'}
+            </p>
+          </div>
+          <button className={styles.link} onClick={() => void onPause(!pause.paused)}>
+            {pause.label}
+          </button>
+        </div>
+      )}
+
+      <Toggle
+        label="Tell me what turned up"
+        hint={NOTIFY_HINT}
+        checked={settings.background_notify}
+        disabled={!settings.background_checks}
+        disabledHint="Needs background checks, since there would be nothing to tell you about."
+        onChange={(value) => void onNotify(value)}
+      />
+
+      <Toggle
+        label="Launch at login"
+        hint={launchAtLoginHint(os)}
+        checked={status?.launch_at_login ?? settings.launch_at_login}
+        disabled={status !== null && !status.launch_at_login_available}
+        disabledHint="Scuttle cannot set this up on this system."
+        onChange={(value) => void onLaunchAtLogin(value)}
+      />
+
+      {loginTrouble && <p className={styles.trouble}>{loginTrouble}</p>}
+    </section>
+  )
+}
+
 function Toggle({
   label,
   hint,
   checked,
   onChange,
+  disabled = false,
+  disabledHint,
 }: {
   label: string
   hint: string
   checked: boolean
   onChange: (value: boolean) => void
+  /**
+   * A setting that depends on another one above it. The row stays visible so
+   * the shape of the decision is legible, and says what it is waiting for
+   * rather than simply refusing to respond.
+   */
+  disabled?: boolean
+  disabledHint?: string
 }) {
   return (
-    <div className={styles.row}>
+    <div className={styles.row} data-disabled={disabled || undefined}>
       <div className={styles.rowText}>
         <div className={styles.rowLabel}>{label}</div>
-        <p className={styles.rowHint}>{hint}</p>
+        <p className={styles.rowHint}>{disabled && disabledHint ? disabledHint : hint}</p>
       </div>
       <button
         className={styles.switch}
         role="switch"
         aria-checked={checked}
         aria-label={label}
+        disabled={disabled}
         onClick={() => onChange(!checked)}
       >
         <span className={styles.knob} />

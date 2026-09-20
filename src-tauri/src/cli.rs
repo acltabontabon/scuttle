@@ -11,23 +11,39 @@ use crate::model::{human_bytes, RecommendedAction};
 use crate::platform;
 use crate::scanning::{self, IgnoreSet, ScanContext, ScanOptions, SilentObserver};
 
-/// Returns true when a flag was handled and the process should exit.
-pub fn handle_arguments() -> bool {
+/// Passed by the login item, so that starting with the machine does not throw
+/// a window at whoever just logged in.
+pub const BACKGROUND_FLAG: &str = "--background";
+
+/// How the application was asked to start.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Launch {
+    /// Started by the system rather than by a person. A request, not a
+    /// guarantee: the window still appears unless background mode is on and
+    /// there is a tray icon to get back from.
+    pub background: bool,
+}
+
+/// `None` when a flag was handled and the process should exit; otherwise how
+/// to start.
+pub fn handle_arguments() -> Option<Launch> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {
         print_help();
-        return true;
+        return None;
     }
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("scuttle {}", env!("CARGO_PKG_VERSION"));
-        return true;
+        return None;
     }
     if args.iter().any(|a| a == "--dry-run") {
         let developer_debris = args.iter().any(|a| a == "--developer-debris");
         dry_run(developer_debris);
-        return true;
+        return None;
     }
-    false
+    Some(Launch {
+        background: args.iter().any(|a| a == BACKGROUND_FLAG),
+    })
 }
 
 fn print_help() {
@@ -40,6 +56,10 @@ Run with no arguments to open the application.
                          Changes nothing.
   --developer-debris     Include build output and package caches in the
                          dry run.
+  --background           Start without showing the window. Only does
+                         anything when \"keep Scuttle in the menu bar\" is
+                         on; otherwise the window opens as usual. This is
+                         what the login item passes.
   --version              Print the version.
   --help                 This.
 

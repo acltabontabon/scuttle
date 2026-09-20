@@ -18,7 +18,8 @@ import styles from './Drawer.module.css'
  * with the objects still sitting in it. Nothing here is a database table.
  */
 export function Drawer() {
-  const { drawer, refreshDrawer, restore, removePermanently, emptyDrawer, go } = useStore()
+  const { drawer, refreshDrawer, restore, removePermanently, emptyDrawer, go, background } =
+    useStore()
   const [emptying, setEmptying] = useState(false)
   const [purging, setPurging] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -67,9 +68,17 @@ export function Drawer() {
             <p className={styles.line}>
               These files still take up disk space. Put them back before they expire.
             </p>
+            {/*
+              Retention has not changed: an item still expires after exactly
+              the days it was given. What changed is when the deletion
+              happens. An application that stays in the menu bar starts far
+              less often, so it sweeps on its own schedule instead — otherwise
+              "after {retention} days" would quietly become "eventually".
+            */}
             <p className={styles.policy}>
-              Items expire after {retention} days and are deleted the next time Scuttle
-              starts.
+              {background?.mode
+                ? `Items expire after ${retention} days, and are deleted shortly after that while Scuttle is running.`
+                : `Items expire after ${retention} days and are deleted the next time Scuttle starts.`}
             </p>
           </>
         )}

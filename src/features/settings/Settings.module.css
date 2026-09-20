@@ -143,6 +143,36 @@
   transform: translateX(18px);
 }
 
+/*
+ * A setting waiting on the one above it. Dimmed rather than hidden, so the
+ * shape of the decision stays legible and nothing appears out of nowhere when
+ * the parent is switched on. The label keeps full contrast — it is the reason
+ * the row is there — and only the control reads as unavailable.
+ */
+.row[data-disabled] .switch {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.row[data-disabled] .rowLabel {
+  color: var(--ink-soft);
+}
+
+/*
+ * What the system refused. Not an error — nothing has gone wrong with anyone's
+ * files — so it takes the quiet clay rather than anything louder, and sits
+ * under the row it explains.
+ */
+.trouble {
+  margin: 0 0 var(--close);
+  padding: var(--snug) var(--close);
+  border-radius: var(--round);
+  background: var(--clay-soft);
+  color: var(--clay-ink);
+  font-size: var(--type-small);
+  line-height: var(--leading-normal);
+}
+
 /* ---- segmented choice ---------------------------------------------------- */
 .choices {
   display: flex;

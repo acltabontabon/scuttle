@@ -111,6 +111,9 @@ export interface Findings {
   files_seen: number
   hiccups: HiccupSummary
   has_rummaged: boolean
+  kind: ScanKind
+  /** Whether the scan that produced these was stopped before it finished. */
+  cancelled: boolean
 }
 
 export type Phase =
@@ -376,6 +379,60 @@ export interface Settings {
   appearance: 'system' | 'light' | 'dark'
   reduced_motion: boolean | null
   has_rummaged_before: boolean
+
+  /**
+   * Staying in the menu bar or system tray.
+   *
+   * These three depend on each other in order, and the backend enforces that
+   * rather than trusting this side: a check cannot happen if closing the
+   * window quits, and there is nothing to notify about if no checks happen.
+   * `save_settings` returns the settings it actually stored, so the interface
+   * shows what is true rather than what was asked for.
+   */
+  background_mode: boolean
+  background_checks: boolean
+  background_notify: boolean
+  /** A mirror. The truth is whatever the operating system reports. */
+  launch_at_login: boolean
+  background_intro_seen: boolean
+}
+
+/**
+ * Which kind of scan produced a set of findings.
+ *
+ * A background check reads no file contents, so it cannot find duplicates or
+ * near-identical screenshots. The findings screen says so, because otherwise
+ * their absence reads as "you have none".
+ */
+export type ScanKind = 'full' | 'glance'
+
+/** Where background mode stands, including the parts the system refused. */
+export interface BackgroundStatus {
+  /**
+   * Whether the tray icon actually exists. When this is false the setting may
+   * be on and yet closing the window still quits — and the interface says so
+   * rather than letting the setting read as a promise.
+   */
+  tray_alive: boolean
+  mode: boolean
+  checks: boolean
+  notify: boolean
+  /** `null` when the system has not been asked. */
+  notifications_permitted: boolean | null
+  launch_at_login: boolean
+  launch_at_login_available: boolean
+  last_check_unix: number
+  paused_until_unix: number
+  /**
+   * The core's own clock. The interface compares against this rather than
+   * calling `Date.now()`, so what it says is a pure function of what it was
+   * given and the two sides can never disagree about whether a pause is over.
+   */
+  now_unix: number
+  /** A background check the user has not looked at yet. */
+  pending_review: string | null
+  /** Why nothing is happening at the moment, phrased for a person. */
+  waiting_because: string
 }
 
 export interface HistoryEntry {

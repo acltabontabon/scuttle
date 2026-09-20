@@ -386,3 +386,22 @@
   font-size: var(--type-whisper);
   color: var(--ink-faint);
 }
+
+/*
+ * What produced these findings, when it was not an ordinary rummage.
+ *
+ * Deliberately quiet — honey rather than clay, because nothing is wrong. It
+ * is telling the reader what was *not* looked at, so that a missing pile is
+ * not mistaken for an empty one.
+ */
+.caveat {
+  max-width: 62ch;
+  margin: 0 auto var(--close);
+  padding: var(--snug) var(--close);
+  border-radius: var(--round);
+  background: var(--honey-soft);
+  color: var(--honey-ink);
+  font-size: var(--type-small);
+  line-height: var(--leading-normal);
+  text-align: center;
+}

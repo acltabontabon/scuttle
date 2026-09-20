@@ -8,39 +8,56 @@ major version is 0, a minor bump may change behaviour.
 
 ## [Unreleased]
 
-### Fixed
+Nothing yet.
 
-- **Moving a folder that is in use no longer fails with "modified since Scuttle
-  found it".** Cache and temp folders change whenever anything inside them does,
-  so comparing the folder's own timestamp meant the Windows temp folder could
-  never be moved, and "rummage again" only led back to the same refusal. Shared
-  folders are now cleaned from the set of files reviewed at scan time, each
-  checked just before it moves; files that changed, vanished or are in use are
-  skipped and counted, and the rest go. The folder itself never moves.
-- **A failed folder move could lose files.** After a refused rename the old code
-  copied the folder, deleted the original file by file, and on a locked file
-  deleted the copy as well. Copying is now used only across drives, only for
-  files, and the original is removed last.
-- **Moving no longer freezes the window.** It ran on the thread that draws the
-  window. It now runs on a worker, and starting one returns at once.
-- Nothing is ever overwritten by a move or a restore, enforced by the operating
-  system rather than by a check that can lose a race.
+## [0.1.0-alpha.2] - 2026-09-21
 
 ### Added
 
-- **Progress you can see.** The selection panel turns into a thin progress track
-  with the phase in words, real counts, and Cancel; a small indicator in the
-  header follows the move around Scuttle; and anything left unfinished stays
-  reachable, with what happened, the operating system's error code, and what to
-  do about it — retry the rest, review again, or copy the details.
-- Failures are classified — in use, access denied, changed since the scan, no
-  room on the drawer's drive, and more — and only an in-use failure ever
-  suggests closing an app.
-- **Recovery from an interrupted move.** Each batch is checkpointed before it
-  happens, and on the next start Scuttle settles what really moved, keeps
-  anything it is unsure of and flags it, and deletes nothing uncertain.
+- **Scuttle can stay in the menu bar** (system tray on Windows) instead of
+  quitting when you close the window. Off by default. ⌘Q, logging out and
+  shutting down still quit properly.
+- **Optional background checks.** At most one a day, and only when the machine
+  is on mains power and not busy. They read names, sizes and dates and never
+  open a file, so they cannot find duplicates or near-identical screenshots —
+  the findings screen says so. Nothing is moved or removed.
+- **Optional notifications.** One summary a day at most, only when something
+  new turned up, and never containing a filename. Pause until tomorrow from
+  the menu or Settings.
+- **Launch at login**, as an ordinary per-user login item. Separate setting.
+- **Progress while moving.** A progress track with real counts and Cancel, an
+  indicator in the header, and anything left unfinished stays reachable with
+  what happened and what to do about it.
+- **Recovery from an interrupted move.** Scuttle settles what really moved on
+  the next start, and deletes nothing it is unsure of.
+
+### Changed
+
+- Expired drawer items are now removed while Scuttle is running, not only at
+  startup. How long things last is unchanged.
+
+### Fixed
+
+- Moving a folder that is in use no longer fails with "modified since Scuttle
+  found it". This is what made the Windows temp folder impossible to move.
+- A failed folder move could lose files. It no longer can.
+- Moving no longer freezes the window.
+- Nothing is ever overwritten by a move or a restore.
 - Moving, restoring, emptying the drawer and scanning no longer run over each
   other.
+
+### Known limitations
+
+- **None of the background behaviour has been tested on Windows.** It builds
+  and its tests pass in CI, but the tray icon, power checks, login item and
+  notifications were only tried by hand on macOS.
+- Background checks cannot find duplicates or near-identical screenshots.
+- Hiding the window does not give the memory back. Idle CPU is unmeasurable
+  either way; the webview stays resident.
+- Scuttle cannot tell a free machine from a merely quiet one, so expect it to
+  skip days.
+- On Windows the tray icon picks light or dark once at startup.
+- On macOS the dock icon disappears while the window is hidden.
 
 ## [0.1.0-alpha.1] - 2026-09-21
 
@@ -119,5 +136,6 @@ be undone.
   because it also holds logins, cookies and history. Firefox, which keeps its
   cache somewhere else, is covered.
 
-[Unreleased]: https://github.com/acltabontabon/scuttle/compare/v0.1.0-alpha.1...HEAD
+[Unreleased]: https://github.com/acltabontabon/scuttle/compare/v0.1.0-alpha.2...HEAD
+[0.1.0-alpha.2]: https://github.com/acltabontabon/scuttle/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/acltabontabon/scuttle/releases/tag/v0.1.0-alpha.1

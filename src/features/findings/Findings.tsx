@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 import { useStore } from '@/app/store'
 import { bytes, bytesParts, scatter } from '@/lib/format'
 import { Unavailable } from '@/components/Unavailable'
+import { CANCELLED_CAVEAT, GLANCE_CAVEAT } from '@/features/background/phrasing'
 import type { HiccupSummary } from '@/lib/types'
 import { Scuttle } from '@/visuals/Scuttle'
 import { Heap } from './Heap'
@@ -138,6 +139,15 @@ export function Findings() {
           )}
         </div>
       </header>
+
+      {/*
+          What produced these findings, when it was not an ordinary rummage.
+          Without this, an empty Copies pile after a background check reads as
+          "you have no duplicates" — when what actually happened is that
+          nothing opened a file to find out.
+        */}
+      {findings.kind === 'glance' && <p className={styles.caveat}>{GLANCE_CAVEAT}</p>}
+      {findings.cancelled && <p className={styles.caveat}>{CANCELLED_CAVEAT}</p>}
 
       <p className={styles.lede}>Choose a pile to see what&rsquo;s inside.</p>
 

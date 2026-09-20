@@ -5,7 +5,17 @@ import { App } from '@/app/App'
 import { StoreContext, type Store, type View } from '@/app/store'
 import type { Candidate, Findings, Settings } from '@/lib/types'
 import { isTerminal } from '@/features/move/progress'
-import { CANDIDATES, DRAWER, EMPTY_FINDINGS, FINDINGS, MOVE_SCENES, SETTINGS, SPACE } from './fixtures'
+import {
+  BACKGROUND_STATUS,
+  CANDIDATES,
+  DRAWER,
+  EMPTY_FINDINGS,
+  FINDINGS,
+  GLANCE_FINDINGS,
+  MOVE_SCENES,
+  SETTINGS,
+  SPACE,
+} from './fixtures'
 
 import styles from './Preview.module.css'
 
@@ -25,6 +35,12 @@ const SCENES: { id: string; label: string; view: View; findings: Findings }[] = 
   { id: 'home', label: 'Home', view: { name: 'home' }, findings: FINDINGS },
   { id: 'floor', label: 'The floor', view: { name: 'findings' }, findings: FINDINGS },
   { id: 'empty', label: 'Found nothing', view: { name: 'findings' }, findings: EMPTY_FINDINGS },
+  {
+    id: 'glance',
+    label: 'After a background check',
+    view: { name: 'findings' },
+    findings: GLANCE_FINDINGS,
+  },
   { id: 'ghosts', label: 'Ghosts pile', view: { name: 'pile', category: 'ghosts' }, findings: FINDINGS },
   { id: 'shots', label: 'Screenshots pile', view: { name: 'pile', category: 'screenshots' }, findings: FINDINGS },
   { id: 'drawer', label: 'Drawer', view: { name: 'drawer' }, findings: FINDINGS },
@@ -167,6 +183,10 @@ export function Preview() {
         setTheme(next.appearance)
         return true
       },
+      background: BACKGROUND_STATUS,
+      refreshBackground: noop,
+      pauseBackground: noop,
+      setLaunchAtLogin: noop,
       note: null,
       say: () => {},
       dismissNote: () => {},

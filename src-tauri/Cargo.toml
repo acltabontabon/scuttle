@@ -1,6 +1,6 @@
 [package]
 name = "scuttle"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 description = "Your computer leaves stuff everywhere. Scuttle finds it."
 authors = ["Scuttle contributors"]
 license = "Apache-2.0"
@@ -16,9 +16,18 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# No tray in this version: ambient rummaging is not implemented, and a tray
-# icon with nothing behind it is just a second place to close the app from.
-tauri = { version = "2", features = [] }
+# The tray has something behind it now: an opt-in, metadata-only background
+# check, off by default. Without `background_mode` enabled none of it runs, and
+# closing the window still quits.
+tauri = { version = "2", features = ["tray-icon"] }
+# One process per user: two Scuttles sharing one database and one drawer would
+# make the operation gate a lie, since it is per-process.
+tauri-plugin-single-instance = "2.4"
+# A per-user login item. No installer, no service, no elevation.
+tauri-plugin-autostart = "2.5"
+# Ordinary notification permission, asked for only when notifications are
+# turned on, and never required for anything else to work.
+tauri-plugin-notification = "2.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -43,8 +52,14 @@ plist = "1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.55"
-# Rename/delete through an open handle, and file identity.
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+# Rename/delete through an open handle, file identity, and — for background
+# checks — whether the machine is on mains power. `GetSystemPowerStatus` needs
+# no permission and no elevation.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Power",
+] }
 
 [dev-dependencies]
 tempfile = "3"

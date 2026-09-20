@@ -12,6 +12,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 import type {
+  BackgroundStatus,
   Candidate,
   DryRunReport,
   Findings,
@@ -37,6 +38,9 @@ export const EVENTS = {
   found: 'scuttle://found',
   done: 'scuttle://done',
   move: 'scuttle://move',
+  background: 'scuttle://background',
+  /** Something the tray asked the window to do. */
+  intent: 'scuttle://intent',
 } as const
 
 /** Scan events all carry the id of the scan they belong to. */
@@ -111,6 +115,44 @@ export const api = {
       },
     }),
   about: () => invoke<{ version: string; platform: string; quarantine_root: string }>('about'),
+
+  backgroundStatus: () => invoke<BackgroundStatus>('background_status'),
+
+  /**
+   * Pause until the start of tomorrow, or start again now.
+   *
+   * The offset goes with it because the core has no business deciding what day
+   * it is where the user lives.
+   */
+  pauseBackground: (paused: boolean) =>
+    invoke<BackgroundStatus>('pause_background', {
+      paused,
+      utcOffsetSecs: -new Date().getTimezoneOffset() * 60,
+    }),
+
+  /** Returns what the system actually did, not what was asked for. */
+  setLaunchAtLogin: (enabled: boolean) => invoke<boolean>('set_launch_at_login', { enabled }),
+
+  /** Asked for only when the user turns notifications on. */
+  requestNotificationPermission: () => invoke<boolean>('request_notification_permission'),
+
+  clearPendingReview: () => invoke<void>('clear_pending_review'),
+}
+
+/** Subscribe to background-mode status. */
+export async function watchBackground(
+  onStatus: (status: BackgroundStatus) => void,
+): Promise<UnlistenFn> {
+  return listen<BackgroundStatus>(EVENTS.background, ({ payload }) => onStatus(payload))
+}
+
+/** Things the tray menu asks the window to do. */
+export type Intent = 'rummage' | 'settings'
+
+export async function watchIntents(onIntent: (intent: Intent) => void): Promise<UnlistenFn> {
+  return listen<string>(EVENTS.intent, ({ payload }) => {
+    if (payload === 'rummage' || payload === 'settings') onIntent(payload)
+  })
 }
 
 /** Subscribe to a whole rummage. Returns a single unsubscribe function. */

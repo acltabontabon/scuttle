@@ -12,9 +12,10 @@ import {
 import { describeReport } from '@/features/move/phrasing'
 import { applySnapshot, isTerminal, seedJob } from '@/features/move/progress'
 import { bytes } from '@/lib/format'
-import { api, watchMoves, watchRummage } from '@/lib/ipc'
+import { api, watchBackground, watchIntents, watchMoves, watchRummage } from '@/lib/ipc'
 import {
   isScuttleError,
+  type BackgroundStatus,
   type Candidate,
   type Category,
   type Findings,
@@ -119,6 +120,19 @@ export interface Store {
   /** Reports whether the write actually landed. */
   updateSettings: (next: Settings) => Promise<boolean>
 
+  /**
+   * Where background mode stands, as the core reports it. Null until the
+   * first answer arrives.
+   *
+   * Kept apart from `settings` because they answer different questions: the
+   * settings are what the user asked for, and this is what the system
+   * actually allowed.
+   */
+  background: BackgroundStatus | null
+  refreshBackground: () => Promise<void>
+  pauseBackground: (paused: boolean) => Promise<void>
+  setLaunchAtLogin: (enabled: boolean) => Promise<void>
+
   note: Note | null
   say: (text: string, options?: { tone?: Note['tone']; action?: Note['action'] }) => void
   dismissNote: () => void
@@ -190,6 +204,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [drawer, setDrawer] = useState<QuarantineView | null>(null)
   const [space, setSpace] = useState<SpaceOverview | null>(null)
   const [settings, setSettings] = useState<Settings | null>(null)
+  const [background, setBackground] = useState<BackgroundStatus | null>(null)
+  /** The last background check already pointed at, so it is offered once. */
+  const handledReview = useRef<string | null>(null)
+
+  const go = useCallback<Store['go']>((next) => {
+    setDetail(null)
+    setView(next)
+  }, [])
+
   const [note, setNote] = useState<Note | null>(null)
   const [moveSnapshot, setMoveSnapshot] = useState<MoveSnapshot | null>(null)
   const [movePending, setMovePending] = useState(false)
@@ -339,6 +362,76 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [say],
   )
 
+  /**
+   * Take a status update, and act on it if it carries news.
+   *
+   * A background check that found something sets `pending_review`, and
+   * opening the window is the moment to point at it — but only from the home
+   * screen. Pulling somebody out of a pile they are halfway through reviewing
+   * would be worse than saying nothing at all. Either way it is offered once:
+   * the core is told the user has seen it, and `handled` stops a second
+   * status arriving before that lands from redirecting again.
+   */
+  const applyBackground = useCallback(
+    (status: BackgroundStatus | null) => {
+      setBackground(status)
+
+      const pending = status?.pending_review
+      if (!pending || handledReview.current === pending) return
+      handledReview.current = pending
+
+      void api.clearPendingReview().catch(() => undefined)
+      void refreshFindings().then(() => {
+        setDetail(null)
+        setView((current) => (current.name === 'home' ? { name: 'findings' } : current))
+      })
+    },
+    [refreshFindings],
+  )
+
+  const refreshBackground = useCallback(async () => {
+    try {
+      applyBackground(await api.backgroundStatus())
+    } catch {
+      // Background mode is an extra. Failing to read its status must never
+      // cost the user the rest of the application, and there is nothing here
+      // worth interrupting them about.
+      applyBackground(null)
+    }
+  }, [applyBackground])
+
+  const pauseBackground = useCallback<Store['pauseBackground']>(
+    async (paused) => {
+      try {
+        setBackground(await api.pauseBackground(paused))
+      } catch (error) {
+        say(readError(error), { tone: 'warn' })
+      }
+    },
+    [say],
+  )
+
+  const setLaunchAtLogin = useCallback<Store['setLaunchAtLogin']>(
+    async (enabled) => {
+      try {
+        // The answer is what the system did, not what was asked. A setting
+        // that claims to be on while the platform refused is worse than one
+        // that admits it could not.
+        const actual = await api.setLaunchAtLogin(enabled)
+        setSettings((previous) =>
+          previous ? { ...previous, launch_at_login: actual } : previous,
+        )
+        if (enabled && !actual) {
+          say('Your system would not set that up, so it is still off.', { tone: 'warn' })
+        }
+      } catch (error) {
+        say(readError(error), { tone: 'warn' })
+      }
+      await refreshBackground()
+    },
+    [refreshBackground, say],
+  )
+
   const restore = useCallback<Store['restore']>(
     async (id) => {
       try {
@@ -449,6 +542,58 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       document.removeEventListener('visibilitychange', onVisible)
     }
   }, [applyMove])
+
+  // The tray menu cannot navigate or start a scan itself; it says what it
+  // wants and this decides what that means, so there is one place that owns
+  // where the window goes.
+  useEffect(() => {
+    let dispose: (() => void) | undefined
+    let stopped = false
+    watchIntents((intent) => {
+      if (stopped) return
+      if (intent === 'settings') go({ name: 'settings' })
+      if (intent === 'rummage') {
+        go({ name: 'home' })
+        void rummage()
+      }
+    }).then((off) => {
+      if (stopped) off()
+      else dispose = off
+    })
+    return () => {
+      stopped = true
+      dispose?.()
+    }
+  }, [go, rummage])
+
+  // Background status, on the same arrangement as moves: one subscription,
+  // plus a catch-up whenever the window comes back. A window that was hidden
+  // missed every event sent while it was away, and polling for them would be
+  // exactly the cost this feature is supposed to avoid.
+  useEffect(() => {
+    let dispose: (() => void) | undefined
+    let stopped = false
+
+    watchBackground((status) => {
+      if (!stopped) applyBackground(status)
+    }).then((off) => {
+      if (stopped) off()
+      else {
+        dispose = off
+        void refreshBackground()
+      }
+    })
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refreshBackground()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      stopped = true
+      dispose?.()
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [applyBackground, refreshBackground])
 
   /**
    * Start a move. The interface answers the click at once — `pending` flips
@@ -648,11 +793,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [say],
   )
 
-  const go = useCallback<Store['go']>((next) => {
-    setDetail(null)
-    setView(next)
-  }, [])
-
   const move = useMemo(
     () => ({ snapshot: moveSnapshot, pending: movePending }),
     [moveSnapshot, movePending],
@@ -677,6 +817,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshSpace,
       settings,
       updateSettings,
+      background,
+      refreshBackground,
+      pauseBackground,
+      setLaunchAtLogin,
       note,
       say,
       dismissNote,
@@ -702,7 +846,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }),
     [
       view, go, scan, rummage, cancel, findings, refreshFindings, detail, drawer,
-      refreshDrawer, space, refreshSpace, settings, updateSettings, note, say,
+      refreshDrawer, space, refreshSpace, settings, updateSettings, background,
+      refreshBackground, pauseBackground, setLaunchAtLogin, note, say,
       dismissNote, move, moving, cancelMove, dismissMove, retryMove, reviewAgain,
       moveDetailsOpen, quarantine, quarantineGroup, quarantineConfident,
       quarantineAllConfident, quarantineMany, emptyDrawer, keep, ignore, restore,

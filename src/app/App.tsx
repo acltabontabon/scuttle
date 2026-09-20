@@ -8,6 +8,7 @@ import { Drawer } from '@/features/quarantine/Drawer'
 import { Rummage } from '@/features/rummage/Rummage'
 import { Settings } from '@/features/settings/Settings'
 import { Space } from '@/features/space/Space'
+import { platform } from '@/lib/platform'
 import { Mark } from '@/visuals/Mark'
 import { useStore, type View } from './store'
 
@@ -34,13 +35,6 @@ interface NavState {
   moving: boolean
 }
 
-/** Rough platform sniff, used only to leave room for the traffic lights. */
-function platform(): 'macos' | 'other' {
-  return typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent)
-    ? 'macos'
-    : 'other'
-}
-
 export function App() {
   const store = useStore()
   const { settings, findings, drawer, space, view, go, note, dismissNote, refreshDrawer, refreshSpace } =
@@ -58,6 +52,29 @@ export function App() {
     if (settings?.reduced_motion === true) root.setAttribute('data-motion', 'still')
     else root.removeAttribute('data-motion')
   }, [settings?.appearance, settings?.reduced_motion])
+
+  /*
+   * Stop the decorative loops while nobody is looking at them.
+   *
+   * With background mode on, closing the window hides it rather than
+   * destroying it, so the mascot would otherwise go on breathing behind the
+   * menu bar. Scheduling and scan coordination live in Rust and are not
+   * affected by this either way — this is only about not compositing frames
+   * nobody can see.
+   */
+  useEffect(() => {
+    const root = document.documentElement
+    const apply = () => {
+      if (document.visibilityState === 'hidden') root.setAttribute('data-window', 'hidden')
+      else root.removeAttribute('data-window')
+    }
+    apply()
+    document.addEventListener('visibilitychange', apply)
+    return () => {
+      document.removeEventListener('visibilitychange', apply)
+      root.removeAttribute('data-window')
+    }
+  }, [])
 
   // The drawer count is worth knowing without opening it; nothing else is.
   // Depending on `store` here would re-run this on every progress event,

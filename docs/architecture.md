@@ -235,6 +235,145 @@ Bounded by construction: large files are streamed rather than read into memory,
 image decoding is capped, directory measurement has an entry budget and admits
 when it was truncated, and the directory index has a ceiling.
 
+## Background mode
+
+Off by default. With `background_mode` off, none of this runs and closing the
+window quits, exactly as before.
+
+### Three settings, nested
+
+`background_mode` → `background_checks` → `background_notify`. Each needs the
+one before it, and `save_settings` enforces that server-side rather than
+trusting the interface: a check cannot happen if closing the window quits, and
+there is nothing to notify about if no checks happen. `launch_at_login` sits
+apart — staying in the menu bar is not permission to start with the machine.
+
+### Window lifecycle
+
+The window is **hidden, never closed**. That is the load-bearing decision:
+because the window still exists, `RunEvent::ExitRequested` never fires from a
+close, so Scuttle never has to call `prevent_exit` — and therefore ⌘Q, the
+tray's own Quit, logging out and shutting down all simply work. Nothing in the
+codebase prevents an exit.
+
+Hiding is conditional on `background_mode && tray_alive`. If the tray icon
+failed to build, closing quits as usual: a hidden window with no icon to
+return from would be a trap, and Settings says so rather than leaving the
+toggle looking like a promise.
+
+On macOS the activation policy follows the window — `Accessory` while hidden,
+`Regular` set *before* `show()` so the window comes to the front rather than
+appearing behind everything.
+
+`tauri-plugin-single-instance` keeps it to one process per user. Two would
+share one database and one drawer while each believed its own operation gate
+was the only one.
+
+### The scheduler
+
+One thread, asleep on a `Condvar` with a five-minute timeout. Pausing,
+switching the setting off, and quitting all wake it immediately rather than
+waiting out the interval. A tick that decides to do nothing costs a handful of
+integer comparisons.
+
+All the judgement is in `background::schedule::decide`, a pure function of the
+clock, the persisted state and what the machine reports — which is what makes
+the policy testable against a clock moved by hand. The gates run cheapest
+first, so the expensive signals (a subprocess on macOS) are consulted only
+once everything free has agreed: in practice a handful of times a day rather
+than twelve times an hour.
+
+Scheduling state lives in the `settings` table under `background`, so
+restarting does not earn a fresh check. A gap between ticks larger than
+`SLEEP_GAP` means the machine slept; the answer is to settle for fifteen
+minutes, not to catch up. There is no queue of missed checks.
+
+### What a check is allowed to do
+
+It goes through the ordinary `start_scan` path, so it takes the same operation
+gate, obeys the same ignore lists, and every candidate passes the same safety
+guard. Two differences:
+
+- **It reads no file contents.** `detectors::glance_set` is `default_set`
+  minus `duplicates` (BLAKE3) and `screenshots` (image decode) — the only two
+  detectors that open files. That is what makes it cheap enough to run
+  unattended, and it is also what makes it incomplete.
+- **It is bounded in time.** A watchdog sets the same flag the Stop button
+  does after ten minutes, so it unwinds through the ordinary cancellation path
+  and its partial results are saved *and labelled*.
+
+Because the results are partial, `scan_runs.kind` records `full` or `glance`,
+and the findings screen says which it is looking at. Without that, an empty
+Copies pile after a check reads as "you have no duplicates" when nothing
+opened a file to find out.
+
+### Yielding
+
+A background check yields to a person, and never the reverse. The rule lives
+in one place — `begin_operation_as(op, Priority)` and `start_scan_as` — rather
+than at each of the eight call sites, so no command can forget it. A user
+action finding the gate held by a check cancels it and waits up to 1.5 s;
+since a metadata-only scan tests its cancel flag on every 120 ms progress
+tick, that is tens of milliseconds in practice. If the wait runs out, the
+ordinary "Scuttle is busy" refusal is what appears, unchanged.
+
+Lock ordering is `running` → `gate`, consistently. The yielding half of
+`begin_operation_as` inspects the running scan, so `start_scan_as` — which
+already holds that lock — goes to `claim_gate` directly.
+
+### Drawer retention
+
+Expiry used to run once per launch, and `Drawer.tsx` said so. An application
+that stays in the menu bar starts far less often, so the same promise would
+quietly have become "after N days, eventually". The scheduler therefore sweeps
+on its tick as well, under the previously unused `Operation::Sweep`.
+
+This preserves the existing contract rather than changing it: an item still
+expires after exactly the days it was given, and only items the user placed in
+the drawer under a stated date are ever removed. With background mode off,
+behaviour is byte-for-byte what it was.
+
+Startup work is claimed once per process (`AppState::claim_startup`), so
+showing a hidden window is never mistaken for a launch that re-runs cleanup.
+
+### Cost when hidden
+
+Measured on an Apple Silicon Mac, macOS 27.0 (Darwin 27.0.0), 10 cores, on
+battery, **debug build** — a release build will differ. One window, a drawer
+of seven items, background mode and background checks both on. Sampled with
+`ps` every ten seconds.
+
+| | Hidden (60 samples, 10 min) | Visible (42 samples, 7 min) |
+|---|---|---|
+| Resident set | 114.8 MB, flat to ±0.1 MB | 116.2 MB at launch, settling to 86.3 MB |
+| CPU, idle | 0.00% on every sample | 32.7% peak during startup, 0.0% once settled |
+
+Two honest caveats. The two runs are separate processes with different
+histories, so the resident-set figures are not a controlled comparison and
+the difference between them should not be read as hiding costing *more*. And
+the display slept during part of the visible run, so its idle CPU figure
+understates a window somebody is actually using.
+
+What the numbers do support: **an idle Scuttle costs no measurable CPU in
+either state, and hiding the window does not give the memory back.** The
+webview stays resident; the saving is in frames not composited, not in pages
+returned. Scuttle does not market this as "zero impact".
+
+The scheduler itself is one thread asleep on a condition variable, waking
+twelve times an hour to compare a few integers. Over twenty minutes of ticks
+on this machine it ran zero checks — correctly, since the machine was on
+battery — which is the behaviour the conservative gates exist to produce.
+
+What was actually changed for this: scheduling and scan coordination are in
+Rust, outside the render loop entirely; the frontend adds no polling (the
+background status arrives as an event, with a catch-up on `visibilitychange`,
+the same arrangement moves already used); and `:root[data-window="hidden"]`
+pauses the looping decorative animations with `animation-play-state` so they
+resume where they stopped rather than snapping back.
+
+No architecture rewrite was undertaken to eliminate the webview, and none is
+proposed on this evidence.
+
 ## Frontend state
 
 A single React context over `useState`. The Rust core is the source of truth

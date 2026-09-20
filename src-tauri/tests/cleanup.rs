@@ -36,7 +36,12 @@ fn bench(world: World) -> Bench {
 
     let store = Arc::new(Store::in_memory().expect("store"));
     store
-        .begin_scan("scan", &ctx.options, NOW)
+        .begin_scan(
+            "scan",
+            scuttle_core::storage::ScanKind::Full,
+            &ctx.options,
+            NOW,
+        )
         .expect("begin scan");
     store
         .save_candidates("scan", &outcome.candidates)

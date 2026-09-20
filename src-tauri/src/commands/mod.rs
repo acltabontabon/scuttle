@@ -19,7 +19,7 @@ pub use moves::{
     FindingResult, FindingStatus, MovePhase, MoveReport, MoveRequest, MoveSink, MoveSnapshot,
     Refusal, Unit,
 };
-pub use state::{AppState, Operation, OperationGuard};
+pub use state::{AppState, Operation, OperationGuard, Priority};
 
 use std::path::PathBuf;
 
@@ -40,6 +40,8 @@ pub mod events {
     pub const DONE: &str = "scuttle://done";
     /// Progress of a move into the Drawer. One channel, for every job.
     pub const MOVE: &str = "scuttle://move";
+    /// Where background mode stands. Only sent when something changes it.
+    pub const BACKGROUND: &str = "scuttle://background";
 }
 
 // ---------------------------------------------------------------------------
@@ -77,6 +79,14 @@ pub struct Findings {
     pub hiccups: HiccupSummary,
     /// Present only when a rummage has completed at least once.
     pub has_rummaged: bool,
+    /// Whether these came from a rummage or from a background check.
+    ///
+    /// A background check reads no file contents, so it cannot have found
+    /// duplicates or near-identical screenshots. The screen says so rather
+    /// than letting their absence read as "there are none".
+    pub kind: crate::storage::ScanKind,
+    /// Whether the scan that produced these was stopped before it finished.
+    pub cancelled: bool,
 }
 
 /// Cap on how many items of a single pile cross the IPC boundary at once.
@@ -236,6 +246,8 @@ pub fn findings(state: State<'_, AppState>) -> Result<Findings> {
             files_seen: 0,
             hiccups: HiccupSummary::default(),
             has_rummaged: false,
+            kind: crate::storage::ScanKind::Full,
+            cancelled: false,
         });
     };
 
@@ -290,6 +302,8 @@ pub fn findings(state: State<'_, AppState>) -> Result<Findings> {
         hiccups: scan.hiccups.clone(),
         piles,
         has_rummaged: true,
+        kind: scan.kind,
+        cancelled: scan.cancelled,
     })
 }
 
@@ -789,13 +803,41 @@ pub fn settings(state: State<'_, AppState>) -> Result<Settings> {
 }
 
 #[tauri::command]
-pub fn save_settings(state: State<'_, AppState>, settings: Settings) -> Result<Settings> {
+pub fn save_settings(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    settings: Settings,
+) -> Result<Settings> {
     let mut settings = settings;
     // Retention is a fixed set of choices, not free input.
     if ![7, 14, 30].contains(&settings.quarantine_retention_days) {
         settings.quarantine_retention_days = 14;
     }
+
+    // Each of these depends on the one above it, and the dependency is
+    // enforced here rather than trusted to the interface. A check cannot
+    // happen if closing the window quits, and there is nothing to notify
+    // about if no checks happen — a toggle left on in either of those states
+    // would be a promise Scuttle cannot keep.
+    if !settings.background_mode {
+        settings.background_checks = false;
+    }
+    if !settings.background_checks {
+        settings.background_notify = false;
+    }
+
+    let previous = state.store().settings()?;
     state.store().save_settings(&settings)?;
+
+    // The scheduler's existence follows the setting rather than recording
+    // what was true at launch.
+    if previous.background_mode != settings.background_mode {
+        state.sync_scheduler(&app);
+    }
+    state.nudge_scheduler();
+    crate::tray::refresh(&app);
+    emit_background(&app, state.inner());
+
     Ok(settings)
 }
 
@@ -879,8 +921,204 @@ pub(crate) fn emit_done(app: &tauri::AppHandle, summary: &ScanSummary) {
     );
 }
 
+/// Tell the window where background mode stands.
+///
+/// Emitted whenever something changes it — a check finishing, a pause, the
+/// tray being used. Events are not replayed, so the window also asks on
+/// becoming visible; this is the same arrangement moves already use.
+pub(crate) fn emit_background<R: tauri::Runtime>(app: &tauri::AppHandle<R>, state: &AppState) {
+    if let Ok(status) = background_status_of(state, app) {
+        let _ = app.emit(events::BACKGROUND, status);
+    }
+}
+
 pub(crate) fn now_unix() -> i64 {
     chrono::Utc::now().timestamp()
+}
+
+// ---------------------------------------------------------------------------
+// Background mode
+// ---------------------------------------------------------------------------
+
+/// Everything the interface needs to describe background mode honestly,
+/// including the parts where the answer is "the system said no".
+#[derive(Debug, Clone, Serialize)]
+pub struct BackgroundStatus {
+    /// Whether the tray icon actually exists. When this is false the setting
+    /// may be on and yet closing the window still quits, and the interface
+    /// says so rather than letting the setting read as a promise.
+    pub tray_alive: bool,
+    pub mode: bool,
+    pub checks: bool,
+    pub notify: bool,
+    /// Whether the system is currently allowing notifications. `None` when it
+    /// has not been asked.
+    pub notifications_permitted: Option<bool>,
+    /// What the operating system reports, not what was stored.
+    pub launch_at_login: bool,
+    /// Whether launch at login could be read or changed at all here.
+    pub launch_at_login_available: bool,
+    pub last_check_unix: i64,
+    pub paused_until_unix: i64,
+    /// The core's own clock, sent so the window never has to consult its own.
+    ///
+    /// Everything the interface says about background mode — whether a pause
+    /// has expired, how long ago the last check was — is a comparison against
+    /// a timestamp the core produced. Comparing it against a second clock
+    /// would mean two answers that can disagree, and a render that is not a
+    /// pure function of what it was given.
+    pub now_unix: i64,
+    /// A scan the user has not looked at yet.
+    pub pending_review: Option<String>,
+    /// Why nothing is happening at the moment, phrased for a person.
+    pub waiting_because: String,
+}
+
+fn background_status_of<R: tauri::Runtime>(
+    state: &AppState,
+    app: &tauri::AppHandle<R>,
+) -> Result<BackgroundStatus> {
+    let settings = state.store().settings()?;
+    let persisted = state.store().background_state()?;
+
+    let (launch_at_login, launch_at_login_available) = match login_item_enabled(app) {
+        Some(on) => (on, true),
+        None => (false, false),
+    };
+
+    let moment = crate::background::Moment {
+        launched_unix: state.launched_unix(),
+        window_visible: state.window_visible(),
+        busy: state.current_operation().is_some(),
+        has_roots: !state.resolved_roots().is_empty(),
+    };
+    // Asking why, not deciding whether: the conditions are not read here,
+    // because this runs whenever the window asks and must stay cheap.
+    let waiting_because = match crate::background::schedule::decide(
+        now_unix(),
+        &settings,
+        &persisted,
+        &moment,
+        Default::default,
+    ) {
+        crate::background::Decision::Skip(reason) => reason.say(),
+        _ => "Ready to look when the machine is free.".into(),
+    };
+
+    Ok(BackgroundStatus {
+        tray_alive: state.tray_alive(),
+        mode: settings.background_mode,
+        checks: settings.background_checks,
+        notify: settings.background_notify,
+        notifications_permitted: notifications_permitted(app),
+        launch_at_login,
+        launch_at_login_available,
+        last_check_unix: persisted.last_completed_unix,
+        paused_until_unix: persisted.paused_until_unix,
+        now_unix: now_unix(),
+        pending_review: persisted.pending_review,
+        waiting_because,
+    })
+}
+
+fn notifications_permitted<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<bool> {
+    use tauri_plugin_notification::NotificationExt;
+    app.notification()
+        .permission_state()
+        .ok()
+        .map(|state| matches!(state, tauri_plugin_notification::PermissionState::Granted))
+}
+
+fn login_item_enabled<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<bool> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().ok()
+}
+
+/// Where background mode stands. Cheap enough to call on every window show.
+#[tauri::command]
+pub fn background_status(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<BackgroundStatus> {
+    background_status_of(state.inner(), &app)
+}
+
+/// Stop checking until the start of tomorrow, or start again now.
+///
+/// The offset comes from the window because the core has no business
+/// deciding what day it is where the user lives.
+#[tauri::command]
+pub fn pause_background(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    paused: bool,
+    utc_offset_secs: i32,
+) -> Result<BackgroundStatus> {
+    let mut persisted = state.store().background_state()?;
+    persisted.paused_until_unix = if paused {
+        crate::background::schedule::tomorrow_unix(now_unix(), utc_offset_secs)
+    } else {
+        0
+    };
+    state.store().save_background_state(&persisted)?;
+    state.nudge_scheduler();
+    background_status_of(state.inner(), &app)
+}
+
+/// Turn the login item on or off, and report what the system actually did.
+///
+/// The returned value is read back from the platform rather than assumed: a
+/// setting that says "on" when the operating system disagrees is worse than
+/// one that admits it could not.
+#[tauri::command]
+pub fn set_launch_at_login(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<bool> {
+    use tauri_plugin_autostart::ManagerExt;
+    let manager = app.autolaunch();
+    let attempt = if enabled {
+        manager.enable()
+    } else {
+        manager.disable()
+    };
+    if let Err(err) = attempt {
+        tracing::warn!(error = %err, "the system would not change the login item");
+    }
+
+    let actual = manager.is_enabled().unwrap_or(false);
+    let mut settings = state.store().settings()?;
+    settings.launch_at_login = actual;
+    state.store().save_settings(&settings)?;
+    Ok(actual)
+}
+
+/// Ask for notification permission, at the moment the user turns them on.
+///
+/// Returns whether they are allowed. A refusal is not an error: everything
+/// else about background mode keeps working, and the interface says what it
+/// can and cannot do.
+#[tauri::command]
+pub async fn request_notification_permission(app: tauri::AppHandle) -> bool {
+    use tauri_plugin_notification::NotificationExt;
+    let notifier = app.notification();
+    if let Ok(tauri_plugin_notification::PermissionState::Granted) = notifier.permission_state() {
+        return true;
+    }
+    matches!(
+        notifier.request_permission(),
+        Ok(tauri_plugin_notification::PermissionState::Granted)
+    )
+}
+
+/// The user has seen what the last background check turned up.
+#[tauri::command]
+pub fn clear_pending_review(state: State<'_, AppState>) -> Result<()> {
+    let mut persisted = state.store().background_state()?;
+    persisted.pending_review = None;
+    state.store().save_background_state(&persisted)?;
+    Ok(())
 }
 
 /// Bytes, phrased for people. Exposed so the frontend does not reimplement the
@@ -922,13 +1160,28 @@ pub fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static
         dry_run,
         about,
         format_bytes,
+        background_status,
+        pause_background,
+        set_launch_at_login,
+        request_notification_permission,
+        clear_pending_review,
     ]
 }
 
 /// Set up state once the app has a handle to its own data directory.
+///
+/// Everything here belongs to the *process*, not to the window. With a tray,
+/// a window can be hidden and shown many times in one run, and none of those
+/// is a launch: reopening Scuttle must never be a fresh startup that quietly
+/// expires part of someone's drawer.
 pub fn init(app: &tauri::App) -> std::result::Result<(), Box<dyn std::error::Error>> {
     let platform = crate::platform::current();
     let state = AppState::new(platform)?;
+
+    if !state.claim_startup() {
+        app.manage(state);
+        return Ok(());
+    }
 
     // Settle anything a crash left half-done *before* anything is allowed to
     // expire: an interrupted move must be understood, not swept.

@@ -85,10 +85,70 @@ Logs go to stderr. Scuttle does not write a log file.
 
 ## Clipboard, notifications, background activity
 
-None of these. Scuttle does not read the clipboard, does not send
-notifications, and does nothing when you are not looking at it. There is no
-background scanning in this version. If ambient rummaging is added later it
-will be opt-in and it will not nag.
+Scuttle does not read the clipboard.
+
+Everything below is **off by default**. With all of it off, Scuttle behaves
+exactly as it always has: closing the window quits it, and it does nothing at
+all when you are not looking at it.
+
+### Staying in the menu bar
+
+"Keep Scuttle in the menu bar" (on Windows, "in the system tray") makes closing
+the window hide it instead of quitting. Quitting — from the icon's own menu,
+with ⌘Q, or by logging out or shutting down — always quits, and Scuttle never
+delays a shutdown. Quitting stops its background work with it: there is no
+helper process, no service and no daemon.
+
+### Background checks
+
+"Check occasionally in the background" is a separate setting, and needs the
+first one. When it is on, Scuttle looks around at most once a day.
+
+**What a background check looks at is deliberately less than a rummage.** It
+uses the same folders, the same ignore lists and the same safety rules, but it
+reads no file contents at all — so it cannot find duplicates or near-identical
+screenshots, both of which need hashing or decoding. The findings screen says
+so, because an empty pile should not be mistaken for a pile that was searched.
+
+It never moves, deletes or selects anything. Discovery and modification stay
+separate; a check that found something has found something, and that is all.
+
+### How Scuttle decides it is a reasonable moment
+
+It defers when the window is open, when Scuttle is already busy, when the
+machine is on battery, in a low-power or battery-saving mode, reporting
+thermal pressure, or (on macOS) carrying a high load average. Those come from
+`pmset` and `GetSystemPowerStatus`, which need no permission and no elevation.
+
+**This is not idle detection, and Scuttle does not claim it is.** A quiet
+machine on mains power is not proof that you have stepped away. Aggregate idle
+time is published without a permission prompt on both platforms, and Scuttle
+deliberately does not collect it, because no honest claim can be built on a
+number that cannot tell a reader from an empty chair. Every signal here is a
+reason to *defer*, never evidence about you.
+
+Scuttle does not watch the filesystem, keep a queue of missed checks, retry a
+skipped one, prevent the machine sleeping, wake it, or run a check straight
+after it wakes.
+
+### Notifications
+
+Off by default, and a third separate setting. Permission is asked for at the
+moment you turn it on, and refusing it leaves everything else working.
+
+At most one summary a day, only when something genuinely new has turned up,
+and only ever counts by category — "3 old installers worth a look". Filenames
+and paths are never in it, because a summary can appear on a lock screen.
+These are ordinary system notifications, so Focus and Do Not Disturb apply
+normally; Scuttle has no pop-up of its own.
+
+### Permissions this adds
+
+None beyond ordinary notification permission, and only if you ask for
+notifications. Specifically, Scuttle does not request Accessibility, Input
+Monitoring or Screen Recording, installs no keyboard or mouse hooks, reads no
+window titles, records no screen, and does not enumerate running applications
+to infer what you are doing. Background mode needs no administrator rights.
 
 ## Permissions
 

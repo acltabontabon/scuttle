@@ -157,6 +157,8 @@ next time Scuttle starts.
   just excluded from results — they're never walked at all.
 - It won't show you a health score, a fake urgency counter, or a percentage
   with three decimal places.
+- It won't sit in your menu bar unless you ask it to, and it won't scan behind
+  your back. Both are separate settings, both off by default.
 
 ## Two ideas that do most of the work
 
@@ -172,6 +174,41 @@ live filesystem first: does the path still exist, is it still the same size and
 shape, does it pass through a symlink, is it protected, is it inside the area
 you asked Scuttle to look at? If anything moved between the scan and the
 action, Scuttle refuses and asks you to rummage again.
+
+## Staying in the menu bar
+
+**Off by default.** Left alone, Scuttle quits when you close the window and
+does nothing at all when you are not looking at it.
+
+If you turn it on, closing the window hides it behind a menu bar icon (system
+tray on Windows) instead of quitting. The icon's menu opens Scuttle, starts a
+rummage, says when it last looked, and quits. ⌘Q, logging out and shutting
+down all still quit properly — Scuttle never holds up a shutdown, and quitting
+it stops its background work. No helper, no service, no daemon.
+
+A second setting, also off by default, lets it check occasionally on its own —
+at most once a day, and only when the machine looks able to spare it: on mains
+power, not saving battery, not running hot, not already busy, and not while
+you have the window open.
+
+**A background check reads names, sizes and dates, and never opens a file.**
+That makes it cheap, and it also makes it partial: it cannot find duplicates
+or near-identical screenshots, because those need reading the files. Scuttle
+says so on the findings screen rather than letting an empty pile read as good
+news. It moves nothing, deletes nothing and selects nothing.
+
+This is not idle detection and Scuttle does not pretend otherwise. A quiet
+machine on mains power is a reasonable moment to try, not evidence that you
+have stepped away. Scuttle asks for no Accessibility, Input Monitoring or
+Screen Recording permission, watches no input, and reads no window titles.
+
+Notifications are a third setting, off by default. At most one a day, only
+when something new turned up, and never containing a filename — a summary can
+end up on a lock screen. "Launch at login" is separate again, and is an
+ordinary per-user login item with no installer and no administrator rights.
+
+Hiding the window is not free: the webview keeps its memory. See
+[docs/architecture.md](docs/architecture.md) for what that actually costs.
 
 ## It stays on your machine
 

@@ -37,6 +37,65 @@ pub fn default_set(options: &ScanOptions) -> Vec<Box<dyn Detector>> {
     set
 }
 
+/// The detectors a background check runs: everything that works from names,
+/// sizes, dates and what the platform already publishes.
+///
+/// Exactly two detectors read file contents — `duplicates` hashes them and
+/// `screenshots` decodes them (see `docs/privacy.md`) — and both are left out
+/// here. That is what makes a check cheap enough to run unattended, and it is
+/// also what makes it incomplete: a background check cannot find duplicates or
+/// near-identical screenshots, and the interface says so rather than letting
+/// the absence read as "there are none".
+pub fn glance_set(options: &ScanOptions) -> Vec<Box<dyn Detector>> {
+    let mut set: Vec<Box<dyn Detector>> = vec![
+        Box::new(ghosts::GhostDetector::new()),
+        Box::new(installers::InstallerDetector::new()),
+        Box::new(caches::CacheDetector::new()),
+        Box::new(heavy::HeavyStrayDetector::new()),
+    ];
+    if options.include_developer_debris {
+        set.push(Box::new(devdebris::DeveloperDebrisDetector::new()));
+    }
+    set
+}
+
+#[cfg(test)]
+mod set_tests {
+    use super::*;
+
+    #[test]
+    fn a_background_check_never_reads_a_file() {
+        // The two detectors that open files are the two that must not be in
+        // the unattended set. Naming them here means adding a third
+        // content-reading detector without thinking about this list will
+        // leave the test passing for the wrong reason — so the assertion is
+        // on the whole membership, not on an absence.
+        let options = ScanOptions {
+            include_developer_debris: true,
+            ..Default::default()
+        };
+        let ids: Vec<&str> = glance_set(&options).iter().map(|d| d.id()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "ghosts",
+                "installers",
+                "caches",
+                "heavy",
+                "developer_debris"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_rummage_still_does_everything() {
+        let options = ScanOptions::default();
+        let ids: Vec<&str> = default_set(&options).iter().map(|d| d.id()).collect();
+        assert!(ids.contains(&"duplicates"));
+        assert!(ids.contains(&"screenshots"));
+    }
+}
+
 /// Naming helpers shared by several detectors.
 pub mod naming {
     /// Reduce an installer or download file name to the product it installs.

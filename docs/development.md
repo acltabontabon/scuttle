@@ -147,6 +147,24 @@ src-tauri/src/           Rust
   storage/               SQLite behind a repository
   platform/              macOS, Windows, and the fixture platform
   space/                 the storage explanation
+  background/            the optional scheduler: when to look, what to say
+  tray.rs                the menu bar / system tray icon and its menu
+  window.rs              show, hide, quit
 
 src-tauri/tests/         end-to-end, over fixture filesystems
 ```
+
+Background mode has one rule worth knowing before touching it: all the
+judgement about *when* to look lives in `background::schedule::decide`, a pure
+function of the clock, the persisted state and what the machine reports. The
+thread does nothing but call it and act on the answer. Anything that needs
+testing against time belongs in there, not in the thread.
+
+The tray glyphs under `src-tauri/icons/tray/` are generated and committed:
+
+```
+node scripts/tray-icons.mjs
+```
+
+It needs no dependency beyond Node, and the build never runs it — the PNGs in
+the repository are what ship.

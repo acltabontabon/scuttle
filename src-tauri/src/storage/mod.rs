@@ -44,6 +44,25 @@ pub struct Settings {
     /// `None` follows the operating system.
     pub reduced_motion: Option<bool>,
     pub has_rummaged_before: bool,
+
+    // ---- staying in the menu bar / system tray -------------------------
+    //
+    // Each of these three depends on the one above it, and `save_settings`
+    // enforces that rather than trusting the caller: a toggle that promises
+    // something the app cannot deliver is worse than no toggle.
+    /// Closing the window leaves Scuttle running behind its tray icon.
+    pub background_mode: bool,
+    /// Look around occasionally, on its own. Needs `background_mode`.
+    pub background_checks: bool,
+    /// Say when a background check turned something new up. Needs
+    /// `background_checks`.
+    pub background_notify: bool,
+    /// Start at login, through the platform's own per-user mechanism. This is
+    /// a mirror for the interface; the truth is whatever the OS reports.
+    pub launch_at_login: bool,
+    /// Whether the one-off "Scuttle stays in the menu bar now" note has been
+    /// shown. Explaining it once is the point.
+    pub background_intro_seen: bool,
 }
 
 impl Default for Settings {
@@ -56,8 +75,42 @@ impl Default for Settings {
             appearance: "system".into(),
             reduced_motion: None,
             has_rummaged_before: false,
+            background_mode: false,
+            background_checks: false,
+            background_notify: false,
+            launch_at_login: false,
+            background_intro_seen: false,
         }
     }
+}
+
+/// What the background scheduler needs to remember between ticks — and
+/// between runs, so that restarting Scuttle does not earn it a fresh check.
+///
+/// Deliberately not part of [`Settings`]: none of it is a preference, and it
+/// changes far more often than anything the user chose.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BackgroundState {
+    /// The last check that ran to completion without being cancelled. The
+    /// once-a-day gate is measured from here.
+    pub last_completed_unix: i64,
+    /// The last check that started, however it ended.
+    pub last_attempt_unix: i64,
+    /// The last time a summary was sent, for the notification cooldown.
+    pub last_notified_unix: i64,
+    /// "Pause until tomorrow", persisted so it survives a restart.
+    pub paused_until_unix: i64,
+    /// When the scheduler last woke. A gap much larger than the tick interval
+    /// means the machine slept, which is a reason to settle rather than to
+    /// catch up.
+    pub last_tick_unix: i64,
+    /// When the machine was last noticed to have woken. Checks stay quiet for
+    /// a while after this — long enough that waking a laptop is never followed
+    /// shortly by a scan.
+    pub woke_unix: i64,
+    /// The scan id of a completed check the user has not looked at yet.
+    pub pending_review: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,10 +215,46 @@ fn one() -> u64 {
     1
 }
 
+/// Who asked for a scan, and therefore how much it was allowed to do.
+///
+/// A [`ScanKind::Glance`] never opens a file: it runs the detectors that work
+/// from names, sizes and dates, and leaves duplicate hashing and screenshot
+/// decoding to a rummage the user started. That makes it cheap enough to run
+/// unattended, and it also makes it incomplete — which is why this is stored
+/// rather than inferred.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScanKind {
+    /// A rummage someone asked for.
+    Full,
+    /// A background check.
+    Glance,
+}
+
+impl ScanKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ScanKind::Full => "full",
+            ScanKind::Glance => "glance",
+        }
+    }
+
+    /// Anything unrecognised is treated as a rummage: over-reporting how
+    /// thorough a scan was is the dangerous direction, so an unknown value
+    /// from a newer version should not silently become "glance".
+    pub fn parse(raw: &str) -> ScanKind {
+        match raw {
+            "glance" => ScanKind::Glance,
+            _ => ScanKind::Full,
+        }
+    }
+}
+
 /// A summary of a past rummage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanRecord {
     pub id: String,
+    pub kind: ScanKind,
     pub started_unix: i64,
     pub finished_unix: Option<i64>,
     pub roots: Vec<PathBuf>,
@@ -240,14 +329,16 @@ impl Store {
     pub fn begin_scan(
         &self,
         scan_id: &str,
+        kind: ScanKind,
         options: &ScanOptions,
         started_unix: i64,
     ) -> Result<()> {
         let conn = self.lock();
         conn.execute(
-            "INSERT INTO scan_runs (id, started_unix, roots) VALUES (?1, ?2, ?3)",
+            "INSERT INTO scan_runs (id, kind, started_unix, roots) VALUES (?1, ?2, ?3, ?4)",
             params![
                 scan_id,
+                kind.as_str(),
                 started_unix,
                 serde_json::to_string(&options.roots)?
             ],
@@ -283,13 +374,15 @@ impl Store {
         let record = conn
             .query_row(
                 "SELECT id, started_unix, finished_unix, roots, files_seen, bytes_seen,
-                        candidates_found, reclaimable_bytes, duration_ms, cancelled, hiccups
+                        candidates_found, reclaimable_bytes, duration_ms, cancelled, hiccups,
+                        kind
                  FROM scan_runs WHERE finished_unix IS NOT NULL
                  ORDER BY started_unix DESC LIMIT 1",
                 [],
                 |row| {
                     Ok(ScanRecord {
                         id: row.get(0)?,
+                        kind: ScanKind::parse(&row.get::<_, String>(11)?),
                         started_unix: row.get(1)?,
                         finished_unix: row.get(2)?,
                         roots: serde_json::from_str(&row.get::<_, String>(3)?).unwrap_or_default(),
@@ -643,6 +736,91 @@ impl Store {
         )?;
         Ok(())
     }
+
+    /// Where everything currently in the drawer came from.
+    ///
+    /// Used to keep a background check from announcing something the user has
+    /// already decided about and put away.
+    pub fn quarantined_paths(&self) -> Result<Vec<PathBuf>> {
+        let conn = self.lock();
+        let mut stmt =
+            conn.prepare("SELECT original_path FROM quarantine_items WHERE status = 'held'")?;
+        let rows = stmt.query_map([], |row| Ok(PathBuf::from(row.get::<_, String>(0)?)))?;
+        Ok(rows.filter_map(std::result::Result::ok).collect())
+    }
+
+    // ---- background scheduling ------------------------------------------
+
+    /// Reads back as `Default` if it is missing or unreadable, which means a
+    /// corrupt row costs at most one skipped day, never a burst of checks.
+    pub fn background_state(&self) -> Result<BackgroundState> {
+        let conn = self.lock();
+        let raw: Option<String> = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'background'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(raw
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default())
+    }
+
+    pub fn save_background_state(&self, state: &BackgroundState) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('background', ?1)",
+            params![serde_json::to_string(state)?],
+        )?;
+        Ok(())
+    }
+
+    /// Which of these keys Scuttle has not mentioned before.
+    ///
+    /// Reading and writing are separate on purpose: a check that ends badly,
+    /// or is not worth mentioning, must not burn the keys it saw. Only
+    /// [`Store::remember_notified`] does that, and only once something has
+    /// actually been said.
+    pub fn unseen_notices(&self, keys: &[String]) -> Result<Vec<String>> {
+        let conn = self.lock();
+        let mut stmt = conn.prepare("SELECT 1 FROM background_seen WHERE key = ?1")?;
+        let mut fresh = Vec::new();
+        for key in keys {
+            let known = stmt
+                .query_row(params![key], |_| Ok(()))
+                .optional()?
+                .is_some();
+            if !known {
+                fresh.push(key.clone());
+            }
+        }
+        Ok(fresh)
+    }
+
+    pub fn remember_notified(&self, keys: &[String], now_unix: i64) -> Result<()> {
+        let mut conn = self.lock();
+        let tx = conn.transaction()?;
+        for key in keys {
+            tx.execute(
+                "INSERT OR REPLACE INTO background_seen (key, seen_unix) VALUES (?1, ?2)",
+                params![key, now_unix],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Forget notices older than `older_than_unix`, so the table does not
+    /// grow without bound. A file that comes back after six months is worth
+    /// mentioning again.
+    pub fn prune_notices(&self, older_than_unix: i64) -> Result<usize> {
+        let conn = self.lock();
+        Ok(conn.execute(
+            "DELETE FROM background_seen WHERE seen_unix < ?1",
+            params![older_than_unix],
+        )?)
+    }
 }
 
 // ---- row mapping --------------------------------------------------------
@@ -836,6 +1014,7 @@ mod tests {
         store
             .begin_scan(
                 "s1",
+                ScanKind::Full,
                 &ScanOptions {
                     roots: vec!["/tmp".into()],
                     ..Default::default()
@@ -1081,7 +1260,12 @@ mod tests {
         let store = Store::in_memory().unwrap();
         for i in 0..5 {
             store
-                .begin_scan(&format!("s{i}"), &ScanOptions::default(), i as i64 * 100)
+                .begin_scan(
+                    &format!("s{i}"),
+                    ScanKind::Full,
+                    &ScanOptions::default(),
+                    i as i64 * 100,
+                )
                 .unwrap();
         }
         store.prune_scans(2).unwrap();
@@ -1096,7 +1280,7 @@ mod tests {
     fn the_latest_scan_ignores_ones_that_never_finished() {
         let store = Store::in_memory().unwrap();
         store
-            .begin_scan("done", &ScanOptions::default(), 100)
+            .begin_scan("done", ScanKind::Full, &ScanOptions::default(), 100)
             .unwrap();
         store
             .finish_scan(
@@ -1117,7 +1301,7 @@ mod tests {
             )
             .unwrap();
         store
-            .begin_scan("abandoned", &ScanOptions::default(), 300)
+            .begin_scan("abandoned", ScanKind::Full, &ScanOptions::default(), 300)
             .unwrap();
 
         let latest = store.latest_scan().unwrap().unwrap();
@@ -1131,7 +1315,9 @@ mod tests {
         // findings screen reported a clean sweep even when a whole home
         // folder had been refused. A partial scan has to be able to say so.
         let store = Store::in_memory().unwrap();
-        store.begin_scan("s", &ScanOptions::default(), 100).unwrap();
+        store
+            .begin_scan("s", ScanKind::Full, &ScanOptions::default(), 100)
+            .unwrap();
         store
             .finish_scan(
                 &ScanSummary {

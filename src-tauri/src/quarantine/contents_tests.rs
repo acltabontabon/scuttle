@@ -19,6 +19,7 @@ use crate::model::*;
 use crate::safety::{Bidding, ProtectedPaths};
 use crate::scanning::snapshot::{self, SnapshotPolicy};
 use crate::scanning::ScanOptions;
+use crate::storage::ScanKind;
 use crate::storage::{journal, SnapshotEntry, SnapshotState};
 
 struct World {
@@ -79,7 +80,9 @@ fn world_on(drawer: Option<PathBuf>, files: &[(&str, &str)]) -> World {
         group: vec![],
         fingerprint,
     };
-    store.begin_scan("s1", &ScanOptions::default(), 0).unwrap();
+    store
+        .begin_scan("s1", ScanKind::Full, &ScanOptions::default(), 0)
+        .unwrap();
     store
         .save_candidates("s1", std::slice::from_ref(&candidate))
         .unwrap();

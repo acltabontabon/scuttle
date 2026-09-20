@@ -248,7 +248,14 @@ mod tests {
 
     fn store_with(candidates: &[CleanupCandidate]) -> Store {
         let store = Store::in_memory().unwrap();
-        store.begin_scan("s1", &ScanOptions::default(), 0).unwrap();
+        store
+            .begin_scan(
+                "s1",
+                crate::storage::ScanKind::Full,
+                &ScanOptions::default(),
+                0,
+            )
+            .unwrap();
         store.save_candidates("s1", candidates).unwrap();
         store
             .finish_scan(

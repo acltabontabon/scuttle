@@ -150,6 +150,26 @@ pub const MIGRATIONS: &[&str] = &[
     ) WITHOUT ROWID;
     CREATE INDEX drawer_entries_state ON drawer_entries(record_id, state);
     "#,
+    // 3 — background checks.
+    //
+    // `scan_runs.kind` separates a rummage the user started from a background
+    // check, which reads no file contents and so cannot find duplicates or
+    // near-identical screenshots. The findings screen needs to know which it
+    // is looking at, because a partial look must never be reported as a whole
+    // one. Existing rows are rummages, which is what the default says.
+    //
+    // `background_seen` is what stops Scuttle mentioning the same thing twice.
+    // It holds a hash of category and path — never a path — and rows are
+    // pruned by age.
+    r#"
+    ALTER TABLE scan_runs ADD COLUMN kind TEXT NOT NULL DEFAULT 'full';
+
+    CREATE TABLE background_seen (
+        key       TEXT PRIMARY KEY,
+        seen_unix INTEGER NOT NULL
+    ) WITHOUT ROWID;
+    CREATE INDEX background_seen_age ON background_seen(seen_unix);
+    "#,
 ];
 
 /// Bring a connection up to the current schema.
@@ -210,6 +230,7 @@ mod tests {
             "drawer_entries",
             "cleanup_history",
             "settings",
+            "background_seen",
         ] {
             let count: u32 = conn
                 .query_row(
@@ -270,5 +291,29 @@ mod tests {
             )
             .unwrap();
         assert_eq!((mode.as_str(), count, attention), ("whole", 1, 0));
+    }
+
+    #[test]
+    fn scans_from_before_background_checks_are_still_rummages() {
+        // Anything recorded before there was such a thing as a background
+        // check was a rummage the user started, and must keep being reported
+        // as one.
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
+        conn.execute_batch(MIGRATIONS[1]).unwrap();
+        conn.execute_batch("PRAGMA user_version = 2").unwrap();
+        conn.execute_batch(
+            "INSERT INTO scan_runs (id, started_unix, roots) VALUES ('old', 1, '[]');",
+        )
+        .unwrap();
+
+        apply(&mut conn).unwrap();
+
+        let kind: String = conn
+            .query_row("SELECT kind FROM scan_runs WHERE id='old'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(kind, "full");
     }
 }

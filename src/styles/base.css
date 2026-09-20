@@ -118,6 +118,28 @@ button {
   transition-duration: 0.01ms !important;
 }
 
+/*
+ * A hidden window.
+ *
+ * With background mode on, the window is hidden rather than closed, so the
+ * webview is still alive behind the menu bar. Browsers throttle timers and
+ * `requestAnimationFrame` for a hidden page, but a running CSS animation can
+ * still be composited, so the looping decorative ones are paused outright.
+ *
+ * `animation-play-state` rather than `animation: none`: pausing holds each
+ * animation where it stopped, so showing the window again resumes rather than
+ * snapping every element back to its first frame.
+ *
+ * This is a small saving, honestly small. It does not make a hidden window
+ * free — the webview keeps its memory either way, and the measurements in
+ * docs/architecture.md say what that costs.
+ */
+:root[data-window="hidden"] *,
+:root[data-window="hidden"] *::before,
+:root[data-window="hidden"] *::after {
+  animation-play-state: paused !important;
+}
+
 /* Scrollbars, made quiet. */
 ::-webkit-scrollbar {
   width: 10px;

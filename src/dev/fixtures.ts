@@ -12,6 +12,7 @@
  */
 
 import type {
+  BackgroundStatus,
   Candidate,
   Evidence,
   Findings,
@@ -290,6 +291,20 @@ export const FINDINGS: Findings = {
   files_seen: 184_233,
   hiccups: { permission_denied: 12, vanished: 3, unreadable: 0, loops_avoided: 0 },
   has_rummaged: true,
+  kind: 'full',
+  cancelled: false,
+}
+
+/** The same floor, but after a background check rather than a rummage. */
+export const GLANCE_FINDINGS: Findings = {
+  ...FINDINGS,
+  kind: 'glance',
+  // A background check reads no file contents, so these two piles cannot be
+  // there. The fixture has to agree, or the preview shows a screen the
+  // application can never produce.
+  piles: FINDINGS.piles.filter(
+    (pile) => pile.category !== 'copies' && pile.category !== 'screenshots',
+  ),
 }
 
 export const EMPTY_FINDINGS: Findings = {
@@ -374,6 +389,26 @@ export const SETTINGS: Settings = {
   appearance: 'system',
   reduced_motion: null,
   has_rummaged_before: true,
+  background_mode: false,
+  background_checks: false,
+  background_notify: false,
+  launch_at_login: false,
+  background_intro_seen: false,
+}
+
+export const BACKGROUND_STATUS: BackgroundStatus = {
+  tray_alive: true,
+  mode: false,
+  checks: false,
+  notify: false,
+  notifications_permitted: null,
+  launch_at_login: false,
+  launch_at_login_available: true,
+  last_check_unix: 0,
+  paused_until_unix: 0,
+  now_unix: now,
+  pending_review: null,
+  waiting_because: 'Background checks are off.',
 }
 
 export const CANDIDATES = [...GHOSTS, ...SCREENSHOTS, ...INSTALLERS, ...HEAVY, ...COPIES, ...CACHES, ...ODDMENTS]

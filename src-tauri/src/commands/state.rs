@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::model::CleanupCandidate;
 use crate::platform::PlatformService;
@@ -13,7 +14,7 @@ use crate::scanning::{
     self, CleanupObserver, Phase, Progress, ScanContext, ScanObserver, ScanOptions, ScanSummary,
 };
 use crate::space::SpaceOverview;
-use crate::storage::{QuarantineRecord, Store};
+use crate::storage::{QuarantineRecord, ScanKind, Store};
 use crate::{Result, ScuttleError};
 
 /// What the safety gate needs, gathered once. Building the protected-path table
@@ -50,15 +51,60 @@ struct Inner {
     gate: Mutex<Option<GateHold>>,
     /// The move in progress, and the last one's outcome.
     jobs: Mutex<super::moves::JobBook>,
+    /// Whether a window is on screen. Kept here rather than asked of Tauri on
+    /// demand so the background scheduler — which has no window handle and
+    /// must not touch the main thread — can read it.
+    window_visible: AtomicBool,
+    /// Whether the tray icon was actually created. Hiding the window on close
+    /// is conditional on this: a failed tray must never leave someone with a
+    /// running application and no way back into it.
+    tray_alive: AtomicBool,
+    /// Set once the one-per-launch startup work has run, so that showing a
+    /// hidden window is never mistaken for a fresh start.
+    startup_done: AtomicBool,
+    /// True from the moment an explicit quit begins, so the close handler
+    /// stops hiding the window and lets it go.
+    quitting: AtomicBool,
+    /// The background scheduler, while one is running. Only the control block
+    /// is held here — the thread keeps its own handle on the state, and
+    /// storing a second one the other way would be a cycle.
+    scheduler: Mutex<Option<crate::background::Scheduler>>,
+    /// When this process started. Background checks stay quiet for a while
+    /// after it, so that launching is never itself a reason to scan.
+    launched_unix: i64,
 }
 
 struct RunningScan {
     id: String,
+    kind: ScanKind,
     cancel: Arc<AtomicBool>,
     /// Held for as long as the scan runs, so nothing that could invalidate its
     /// results starts underneath it.
     _guard: OperationGuard,
 }
+
+/// Who wants the gate.
+///
+/// The rule is one sentence: a background check yields to a person. Putting it
+/// here rather than at each of the eight call sites means there is one place
+/// to read, and no command can forget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Priority {
+    /// Someone clicked something.
+    User,
+    /// The scheduler.
+    Background,
+}
+
+/// How long a user action waits for a background check to get out of the way.
+///
+/// A background check is metadata-only and tests its cancel flag on every
+/// 120 ms progress tick, so in practice this is tens of milliseconds. The cap
+/// exists so that a pathological case costs a brief pause rather than a frozen
+/// window — and if it expires, the ordinary "Scuttle is busy" refusal is what
+/// the user sees, exactly as before.
+const YIELD_TIMEOUT: Duration = Duration::from_millis(1500);
+const YIELD_POLL: Duration = Duration::from_millis(15);
 
 /// The things that change files, the Drawer, or the findings a selection was
 /// made from. Scuttle does one of them at a time.
@@ -144,8 +190,139 @@ impl AppState {
                 allowed_roots: Mutex::new(roots),
                 gate: Mutex::new(None),
                 jobs: Mutex::new(super::moves::JobBook::default()),
+                window_visible: AtomicBool::new(false),
+                tray_alive: AtomicBool::new(false),
+                startup_done: AtomicBool::new(false),
+                quitting: AtomicBool::new(false),
+                scheduler: Mutex::new(None),
+                launched_unix: super::now_unix(),
             }),
         })
+    }
+
+    pub fn launched_unix(&self) -> i64 {
+        self.inner.launched_unix
+    }
+
+    /// Start the background scheduler if it is wanted and not already
+    /// running, and stop it if it is not.
+    ///
+    /// Called at startup and whenever the settings change, so the thread's
+    /// existence always matches the setting rather than the setting being a
+    /// note about what happened at launch.
+    pub fn sync_scheduler(&self, app: &tauri::AppHandle) {
+        let wanted = self
+            .store()
+            .settings()
+            .map(|s| s.background_mode)
+            .unwrap_or(false);
+
+        let mut slot = self
+            .inner
+            .scheduler
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
+        match (wanted, slot.as_ref()) {
+            (true, None) => {
+                *slot = Some(crate::background::Scheduler::start(
+                    self.clone(),
+                    app.clone(),
+                    self.inner.launched_unix,
+                ));
+            }
+            (false, Some(running)) => {
+                running.stop();
+                *slot = None;
+            }
+            // Already in the right state; a settings change that did not touch
+            // background mode should not restart the thread.
+            _ => {}
+        }
+    }
+
+    /// Reconsider now rather than at the next tick.
+    pub fn nudge_scheduler(&self) {
+        if let Some(scheduler) = self
+            .inner
+            .scheduler
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
+            scheduler.nudge();
+        }
+    }
+
+    /// Stop the scheduler for good. Quitting Scuttle stops its background
+    /// work; there is no helper, service or daemon left behind.
+    pub fn stop_scheduler(&self) {
+        if let Some(scheduler) = self
+            .inner
+            .scheduler
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
+            scheduler.stop();
+        }
+    }
+
+    // ---- what the background scheduler needs to know -------------------
+
+    pub fn window_visible(&self) -> bool {
+        self.inner.window_visible.load(Ordering::Relaxed)
+    }
+
+    pub fn set_window_visible(&self, visible: bool) {
+        self.inner.window_visible.store(visible, Ordering::Relaxed);
+    }
+
+    pub fn tray_alive(&self) -> bool {
+        self.inner.tray_alive.load(Ordering::Relaxed)
+    }
+
+    pub fn set_tray_alive(&self, alive: bool) {
+        self.inner.tray_alive.store(alive, Ordering::Relaxed);
+    }
+
+    pub fn quitting(&self) -> bool {
+        self.inner.quitting.load(Ordering::Relaxed)
+    }
+
+    pub fn begin_quitting(&self) {
+        self.inner.quitting.store(true, Ordering::Relaxed);
+    }
+
+    /// True the first time it is called and false afterwards.
+    ///
+    /// Startup work — reconciling interrupted moves, expiring the drawer,
+    /// pruning old scans — belongs to the process, not to the window. With a
+    /// tray, a window can be shown and hidden many times in one run, and none
+    /// of those is a launch.
+    pub fn claim_startup(&self) -> bool {
+        !self.inner.startup_done.swap(true, Ordering::Relaxed)
+    }
+
+    /// The roots a scan would actually use: what the user chose, or what the
+    /// platform suggests when they have chosen nothing. Exactly the resolution
+    /// [`super::rummage`] performs — a background check must not look anywhere
+    /// a rummage would not.
+    pub fn resolved_roots(&self) -> Vec<PathBuf> {
+        let chosen = self
+            .store()
+            .settings()
+            .map(|s| s.scan_roots)
+            .unwrap_or_default();
+        if !chosen.is_empty() {
+            return chosen;
+        }
+        self.inner
+            .platform
+            .default_scan_roots()
+            .into_iter()
+            .map(|known| known.path)
+            .collect()
     }
 
     pub fn clone_handle(&self) -> AppState {
@@ -171,24 +348,73 @@ impl AppState {
 
     /// Register a new scan, refusing if one is already running.
     pub fn start_scan(&self, options: &ScanOptions) -> Result<String> {
+        self.start_scan_as(options, ScanKind::Full, Priority::User)
+    }
+
+    pub fn start_scan_as(
+        &self,
+        options: &ScanOptions,
+        kind: ScanKind,
+        priority: Priority,
+    ) -> Result<String> {
+        // A user starting a rummage while a background check is running should
+        // get their rummage, not a refusal. Asking the check to stop before
+        // taking the running slot is the same courtesy the gate does below.
+        if priority == Priority::User {
+            self.ask_background_scan_to_stop();
+            self.wait_for_background_scan_to_end();
+        }
+
         let mut running = self.lock_running();
         if running.is_some() {
             return Err(ScuttleError::ScanBusy);
         }
         // A scan replaces the findings a selection was made from, so it cannot
-        // start while something is moving them.
-        let guard = self.begin_operation(Operation::Scan)?;
+        // start while something is moving them. Any yielding a user's scan
+        // needed has already happened above, before this lock was taken.
+        let guard = self.claim_gate(Operation::Scan)?;
         let id = uuid::Uuid::new_v4().to_string();
         *running = Some(RunningScan {
             id: id.clone(),
+            kind,
             cancel: Arc::new(AtomicBool::new(false)),
             _guard: guard,
         });
         drop(running);
 
         *self.lock_roots() = options.roots.clone();
-        self.store().begin_scan(&id, options, super::now_unix())?;
+        self.store()
+            .begin_scan(&id, kind, options, super::now_unix())?;
         Ok(id)
+    }
+
+    /// Whether the scan currently running, if any, is a background check.
+    pub fn background_scan_running(&self) -> bool {
+        self.lock_running()
+            .as_ref()
+            .is_some_and(|scan| scan.kind == ScanKind::Glance)
+    }
+
+    /// Ask a running background check — and only a background check — to stop.
+    fn ask_background_scan_to_stop(&self) {
+        if let Some(scan) = self.lock_running().as_ref() {
+            if scan.kind == ScanKind::Glance {
+                scan.cancel.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// Wait, briefly, for a cancelled background check to let go.
+    ///
+    /// Bounded because this runs on the thread handling a command: a pause of
+    /// a few milliseconds is invisible, and a check that somehow will not stop
+    /// must not freeze the window. If the wait runs out the caller carries on
+    /// and gets the ordinary "busy" refusal.
+    fn wait_for_background_scan_to_end(&self) {
+        let deadline = Instant::now() + YIELD_TIMEOUT;
+        while self.background_scan_running() && Instant::now() < deadline {
+            std::thread::sleep(YIELD_POLL);
+        }
     }
 
     pub fn cancel_scan(&self) -> bool {
@@ -201,15 +427,56 @@ impl AppState {
         }
     }
 
-    fn finish_scan(&self) {
-        // Dropping the scan releases the operation gate with it.
-        let finished = self.lock_running().take();
-        drop(finished);
+    /// Clear the running slot, but only if it still holds the scan that is
+    /// finishing.
+    ///
+    /// The identity check matters now that a user action can displace a
+    /// background check: the check is cancelled, the rummage takes the slot,
+    /// and only then does the check's worker unwind and come here. Taking the
+    /// slot unconditionally at that point would clear the rummage's entry —
+    /// releasing its gate underneath it and leaving `cancel_rummage` with
+    /// nothing to stop.
+    fn finish_scan(&self, scan_id: &str) {
+        let mut running = self.lock_running();
+        if running.as_ref().is_some_and(|scan| scan.id == scan_id) {
+            // Dropping the scan releases the operation gate with it.
+            let finished = running.take();
+            drop(running);
+            drop(finished);
+        }
     }
 
     /// Claim the right to change files or the Drawer, or be told what is in
     /// the way. The claim ends when the returned guard is dropped.
     pub fn begin_operation(&self, operation: Operation) -> Result<OperationGuard> {
+        self.begin_operation_as(operation, Priority::User)
+    }
+
+    /// As [`AppState::begin_operation`], but saying who is asking.
+    ///
+    /// A user action finding the gate held by a background check asks the
+    /// check to stop and waits briefly for it. Everything else behaves exactly
+    /// as it did before: the gate is still one-at-a-time, and a busy Scuttle
+    /// still refuses rather than queues.
+    pub fn begin_operation_as(
+        &self,
+        operation: Operation,
+        priority: Priority,
+    ) -> Result<OperationGuard> {
+        if priority == Priority::User && self.background_scan_running() {
+            self.ask_background_scan_to_stop();
+            self.wait_for_background_scan_to_end();
+        }
+        self.claim_gate(operation)
+    }
+
+    /// Take the gate, with no opinion about who is asking.
+    ///
+    /// Split from [`AppState::begin_operation_as`] because the yielding half
+    /// inspects the running scan, and [`AppState::start_scan_as`] calls this
+    /// while already holding that lock. Going through the yielding path from
+    /// there would deadlock on a lock the same thread owns.
+    fn claim_gate(&self, operation: Operation) -> Result<OperationGuard> {
         let mut gate = self.lock_gate();
         if let Some(hold) = gate.as_ref() {
             return Err(ScuttleError::Busy(format!(
@@ -256,7 +523,79 @@ impl AppState {
         };
         let summary = self.run_scan_with(scan_id, options, &observer)?;
         super::emit_done(app, &summary);
+        // The tray says when Scuttle last looked and what turned up, so it is
+        // rewritten whenever that changes rather than on a timer.
+        crate::tray::refresh(app);
+        super::emit_background(app, self);
         Ok(summary)
+    }
+
+    /// One background check: metadata only, bounded in time, yielding to
+    /// anything the user does.
+    ///
+    /// Everything that makes a rummage trustworthy applies unchanged — the
+    /// same operation gate, the same ignore lists, the same safety guard on
+    /// every candidate, the same roots. The differences are that it reads no
+    /// file contents (see [`crate::detectors::glance_set`]) and that it gives
+    /// up when asked. It moves nothing, deletes nothing and selects nothing.
+    pub fn run_glance(&self, budget_secs: u64) -> Result<crate::scanning::ScanOutcome> {
+        let settings = self.store().settings()?;
+        let roots = self.resolved_roots();
+        if roots.is_empty() {
+            return Err(ScuttleError::Refused("There is nowhere to look.".into()));
+        }
+
+        let options = ScanOptions {
+            roots,
+            include_developer_debris: settings.include_developer_debris,
+            heavy_threshold: settings.heavy_threshold,
+            ..Default::default()
+        };
+
+        let scan_id = self.start_scan_as(&options, ScanKind::Glance, Priority::Background)?;
+
+        // A watchdog rather than a timeout: it sets the same flag the Stop
+        // button does, so the check unwinds through the ordinary cancellation
+        // path and its partial results are saved and labelled as partial.
+        let watchdog = self.spawn_budget(&scan_id, budget_secs);
+
+        let outcome = self.run_scan_collecting(&scan_id, options);
+        watchdog.store(true, Ordering::Relaxed);
+        outcome
+    }
+
+    /// Stop the named scan once `budget_secs` have passed. Returns a flag the
+    /// caller sets to stand the watchdog down.
+    fn spawn_budget(&self, scan_id: &str, budget_secs: u64) -> Arc<AtomicBool> {
+        let done = Arc::new(AtomicBool::new(false));
+        let watch = Arc::clone(&done);
+        let state = self.clone();
+        let id = scan_id.to_string();
+        // Sleeping in short steps so a finished scan does not keep a thread
+        // parked for the whole budget.
+        let _ = std::thread::Builder::new()
+            .name("scuttle-glance-budget".into())
+            .spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(budget_secs);
+                while Instant::now() < deadline {
+                    if watch.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+                if watch.load(Ordering::Relaxed) {
+                    return;
+                }
+                if state
+                    .lock_running()
+                    .as_ref()
+                    .is_some_and(|scan| scan.id == id)
+                {
+                    tracing::debug!("a background check ran long and was asked to stop");
+                    state.cancel_scan();
+                }
+            });
+        done
     }
 
     /// The scan itself, with no dependency on a window.
@@ -269,8 +608,31 @@ impl AppState {
         options: ScanOptions,
         observer: &dyn ScanObserver,
     ) -> Result<ScanSummary> {
-        let cancel = match self.lock_running().as_ref() {
-            Some(scan) if scan.id == scan_id => Arc::clone(&scan.cancel),
+        self.scan_to_completion(scan_id, options, observer)
+            .map(|outcome| outcome.summary)
+    }
+
+    /// As [`AppState::run_scan_with`], but keeping what was found.
+    ///
+    /// A background check needs the candidates themselves to work out what is
+    /// new, and reading them back out of the database afterwards would race
+    /// with the next scan.
+    fn run_scan_collecting(
+        &self,
+        scan_id: &str,
+        options: ScanOptions,
+    ) -> Result<crate::scanning::ScanOutcome> {
+        self.scan_to_completion(scan_id, options, &crate::scanning::SilentObserver)
+    }
+
+    fn scan_to_completion(
+        &self,
+        scan_id: &str,
+        options: ScanOptions,
+        observer: &dyn ScanObserver,
+    ) -> Result<crate::scanning::ScanOutcome> {
+        let (cancel, kind) = match self.lock_running().as_ref() {
+            Some(scan) if scan.id == scan_id => (Arc::clone(&scan.cancel), scan.kind),
             // Cancelled or superseded before the worker got going.
             _ => return Err(ScuttleError::ScanBusy),
         };
@@ -283,7 +645,10 @@ impl AppState {
                 ignores,
                 cancel,
             );
-            let detectors = crate::detectors::default_set(&options);
+            let detectors = match kind {
+                ScanKind::Full => crate::detectors::default_set(&options),
+                ScanKind::Glance => crate::detectors::glance_set(&options),
+            };
             let outcome = scanning::run(scan_id, &ctx, detectors, observer);
 
             self.store().save_candidates(scan_id, &outcome.candidates)?;
@@ -291,16 +656,21 @@ impl AppState {
             self.store()
                 .finish_scan(&outcome.summary, super::now_unix())?;
 
-            let mut settings = self.store().settings()?;
-            if !settings.has_rummaged_before {
-                settings.has_rummaged_before = true;
-                let _ = self.store().save_settings(&settings);
+            // Only a rummage someone asked for counts as having rummaged. A
+            // background check must not be able to unlock behaviour — its own
+            // included — that is meant to wait for a deliberate first run.
+            if kind == ScanKind::Full {
+                let mut settings = self.store().settings()?;
+                if !settings.has_rummaged_before {
+                    settings.has_rummaged_before = true;
+                    let _ = self.store().save_settings(&settings);
+                }
             }
 
-            Ok(outcome.summary)
+            Ok(outcome)
         })();
 
-        self.finish_scan();
+        self.finish_scan(scan_id);
         result
     }
 
