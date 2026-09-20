@@ -25,10 +25,10 @@ on:
   workflow_dispatch:
   workflow_call:
     inputs:
-      package:
-        description: Also build the installers. Off for release runs, which build them themselves.
+      skip_package:
+        description: Skip building the installers. Release runs set this, because they build their own.
         required: false
-        default: true
+        default: false
         type: boolean
 
 # Nothing here writes anything. The release workflow grants `contents: write`
@@ -123,7 +123,12 @@ jobs:
     # setting, a frontend that builds but does not load. Worth knowing on
     # main and on demand; not worth paying for on every push to a branch,
     # and not worth doing twice during a release, which builds its own.
-    if: github.event_name != 'pull_request' && inputs.package != false
+    # Phrased as a negative on purpose. On a push there is no `inputs`
+    # context at all, so `inputs.package` would be null — and GitHub coerces
+    # null to false in a comparison, which made `inputs.package != false`
+    # false and skipped this job on every push to main. `!inputs.skip_package`
+    # reads null as "not skipped", which is what is wanted.
+    if: github.event_name != 'pull_request' && !inputs.skip_package
     needs: [frontend, core]
     uses: ./.github/workflows/build-desktop.yml
     with:
