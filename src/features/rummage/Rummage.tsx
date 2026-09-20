@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { useStore } from '@/app/store'
 import { bytes } from '@/lib/format'
 import { Glyph } from '@/visuals/Glyph'
 import { Scuttle, type Mood } from '@/visuals/Scuttle'
 import { outcomeAside, outcomeLine, phaseLine } from './phrasing'
+import { handOff } from './handoff'
 
 import styles from './Rummage.module.css'
 
@@ -22,10 +23,21 @@ export function Rummage() {
   const running = scan.status === 'running'
   const found = scan.foundCount
 
-  // Once a rummage finishes with something to show, move along. The pause is
-  // long enough to read the outcome line and short enough not to be a wait.
+  /**
+   * Once a rummage finishes in front of you, move along. The pause is long
+   * enough to read the outcome line and short enough not to be a wait.
+   *
+   * The rule itself lives in `handOff`, where it can be stated and tested.
+   * A ref is the right home for the flag it carries: it only has to survive
+   * the renders between a rummage starting and ending, and both of those
+   * happen while this screen is mounted. Arriving here after the fact starts
+   * it at `false` — precisely the case that must not navigate anywhere.
+   */
+  const sawItRun = useRef(scan.status === 'running')
   useEffect(() => {
-    if (scan.status !== 'done' || found === 0) return
+    const next = handOff(scan.status, found, sawItRun.current)
+    sawItRun.current = next.sawItRun
+    if (!next.handOver) return
     const timer = window.setTimeout(() => go({ name: 'findings' }), 1500)
     return () => window.clearTimeout(timer)
   }, [scan.status, found, go])
@@ -81,12 +93,12 @@ export function Rummage() {
                 <span className={styles.countValue}>
                   {scan.progress.files_seen.toLocaleString()}
                 </span>{' '}
-                looked at
+                files examined
               </span>
               <span>·</span>
               <span>
                 <span className={styles.countValue}>{found}</span>{' '}
-                {found === 1 ? 'thing' : 'things'} so far
+                {found === 1 ? 'finding' : 'findings'} so far
               </span>
             </div>
 

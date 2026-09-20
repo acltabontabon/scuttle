@@ -10,6 +10,13 @@
 /*
  * The window's own title bar is hidden, so this strip both stands in for it
  * and provides the drag region. It is not a toolbar and does not gain buttons.
+ *
+ * The dragging itself comes from `data-tauri-drag-region` on the element, not
+ * from here. `app-region` below is a Chromium extension — the `-webkit-`
+ * prefix is misleading, WebKit never implemented it — so it does nothing in
+ * the WKWebView that runs this application on macOS. It is kept only because
+ * it is real on Windows' Chromium-based WebView2, and it must never be the
+ * only mechanism: relying on it alone is what left the window unmovable.
  */
 .bar {
   display: flex;

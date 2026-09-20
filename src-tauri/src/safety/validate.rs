@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use super::paths::{self};
 use super::protected::ProtectedPaths;
 use crate::error::{Result, ScuttleError};
-use crate::model::{CleanupCandidate, StateFingerprint, TargetKind};
+use crate::model::{CleanupCandidate, Risk, StateFingerprint, TargetKind};
 
 /// A path that has survived every check, together with the freshly observed
 /// state that justified it. Only the quarantine module can consume one.
@@ -23,12 +23,37 @@ pub struct AuthorizedTarget {
     pub observed: StateFingerprint,
 }
 
+/// Who asked for this.
+///
+/// The distinction decides exactly one thing: whether a verdict of
+/// `InspectOnly` is binding. That verdict means *cleanup is not suggested* —
+/// a statement about what Scuttle should do of its own accord, which is a
+/// very different claim from "this must never move".
+///
+/// Treating the two as one made the largest piles most people have —
+/// screenshots, heavy strays, the categories Scuttle deliberately vouches for
+/// nothing in — impossible to act on by any route. Nothing about that was
+/// safe; it just moved the mess somewhere the application could not reach.
+///
+/// `Risk::Protected` is unaffected and stays refused for both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bidding {
+    /// Scuttle acting on its own judgement: a sweep, or the retention sweep.
+    /// Bound by its own verdicts, because nobody looked.
+    Scuttle,
+    /// A person who ticked this exact item with its size and risk in front of
+    /// them. Their call to make.
+    User,
+}
+
 /// Everything the gate needs to make a decision.
 pub struct ActionContext<'a> {
     pub protected: &'a ProtectedPaths,
     /// The roots the user actually asked Scuttle to look at. Nothing outside
     /// them can be acted on, whatever a stored finding claims.
     pub allowed_roots: &'a [PathBuf],
+    /// Whether Scuttle decided this or a person did.
+    pub bidding: Bidding,
 }
 
 /// Re-check a stored finding against the world as it is *now*.
@@ -39,9 +64,18 @@ pub fn authorize(
     let path = paths::normalize(&candidate.path);
 
     // 1. Is this the kind of finding that may be acted on at all?
-    if !candidate.is_actionable() {
+    //
+    // Protected is absolute and refuses both biddings. An `InspectOnly`
+    // verdict only binds Scuttle itself: see [`Bidding`] for why those are
+    // not the same rule.
+    if candidate.risk == Risk::Protected {
+        return Err(ScuttleError::Refused(
+            "Scuttle will not act on this at all.".into(),
+        ));
+    }
+    if ctx.bidding == Bidding::Scuttle && !candidate.is_actionable() {
         return Err(ScuttleError::Refused(format!(
-            "Scuttle does not act on findings marked {}.",
+            "Scuttle does not act on findings marked {} unless you pick them yourself.",
             candidate.recommended_action_label()
         )));
     }
@@ -240,6 +274,9 @@ mod tests {
             ActionContext {
                 protected: &self.protected,
                 allowed_roots: &self.roots,
+                // Test harnesses take the strict bidding, so every existing
+                // assertion keeps meaning what it meant.
+                bidding: Bidding::Scuttle,
             }
         }
         fn file(&self, rel: &str, contents: &str) -> PathBuf {
@@ -263,6 +300,7 @@ mod tests {
                 display_name: paths::file_name_lower(path),
                 associated_app: None,
                 size: fingerprint.size,
+                group_bytes: fingerprint.size,
                 confidence: Confidence::High,
                 risk: Risk::Low,
                 recommended_action: RecommendedAction::Quarantine,

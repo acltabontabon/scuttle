@@ -10,25 +10,54 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--close);
-  padding: var(--close);
+  gap: var(--snug);
+  padding: var(--snug);
   border-radius: var(--round-soft);
   transition:
     transform var(--normal) var(--settle),
     background var(--normal) var(--ease);
 }
 
-.heap:hover,
-.heap:focus-visible {
-  transform: translateY(-4px);
-  background: color-mix(in srgb, var(--paper-raised) 70%, transparent);
+/*
+ * Hover and press are colour and depth only — never size or position.
+ * The old 4px lift moved the illustration out from under the cursor and
+ * nudged the label, which reads as the layout twitching rather than as the
+ * pile responding.
+ */
+.heap:hover {
+  background: color-mix(in srgb, var(--paper-raised) 80%, transparent);
 }
 
+/*
+ * The whole pile is one control, so it needs the three states a control has.
+ * Focus is a ring rather than the hover lift: a keyboard user needs to see
+ * where they are, and a silent 4px nudge is not that.
+ */
+.heap:focus-visible {
+  outline: 2px solid var(--honey);
+  outline-offset: 2px;
+}
+
+.heap:active {
+  background: color-mix(in srgb, var(--honey-soft) 42%, transparent);
+}
+
+/*
+ * The objects grow from their own groundline rather than from their centre,
+ * so a big heap and a small one still rest on the same floor. The layout box
+ * stays a constant 86px whatever the scale, which is what keeps every label
+ * across a row sitting on one line.
+ */
 .objects {
   position: relative;
   width: 138px;
-  height: 86px;
+  /* Sized to the tallest heap this can draw: objects sit at `bottom: 10`,
+     rise about 25px across the stack and are at most 29px tall. Any less and
+     a full pile is clipped at the top. */
+  height: 84px;
   color: var(--ink);
+  transform: scale(var(--heap-scale, 1));
+  transform-origin: bottom center;
 }
 
 .object {
@@ -48,9 +77,9 @@
 .shadow {
   position: absolute;
   left: 50%;
-  bottom: 10px;
-  width: 84px;
-  height: 14px;
+  bottom: 6px;
+  width: 72px;
+  height: 12px;
   transform: translateX(-50%);
   border-radius: 50%;
   background: var(--ground);
@@ -91,10 +120,14 @@
   letter-spacing: 0.03em;
 }
 
-/* A pile with nothing Scuttle would act on is quieter than one that has. */
-.heap[data-actionable='0'] .name {
-  color: var(--ink-soft);
-}
+/*
+ * Deliberately no dimming here any more.
+ *
+ * The name used to fade when Scuttle had nothing to recommend, which made the
+ * largest pile on most machines — heavy strays, where Scuttle never
+ * recommends anything — look switched off. Having no recommendation is not
+ * the same as having nothing worth opening.
+ */
 
 /* Each object settles into place when the pile first appears. */
 @keyframes settle {
@@ -135,4 +168,35 @@
     opacity: 0;
     transform: translateX(-50%) scale(1.5);
   }
+}
+
+/* ---- a pile with suggestions in it ---------------------------------------
+ *
+ * Quiet on purpose: this connects the offer in the header to the pile it
+ * lives in, and that is all it has to do.
+ */
+.suggested {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--honey-ink);
+}
+
+.suggestedDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--honey);
+}
+
+/*
+ * The plain-language line, for the three names that are evocative rather than
+ * descriptive. Always present, never a tooltip: an explanation somebody has
+ * to hover to find is an explanation a first-time reader never sees.
+ */
+.hint {
+  font-size: var(--type-whisper);
+  color: var(--ink-ghost);
+  max-width: 21ch;
+  text-wrap: pretty;
 }

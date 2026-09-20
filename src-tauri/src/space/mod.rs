@@ -232,6 +232,7 @@ mod tests {
             display_name: id.into(),
             associated_app: None,
             size,
+            group_bytes: size,
             confidence: Confidence::High,
             risk: Risk::Low,
             recommended_action: action,

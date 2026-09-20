@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 
+import { bytes } from '@/lib/format'
 import { api, watchRummage } from '@/lib/ipc'
 import {
   isScuttleError,
@@ -38,7 +39,14 @@ import {
 export type View =
   | { name: 'home' }
   | { name: 'findings' }
-  | { name: 'pile'; category: Category }
+  /**
+   * `preselect` opens the pile with Scuttle's suggested items already ticked.
+   * It is how "Review suggestion" on the floor stays a *review*: the same
+   * pile, the same list, the same explicit button to move anything — just
+   * with the choosing already done. Turning that link into a file operation
+   * would be a different promise entirely.
+   */
+  | { name: 'pile'; category: Category; preselect?: 'suggested' }
   | { name: 'drawer' }
   | { name: 'space' }
   | { name: 'settings' }
@@ -113,6 +121,12 @@ export interface Store {
   quarantine: (candidate: Candidate, memberIndex?: number) => Promise<void>
   quarantineGroup: (candidate: Candidate, keep: KeepChoice) => Promise<void>
   quarantineConfident: (category: Category) => Promise<void>
+  /** Sweep every pile at once, from the findings floor. */
+  quarantineAllConfident: () => Promise<void>
+  /** Move a selection the user ticked by hand. */
+  quarantineMany: (ids: string[]) => Promise<void>
+  /** Permanently remove everything in the drawer. The only bulk deletion. */
+  emptyDrawer: () => Promise<void>
   keep: (candidate: Candidate) => Promise<void>
   ignore: (candidate: Candidate, scope: 'path' | 'app' | 'category') => Promise<void>
   restore: (id: string) => Promise<void>
@@ -125,6 +139,18 @@ export interface Store {
  * state. Nothing in the shipping application uses it directly.
  */
 export const StoreContext = createContext<Store | null>(null)
+
+/**
+ * What to say when things land in the drawer.
+ *
+ * States the consequence at the moment it happens rather than leaving it for
+ * whenever somebody next opens the drawer: nothing has been deleted, and the
+ * bytes are not back yet.
+ */
+function heldNote(count: number, movedBytes: number): string {
+  const what = `${count} ${count === 1 ? 'thing' : 'things'}`
+  return `${what} moved to the drawer, ${bytes(movedBytes)}. Nothing deleted — empty the drawer to free it.`
+}
 
 /** Turn whatever came back from IPC into something worth showing a person. */
 function readError(error: unknown): string {
@@ -351,7 +377,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setDetail(null)
         await Promise.all([refreshFindings(), refreshDrawer()])
 
-        const moved = `${outcome.held.length} ${outcome.held.length === 1 ? 'thing' : 'things'} in the drawer.`
+        const moved = heldNote(outcome.held.length, outcome.bytes)
         if (outcome.refused.length > 0) {
           say(`${moved} ${outcome.refused.length} left alone — ${outcome.refused[0]!.reason}`, {
             tone: 'warn',
@@ -365,6 +391,65 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
     [refreshDrawer, refreshFindings, say],
   )
+
+  const quarantineAllConfident = useCallback<Store['quarantineAllConfident']>(async () => {
+    try {
+      const outcome = await api.quarantineAllConfident()
+      if (outcome.held.length === 0 && outcome.refused.length === 0) {
+        say('Nothing on the floor was confident enough to move on its own.')
+        return
+      }
+      setDetail(null)
+      await Promise.all([refreshFindings(), refreshDrawer()])
+      const moved = heldNote(outcome.held.length, outcome.bytes)
+      if (outcome.refused.length > 0) {
+        say(`${moved} ${outcome.refused.length} left alone.`, { tone: 'warn' })
+      } else {
+        say(moved)
+      }
+    } catch (error) {
+      say(readError(error), { tone: 'warn' })
+    }
+  }, [refreshDrawer, refreshFindings, say])
+
+  const quarantineMany = useCallback<Store['quarantineMany']>(
+    async (ids) => {
+      if (ids.length === 0) return
+      try {
+        const outcome = await api.quarantineMany(ids)
+        setDetail(null)
+        await Promise.all([refreshFindings(), refreshDrawer()])
+        const moved = heldNote(outcome.held.length, outcome.bytes)
+        if (outcome.refused.length > 0) {
+          say(`${moved} ${outcome.refused.length} would not go — ${outcome.refused[0]!.reason}`, {
+            tone: 'warn',
+          })
+        } else {
+          say(moved)
+        }
+      } catch (error) {
+        say(readError(error), { tone: 'warn' })
+      }
+    },
+    [refreshDrawer, refreshFindings, say],
+  )
+
+  const emptyDrawer = useCallback<Store['emptyDrawer']>(async () => {
+    try {
+      const outcome = await api.emptyDrawer()
+      await Promise.all([refreshDrawer(), refreshSpace()])
+      if (outcome.failed.length > 0) {
+        say(
+          `${bytes(outcome.bytes)} freed. ${outcome.failed.length} would not go — ${outcome.failed[0]!.reason}`,
+          { tone: 'warn' },
+        )
+      } else {
+        say(`${bytes(outcome.bytes)} freed.`)
+      }
+    } catch (error) {
+      say(readError(error), { tone: 'warn' })
+    }
+  }, [refreshDrawer, refreshSpace, say])
 
   const keep = useCallback<Store['keep']>(
     async (candidate) => {
@@ -469,6 +554,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       quarantine,
       quarantineGroup,
       quarantineConfident,
+      quarantineAllConfident,
+      quarantineMany,
+      emptyDrawer,
       keep,
       ignore,
       restore,
@@ -478,7 +566,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [
       view, go, scan, rummage, cancel, findings, refreshFindings, detail, drawer,
       refreshDrawer, space, refreshSpace, settings, updateSettings, note, say,
-      dismissNote, quarantine, quarantineGroup, quarantineConfident, keep, ignore, restore, removePermanently, reveal,
+      dismissNote, quarantine, quarantineGroup, quarantineConfident, quarantineAllConfident,
+      quarantineMany, emptyDrawer, keep, ignore, restore, removePermanently, reveal,
     ],
   )
 

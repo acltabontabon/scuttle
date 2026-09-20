@@ -28,7 +28,14 @@ function reason(summary: string, weight: number, riskFloor: Evidence['risk_floor
 }
 
 function candidate(partial: Partial<Candidate> & Pick<Candidate, 'id' | 'display_name'>): Candidate {
+  const group = partial.group ?? []
   return {
+    // Mirrors `model::group_footprint` on the Rust side: a group is worth the
+    // sum of its members, anything else is worth its own size.
+    group_bytes:
+      group.length > 1
+        ? group.reduce((total, member) => total + member.size, 0)
+        : (partial.size ?? 1024 ** 3),
     detector: 'ghosts',
     category: 'ghosts',
     target_kind: 'directory',
@@ -254,6 +261,10 @@ function pile(items: Candidate[]) {
     bytes: items.reduce((total, item) => total + item.size, 0),
     count: items.length,
     actionable: items.filter((item) => item.recommended_action !== 'inspect_only').length,
+    confident_count: items.filter((item) => item.recommended_action === 'quarantine').length,
+    confident_bytes: items
+      .filter((item) => item.recommended_action === 'quarantine')
+      .reduce((total, item) => total + item.size, 0),
     items,
   }
 }
@@ -325,18 +336,25 @@ export const SPACE: SpaceOverview = {
   volume_total: 994 * 1024 ** 3,
   volume_free: 263 * 1024 ** 3,
   volume_used: 731 * 1024 ** 3,
+  // Shaped like a real machine rather than a tidy one: six named areas plus
+  // the unaccounted remainder makes seven legend entries, and every category
+  // turns up in the tallies. Designing this screen against a shorter fixture
+  // is how it came to overflow the window on anyone's actual disk.
   areas: [
-    { label: 'Steam games', bytes: 318 * 1024 ** 3, complete: true },
     { label: 'App data (Application Support)', bytes: 129 * 1024 ** 3, complete: false },
-    { label: 'Photos and video', bytes: 82 * 1024 ** 3, complete: true },
+    { label: 'App data (Caches)', bytes: 82 * 1024 ** 3, complete: false },
     { label: 'Downloads', bytes: 44 * 1024 ** 3, complete: true },
-    { label: 'Documents', bytes: 21 * 1024 ** 3, complete: true },
+    { label: 'App data (Logs)', bytes: 21 * 1024 ** 3, complete: true },
+    { label: 'Movies', bytes: 9 * 1024 ** 3, complete: true },
+    { label: 'Documents', bytes: 4 * 1024 ** 3, complete: true },
   ],
   worth_checking: [
-    { category: 'ghosts', label: 'Ghosts', bytes: 24 * 1024 ** 3, count: 11 },
+    { category: 'heavy_strays', label: 'Heavy strays', bytes: 47 * 1024 ** 3, count: 22 },
     { category: 'installers', label: 'Installers', bytes: 11 * 1024 ** 3, count: 26 },
-    { category: 'screenshots', label: 'Screenshots', bytes: 8 * 1024 ** 3, count: 412 },
+    { category: 'ghosts', label: 'Ghosts', bytes: 8 * 1024 ** 3, count: 11 },
     { category: 'caches', label: 'Caches', bytes: 6 * 1024 ** 3, count: 7 },
+    { category: 'screenshots', label: 'Screenshots', bytes: 2 * 1024 ** 3, count: 412 },
+    { category: 'copies', label: 'Copies', bytes: 1024 ** 3 / 2, count: 3 },
   ],
   reclaimable_estimate: 43 * 1024 ** 3,
   has_findings: true,

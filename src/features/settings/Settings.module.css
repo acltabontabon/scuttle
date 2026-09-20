@@ -1,23 +1,44 @@
 .room {
   height: 100%;
   overflow-y: auto;
-  padding: var(--gap) var(--room) var(--sky);
+  padding: var(--gap) var(--room) var(--step);
 }
 
+/*
+ * Two columns.
+ *
+ * Six groups stacked in a single 640px measure ran to roughly twice the
+ * height of the window, on a canvas with well over a thousand pixels of width
+ * going spare. Multi-column keeps each group whole — `break-inside` below —
+ * and lets the settings be read without scrolling for them.
+ */
 .inner {
-  max-width: 640px;
+  max-width: 1100px;
   margin: 0 auto;
+  columns: 2;
+  column-gap: var(--air);
 }
 
 .title {
+  column-span: all;
   font-family: var(--serif);
   font-size: var(--type-loud);
   font-weight: 400;
-  margin-bottom: var(--room);
+  margin-bottom: var(--step);
 }
 
 .group {
-  margin-bottom: var(--air);
+  break-inside: avoid;
+  /* A group must not be split across the fold of a column: half a heading in
+     one column and its switches in the next is worse than either. */
+  page-break-inside: avoid;
+  margin-bottom: var(--gap);
+}
+
+/* Multi-column counts the first child's margin from the top of each column,
+   which pushes the right-hand column out of alignment with the left. */
+.group:first-of-type {
+  margin-top: 0;
 }
 
 .groupTitle {

@@ -39,7 +39,8 @@ function platform(): 'macos' | 'other' {
 
 export function App() {
   const store = useStore()
-  const { settings, findings, drawer, view, go, note, dismissNote, refreshDrawer } = store
+  const { settings, findings, drawer, space, view, go, note, dismissNote, refreshDrawer, refreshSpace } =
+    store
 
   // Appearance and motion are applied to the document root so CSS can do the
   // rest without any component knowing about themes.
@@ -61,6 +62,21 @@ export function App() {
     if (drawer === null) void refreshDrawer()
   }, [drawer, refreshDrawer])
 
+  /*
+   * Measure the volume in the background, once, as soon as Space is reachable
+   * at all.
+   *
+   * `api.space()` walks the disk, and nothing was started until the moment
+   * someone clicked Space — so the first visit always paid for the whole
+   * measurement with a blank screen and a "Measuring…" line. Doing it here
+   * costs nobody anything: no view is waiting on it, and by the time the tab
+   * is clicked the answer is usually already in the store.
+   */
+  useEffect(() => {
+    if (findings?.has_rummaged !== true || space !== null) return
+    void refreshSpace()
+  }, [findings?.has_rummaged, space, refreshSpace])
+
   const navState: NavState = {
     hasRummaged: findings?.has_rummaged === true,
     heldCount: drawer?.items.length ?? 0,
@@ -75,7 +91,7 @@ export function App() {
       case 'findings':
         return <Findings />
       case 'pile':
-        return <PileView category={view.category} />
+        return <PileView category={view.category} preselect={view.preselect} />
       case 'drawer':
         return <Drawer />
       case 'space':
@@ -87,7 +103,18 @@ export function App() {
 
   return (
     <div className={styles.shell}>
-      <header className={styles.bar} data-platform={platform()}>
+      {/*
+        `data-tauri-drag-region` is what actually makes this strip drag the
+        window. The CSS `app-region` property it used to rely on is a
+        Chromium extension despite its `-webkit-` prefix, and macOS runs this
+        application in WKWebView, where it does nothing at all — so the title
+        bar was hidden and the window could not be moved.
+
+        Tauri hands a mousedown to the native window only when the event's
+        own target carries the attribute, so the wordmark and the nav links
+        below stay clickable without any opt-out of their own.
+      */}
+      <header data-tauri-drag-region className={styles.bar} data-platform={platform()}>
         <button
           className={styles.wordmark}
           onClick={() => go({ name: 'home' })}

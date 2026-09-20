@@ -118,6 +118,10 @@ pub struct ScanRecord {
     pub reclaimable_bytes: u64,
     pub duration_ms: u64,
     pub cancelled: bool,
+    /// Places the scan could not read. Persisted all along, but never read
+    /// back, so the findings screen reported a clean sweep every time even
+    /// when half a home folder had been refused.
+    pub hiccups: crate::scanning::HiccupSummary,
 }
 
 /// Something the user did, kept so the app can say what happened.
@@ -222,7 +226,7 @@ impl Store {
         let record = conn
             .query_row(
                 "SELECT id, started_unix, finished_unix, roots, files_seen, bytes_seen,
-                        candidates_found, reclaimable_bytes, duration_ms, cancelled
+                        candidates_found, reclaimable_bytes, duration_ms, cancelled, hiccups
                  FROM scan_runs WHERE finished_unix IS NOT NULL
                  ORDER BY started_unix DESC LIMIT 1",
                 [],
@@ -238,6 +242,10 @@ impl Store {
                         reclaimable_bytes: row.get(7)?,
                         duration_ms: row.get(8)?,
                         cancelled: row.get::<_, i32>(9)? != 0,
+                        hiccups: row
+                            .get::<_, Option<String>>(10)?
+                            .and_then(|raw| serde_json::from_str(&raw).ok())
+                            .unwrap_or_default(),
                     })
                 },
             )
@@ -559,6 +567,10 @@ impl Store {
 // ---- row mapping --------------------------------------------------------
 
 fn row_to_candidate(row: &rusqlite::Row<'_>) -> rusqlite::Result<CleanupCandidate> {
+    let size: u64 = row.get(7)?;
+    let group =
+        serde_json::from_str::<Vec<GroupMember>>(&row.get::<_, String>(16)?).unwrap_or_default();
+
     Ok(CleanupCandidate {
         id: row.get(0)?,
         detector: row.get(1)?,
@@ -567,7 +579,10 @@ fn row_to_candidate(row: &rusqlite::Row<'_>) -> rusqlite::Result<CleanupCandidat
         path: PathBuf::from(row.get::<_, String>(4)?),
         display_name: row.get(5)?,
         associated_app: row.get(6)?,
-        size: row.get(7)?,
+        size,
+        // Derived rather than stored: no column to migrate, and no chance of
+        // it disagreeing with the group it is a sum of.
+        group_bytes: crate::model::group_footprint(&group, size),
         confidence: parse_confidence(&row.get::<_, String>(8)?),
         risk: parse_risk(&row.get::<_, String>(9)?),
         recommended_action: parse_action(&row.get::<_, String>(10)?),
@@ -577,8 +592,7 @@ fn row_to_candidate(row: &rusqlite::Row<'_>) -> rusqlite::Result<CleanupCandidat
         created_unix: row.get(14)?,
         fingerprint: serde_json::from_str::<StateFingerprint>(&row.get::<_, String>(15)?)
             .unwrap_or_default(),
-        group: serde_json::from_str::<Vec<GroupMember>>(&row.get::<_, String>(16)?)
-            .unwrap_or_default(),
+        group,
         evidence: Vec::new(),
     })
 }
@@ -703,6 +717,7 @@ mod tests {
             display_name: "Chrome.dmg".into(),
             associated_app: Some("Google Chrome".into()),
             size: 212_000_000,
+            group_bytes: 212_000_000,
             confidence: Confidence::High,
             risk: Risk::Low,
             recommended_action: RecommendedAction::Quarantine,
@@ -1018,6 +1033,43 @@ mod tests {
         let latest = store.latest_scan().unwrap().unwrap();
         assert_eq!(latest.id, "done");
         assert_eq!(latest.files_seen, 10);
+    }
+
+    #[test]
+    fn a_scan_remembers_the_places_it_could_not_read() {
+        // These were written on every scan and never read back, so the
+        // findings screen reported a clean sweep even when a whole home
+        // folder had been refused. A partial scan has to be able to say so.
+        let store = Store::in_memory().unwrap();
+        store.begin_scan("s", &ScanOptions::default(), 100).unwrap();
+        store
+            .finish_scan(
+                &ScanSummary {
+                    scan_id: "s".into(),
+                    files_seen: 10,
+                    bytes_seen: 20,
+                    candidates_found: 1,
+                    reclaimable_bytes: 5,
+                    duration_ms: 3,
+                    walk_ms: 1,
+                    probe_ms: 1,
+                    finish_ms: 1,
+                    cancelled: false,
+                    hiccups: crate::scanning::HiccupSummary {
+                        permission_denied: 4,
+                        unreadable: 2,
+                        vanished: 1,
+                        loops_avoided: 0,
+                    },
+                },
+                200,
+            )
+            .unwrap();
+
+        let latest = store.latest_scan().unwrap().unwrap();
+        assert_eq!(latest.hiccups.permission_denied, 4);
+        assert_eq!(latest.hiccups.unreadable, 2);
+        assert_eq!(latest.hiccups.vanished, 1);
     }
 
     #[test]

@@ -442,3 +442,108 @@ fn a_bulk_action_keeps_going_when_one_finding_has_gone_stale() {
     assert_eq!(outcome.refused[0].code, "stale");
     assert!(victim.exists(), "the changed file must be left where it is");
 }
+
+#[test]
+fn a_hand_picked_selection_may_include_what_scuttle_would_not_sweep() {
+    // The line between an opinion and a prohibition.
+    //
+    // `quarantine_confident` decides on the user's behalf, so it may only ever
+    // touch findings rated Quarantine. `quarantine_many` acts on boxes a
+    // person ticked one at a time with the size and risk of each in front of
+    // them, so Review and InspectOnly are theirs to choose.
+    //
+    // Refusing them here instead made the largest piles most people have —
+    // screenshots, heavy strays, where Scuttle vouches for nothing — into
+    // things that could not be dealt with at all, which is not caution.
+    let world = abandoned_game();
+    let (state, options) = state_for(&world);
+    let scan_id = state.start_scan(&options).expect("start");
+    state
+        .run_scan_with(&scan_id, options, &SilentObserver)
+        .expect("scan");
+
+    let found = state
+        .store()
+        .candidates_for_scan(&scan_id)
+        .expect("findings");
+
+    let hesitant: Vec<_> = found
+        .iter()
+        .filter(|c| c.recommended_action != RecommendedAction::Quarantine)
+        .filter(|c| c.risk != scuttle_core::model::Risk::Protected)
+        .cloned()
+        .collect();
+    assert!(
+        !hesitant.is_empty(),
+        "fixture should hold something Scuttle would not sweep on its own"
+    );
+
+    let ids: Vec<String> = hesitant.iter().map(|c| c.id.clone()).collect();
+    let outcome = state.quarantine_many(&ids).expect("hand-picked selection");
+
+    // What must not appear is a refusal on the grounds of the verdict itself.
+    // Some of this fixture's findings nest inside each other, so once the
+    // outer directory has moved the ones underneath it are honestly reported
+    // as gone — that is the staleness check doing its job, not the gate
+    // second-guessing the user.
+    for refusal in &outcome.refused {
+        assert_eq!(
+            refusal.code, "stale",
+            "{} was refused for its verdict, not for the state of the disk: {}",
+            refusal.display_name, refusal.reason
+        );
+    }
+    assert!(
+        !outcome.held.is_empty(),
+        "nothing a person picked by hand was moved; refused: {:?}",
+        outcome.refused
+    );
+    for candidate in &hesitant {
+        assert!(
+            !candidate.path.exists(),
+            "{} was picked by hand and should be gone from where it was",
+            candidate.display_name
+        );
+    }
+}
+
+#[test]
+fn a_hand_picked_selection_still_cannot_touch_anything_protected() {
+    // The actual prohibition, and the reason the verdict check above can go:
+    // protection is enforced by the safety gate against the live filesystem,
+    // for every item, and no selection can talk its way past it.
+    let world = dangerous_paths();
+    let (state, options) = state_for(&world);
+    let scan_id = state.start_scan(&options).expect("start");
+    state
+        .run_scan_with(&scan_id, options, &SilentObserver)
+        .expect("scan");
+
+    let found = state
+        .store()
+        .candidates_for_scan(&scan_id)
+        .expect("findings");
+
+    // Ask for everything the scan turned up, protected or not.
+    let ids: Vec<String> = found.iter().map(|c| c.id.clone()).collect();
+    let outcome = state.quarantine_many(&ids).expect("selection");
+
+    for candidate in found
+        .iter()
+        .filter(|c| c.risk == scuttle_core::model::Risk::Protected)
+    {
+        assert!(
+            candidate.path.exists(),
+            "{} is protected and must not move for any selection",
+            candidate.display_name
+        );
+        assert!(
+            outcome
+                .refused
+                .iter()
+                .any(|r| r.display_name == candidate.display_name),
+            "{} must be reported as refused, not silently skipped",
+            candidate.display_name
+        );
+    }
+}

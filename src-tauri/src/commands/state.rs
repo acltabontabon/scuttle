@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use crate::model::CleanupCandidate;
 use crate::platform::PlatformService;
 use crate::quarantine::Quarantine;
-use crate::safety::{ActionContext, ProtectedPaths};
+use crate::safety::{ActionContext, Bidding, ProtectedPaths};
 use crate::scanning::{
     self, CleanupObserver, Phase, Progress, ScanContext, ScanObserver, ScanOptions, ScanSummary,
 };
@@ -177,13 +177,32 @@ impl AppState {
         result
     }
 
-    /// Move a candidate into the drawer, through the safety gate.
+    /// Move a candidate into the drawer on Scuttle's own judgement, through
+    /// the safety gate. Bound by the verdicts Scuttle computed, because in
+    /// this path nobody looked at the item.
     pub fn hold(&self, candidate: &CleanupCandidate) -> Result<QuarantineRecord> {
+        self.hold_with(candidate, Bidding::Scuttle)
+    }
+
+    /// Move a candidate the user picked out by hand. Same gate, same protected
+    /// table, same containment and staleness checks — the only thing that
+    /// changes is that Scuttle's own "not suggested" verdict stops being
+    /// binding, because someone looked and decided. See [`Bidding`].
+    pub fn hold_for_user(&self, candidate: &CleanupCandidate) -> Result<QuarantineRecord> {
+        self.hold_with(candidate, Bidding::User)
+    }
+
+    fn hold_with(
+        &self,
+        candidate: &CleanupCandidate,
+        bidding: Bidding,
+    ) -> Result<QuarantineRecord> {
         let protected = self.protected_paths();
         let roots = self.lock_roots().clone();
         let ctx = ActionContext {
             protected: &protected,
             allowed_roots: &roots,
+            bidding,
         };
         self.quarantine()?.hold(candidate, &ctx, super::now_unix())
     }
@@ -213,7 +232,22 @@ impl AppState {
         &self,
         category: crate::model::Category,
     ) -> Result<super::BulkOutcome> {
-        super::run_bulk_quarantine(self, category)
+        super::run_bulk_quarantine(self, Some(category))
+    }
+
+    /// Quarantine every confident finding on the floor, across all piles.
+    pub fn quarantine_all_confident(&self) -> Result<super::BulkOutcome> {
+        super::run_bulk_quarantine(self, None)
+    }
+
+    /// Quarantine a hand-picked selection of findings.
+    pub fn quarantine_many(&self, ids: &[String]) -> Result<super::BulkOutcome> {
+        super::run_quarantine_many(self, ids)
+    }
+
+    /// Empty the drawer. The Tauri command is a thin wrapper over this.
+    pub fn empty_drawer(&self) -> Result<crate::quarantine::PurgeOutcome> {
+        self.quarantine()?.purge_all(crate::commands::now_unix())
     }
 
     pub fn space_overview(&self) -> Result<SpaceOverview> {

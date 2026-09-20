@@ -9,7 +9,9 @@ import type { Category, Confidence, RecommendedAction, Risk } from '@/lib/types'
  */
 
 export const CATEGORY_BLURB: Record<Category, string> = {
-  ghosts: 'Left behind by software that is not here any more.',
+  // Scuttle cannot see uninstall records, only what is left on disk, so this
+  // says what it observed rather than asserting the software is gone.
+  ghosts: 'Files that look left over from software Scuttle cannot find.',
   screenshots: 'Captures nobody has looked at in a while.',
   installers: 'Installers whose job is finished.',
   heavy_strays: 'Large things. Not junk — just large.',
@@ -17,6 +19,36 @@ export const CATEGORY_BLURB: Record<Category, string> = {
   caches: 'Caches Scuttle can name the owner of.',
   developer_debris: 'Build output your tools can make again.',
   oddments: 'Things Scuttle noticed but cannot name.',
+}
+
+/**
+ * The evocative names earn their keep, but a name like "Ghosts" is no use to
+ * someone who has never seen this screen before — and no use at all to a
+ * screen reader. This is the plain version, used for accessible names and
+ * anywhere the illustration is doing the talking.
+ */
+export const CATEGORY_PLAIN: Record<Category, string> = {
+  ghosts: 'possible leftovers from software that is no longer installed',
+  screenshots: 'screenshots you have not looked at in a long time',
+  installers: 'installers you have already run',
+  heavy_strays: 'unusually large files',
+  copies: 'files that exist more than once',
+  caches: 'caches belonging to apps Scuttle could identify',
+  developer_debris: 'build output your tools can regenerate',
+  oddments: 'things Scuttle noticed but cannot identify',
+}
+
+/**
+ * A short plain-language line for the categories whose names are evocative
+ * but opaque on first meeting. Only these three: the rest say what they are.
+ *
+ * Each describes what the detector actually keys on, and none of them
+ * promises the files are unwanted.
+ */
+export const CATEGORY_HINT: Partial<Record<Category, string>> = {
+  ghosts: 'App files with no app to match',
+  heavy_strays: 'Unusually large single files',
+  oddments: 'Noticed, but Scuttle can’t identify',
 }
 
 /** Shown when a pile is empty but the category was searched. */

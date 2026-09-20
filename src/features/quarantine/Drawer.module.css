@@ -1,12 +1,29 @@
+/*
+ * The drawer fills the window instead of running past it.
+ *
+ * A masthead, the tray, and a quiet footer. Only the tray can scroll, and
+ * with items filed two across it takes sixteen of them before it needs to.
+ */
 .room {
+  --measure: 1080px;
   height: 100%;
-  overflow-y: auto;
-  padding: var(--gap) var(--room) var(--sky);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  /* `--sky` here was trailing air for a page that scrolled. The window is a
+     fixed canvas now, and that much dead space at the foot was the whole
+     reason these screens ran past the bottom of it. */
+  padding: var(--gap) var(--room) var(--step);
 }
 
 .head {
-  max-width: 820px;
-  margin: 0 auto var(--gap);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--room);
+  width: 100%;
+  max-width: var(--measure);
+  margin: 0 auto var(--step);
 }
 
 .title {
@@ -31,14 +48,27 @@
  */
 .drawer {
   position: relative;
-  max-width: 820px;
+  /* The tray shares the masthead's measure, so the drawer and the words
+     about it line up at the same two edges. At 820px it sat as a narrow box
+     under a much wider header and could only file one card across. */
+  width: 100%;
+  max-width: var(--measure);
   margin: 0 auto;
-  padding: var(--gap) var(--step) var(--step);
+  /* The tray is as deep as what it holds, up to the room available. A drawer
+     with two things in it should look like a drawer with two things in it,
+     not a pit with two things at the bottom. */
+  align-self: start;
+  max-height: 100%;
+  min-height: 0;
+  display: flex;
+  padding: var(--step) var(--step);
   background: linear-gradient(to bottom, var(--hollow), var(--paper-deep) 34%);
   border: var(--hair) solid var(--ink-ghost);
   border-top-width: 2px;
   border-radius: var(--round-tight) var(--round-tight) var(--round-drawer) var(--round-drawer);
-  box-shadow: inset 0 14px 26px -18px rgba(40, 28, 16, 0.5);
+  /* Still recessed, but a shallow drawer rather than a pit. The old inset
+     was heavy enough to read as a gradient rather than as depth. */
+  box-shadow: inset 0 9px 18px -14px rgba(40, 28, 16, 0.34);
 }
 
 /* The lip, so the box reads as open towards the viewer. */
@@ -215,4 +245,233 @@
     opacity: 1;
     transform: translateY(0) rotate(0);
   }
+}
+
+/* ---- emptying the drawer -------------------------------------------------
+ *
+ * The end of the only path in Scuttle that gives disk space back, so it gets
+ * the full ink-on-paper weight the home screen gives Rummage. Those two are
+ * the bookends of the whole application: one asks the question, this one
+ * finishes the answer.
+ */
+.empty_out {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--close) var(--step);
+  max-width: 760px;
+  margin: var(--room) auto 0;
+  padding-top: var(--step);
+  border-top: var(--hair) solid var(--rule);
+}
+
+.emptyAction {
+  padding: 12px var(--room);
+  font-family: var(--serif);
+  font-size: var(--type-say);
+  letter-spacing: 0.01em;
+  color: var(--paper);
+  background: var(--ink);
+  border-radius: var(--round-soft);
+  font-variant-numeric: tabular-nums;
+  box-shadow: var(--lift-hover);
+  transition:
+    transform var(--quick) var(--ease),
+    box-shadow var(--quick) var(--ease);
+}
+
+.emptyAction:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--lift-held);
+}
+
+.emptyAction:active {
+  transform: translateY(1px) scale(0.993);
+  box-shadow: var(--lift-resting);
+}
+
+.emptyHint {
+  flex: 1;
+  min-width: 180px;
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+  text-wrap: pretty;
+}
+
+/* ---- the head ------------------------------------------------------------
+ *
+ * Count and size first, then what it means, then the policy. The paragraph
+ * this replaces said all three at once and buried the only number that
+ * matters in the middle of a sentence.
+ */
+.tally {
+  font-family: var(--serif);
+  font-size: var(--type-say);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.policy {
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+  max-width: 58ch;
+  text-wrap: pretty;
+}
+
+/* ---- the masthead --------------------------------------------------------- */
+.headText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tight);
+  min-width: 0;
+}
+
+.headAction {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--tight);
+  text-align: right;
+}
+
+/* ---- the tray -------------------------------------------------------------
+ *
+ * Two across. A single column of tall rows put eight things well past the
+ * bottom of the window while half its width sat empty; filed two abreast they
+ * read as a drawer of cards, which is what they are.
+ */
+.shelfGrid {
+  /* Grows to fill the tray it sits in, which is what lets two cards sit
+     abreast instead of one stranded column down the left. */
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  align-content: start;
+  gap: var(--close);
+  list-style: none;
+  padding: 0;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+/* ---- a filed thing --------------------------------------------------------
+ *
+ * Two lines: what it is and what it costs, then where it came from and how
+ * long it has. The actions are quiet text until the card is under the cursor
+ * or the keyboard, because eight cards each shouting two buttons was most of
+ * what made this screen so tall.
+ */
+.card {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px var(--close);
+  padding: var(--close) var(--step) var(--close) var(--close);
+  background: var(--paper-raised);
+  border: var(--hair) solid var(--rule);
+  border-radius: var(--round);
+  animation: land 420ms var(--settle) backwards;
+  transition: border-color var(--quick) var(--ease);
+}
+
+.card:hover,
+.card:focus-within {
+  border-color: var(--ink-ghost);
+}
+
+.cardGlyph {
+  grid-row: span 2;
+  color: var(--ink-soft);
+}
+
+.cardName {
+  font-size: var(--type-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardSize {
+  font-size: var(--type-small);
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/*
+ * Path and expiry share the second line. The path is allowed to shrink to
+ * nothing before the expiry does — a date you can act on beats a directory
+ * you cannot read.
+ */
+.cardMeta {
+  grid-column: 2 / span 2;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--close);
+  min-width: 0;
+}
+
+.cardFrom {
+  font-family: var(--mono);
+  font-size: var(--type-whisper);
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.cardExpiry {
+  flex: none;
+  font-size: var(--type-whisper);
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.cardExpiry[data-soon='true'] {
+  color: var(--clay-ink);
+}
+
+.cardActions {
+  grid-column: 2 / span 2;
+  display: flex;
+  gap: var(--step);
+  margin-top: var(--tight);
+}
+
+.cardAction {
+  font-size: var(--type-whisper);
+  color: var(--ink-soft);
+  border-bottom: var(--hair) solid transparent;
+  transition:
+    color var(--quick) var(--ease),
+    border-color var(--quick) var(--ease);
+}
+
+.cardAction:hover {
+  color: var(--ink);
+  border-bottom-color: var(--moss);
+}
+
+.cardDanger:hover {
+  color: var(--clay-ink);
+  border-bottom-color: var(--clay);
+}
+
+/* ---- confirming the whole drawer ------------------------------------------ */
+.confirmBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--close) var(--step);
+  width: 100%;
+  max-width: var(--measure);
+  margin: 0 auto var(--step);
+  padding: var(--close) var(--step);
+  background: var(--clay-soft);
+  border-radius: var(--round-soft);
 }

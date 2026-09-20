@@ -34,7 +34,9 @@ export function outcomeLine(found: number, cancelled: boolean): string {
 }
 
 export function outcomeAside(found: number, cancelled: boolean): string {
-  if (cancelled) return 'Whatever turned up before you stopped is still there.'
+  // Two facts the stopped state has to carry: the sweep was partial, and
+  // nothing was acted on. Neither is obvious from "Stopped." alone.
+  if (cancelled) return 'A partial look. What turned up is still there, untouched.'
   if (found === 0) return 'Your computer is suspiciously tidy.'
   return 'Have a look at what turned up.'
 }

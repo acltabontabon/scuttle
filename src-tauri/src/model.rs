@@ -189,8 +189,18 @@ pub struct CleanupCandidate {
     /// The application, game or tool this appears to belong to, if known.
     pub associated_app: Option<String>,
     /// Bytes Scuttle believes would be reclaimed. For groups this is the sum
-    /// of the redundant members, not the whole group.
+    /// of the redundant members, not the whole group — five identical files
+    /// report four of them.
     pub size: u64,
+    /// The whole footprint this finding covers: every member of a group, or
+    /// simply `size` for a single thing.
+    ///
+    /// Kept apart from `size` because the two answer different questions, and
+    /// showing either one for both is how a screen ends up claiming you can
+    /// free space you cannot. Derived from `group` rather than stored, so it
+    /// cannot drift out of step with it.
+    #[serde(default)]
+    pub group_bytes: u64,
     pub confidence: Confidence,
     pub risk: Risk,
     pub recommended_action: RecommendedAction,
@@ -205,6 +215,19 @@ pub struct CleanupCandidate {
     pub group: Vec<GroupMember>,
     /// Snapshot of file state at scan time, used to detect staleness later.
     pub fingerprint: StateFingerprint,
+}
+
+/// The whole footprint a finding covers.
+///
+/// One rule, applied wherever a candidate is built — from a scan or from the
+/// database — so the two can never disagree. A group is worth the sum of its
+/// members; anything else is worth its own size.
+pub fn group_footprint(group: &[GroupMember], size: u64) -> u64 {
+    if group.len() > 1 {
+        group.iter().map(|m| m.size).sum()
+    } else {
+        size
+    }
 }
 
 /// Enough of the file's state to notice if the world moved underneath us.
@@ -312,6 +335,7 @@ mod tests {
             display_name: "x".into(),
             associated_app: None,
             size: 1,
+            group_bytes: 1,
             confidence: Confidence::High,
             risk: Risk::Low,
             recommended_action: RecommendedAction::Quarantine,

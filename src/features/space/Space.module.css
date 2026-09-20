@@ -1,21 +1,84 @@
+/*
+ * Where the space went.
+ *
+ * Laid out to fill the window rather than to run past the bottom of it: a
+ * masthead, the band and its legend, then the tallies taking whatever is
+ * left. Only the tallies can scroll, and only if a machine ever turns up
+ * more categories than this has room for.
+ */
 .room {
   height: 100%;
-  overflow-y: auto;
-  padding: var(--gap) var(--room) var(--sky);
+  overflow: hidden;
+  padding: var(--step) var(--room);
 }
 
 .inner {
-  max-width: 780px;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: var(--gap);
+  height: 100%;
+  max-width: 1500px;
   margin: 0 auto;
 }
 
-.summary {
+/* ---- the masthead --------------------------------------------------------
+ *
+ * Two poles, like the findings floor: what is in use on one side, what is
+ * left on the other. The summary used to sit here as a single tall paragraph
+ * set at reading size, which spent a third of the window saying two things.
+ */
+.mast {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--room);
+  padding-bottom: var(--close);
+  border-bottom: var(--hair) solid var(--rule);
+}
+
+.poleLeft {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tight);
+  min-width: 0;
+}
+
+.headline {
+  font-family: var(--serif);
+  font-size: var(--type-loud);
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: var(--leading-tight);
+}
+
+.aside {
+  font-size: var(--type-body);
+  color: var(--ink-soft);
+  max-width: 52ch;
+  text-wrap: pretty;
+}
+
+/* The counterweight: quieter than the headline, and set in the same tabular
+   figures as every other measurement in the application. */
+.free {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.freeValue {
   font-family: var(--serif);
   font-size: var(--type-say);
-  line-height: var(--leading-loose);
-  white-space: pre-line;
-  margin-bottom: var(--room);
-  max-width: 38ch;
+  color: var(--ink);
+}
+
+.freeOf {
+  font-size: var(--type-small);
+  color: var(--ink-faint);
 }
 
 /*
@@ -45,18 +108,30 @@
   filter: brightness(1.08);
 }
 
+/*
+ * The legend runs as wide as the window gives it. Three fixed columns left
+ * seven entries wrapping to three rows; letting the count follow the measure
+ * keeps it to two and gives the labels room to say what they are.
+ */
 .legend {
-  list-style: none;
-  margin: var(--step) 0 0;
-  padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: var(--close) var(--step);
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 0 var(--gap);
+  list-style: none;
+  padding: 0;
+  margin-top: var(--close);
 }
 
+/*
+ * The label wraps rather than truncates.
+ *
+ * "App data (Application Support)" was being cut to "App data (Applicati…",
+ * which removes the only part that says which app data it is. A second line
+ * costs a few pixels; an ellipsis costs the meaning.
+ */
 .legendItem {
   display: grid;
-  grid-template-columns: 10px 1fr auto;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
   align-items: baseline;
   gap: var(--snug);
   font-size: var(--type-small);
@@ -73,18 +148,33 @@
 
 .legendLabel {
   color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
+}
+
+/* The qualifier sits with the figure it qualifies, in the quieter weight, so
+   a row reads as one measurement rather than two. */
+.legendQualifier {
+  color: var(--ink-faint);
 }
 
 .legendValue {
   color: var(--ink-soft);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  align-self: start;
 }
 
+/*
+ * The tallies take whatever height is left, and are the only thing here that
+ * may scroll — and only on a machine with more categories than this has room
+ * for, which is not a machine that exists today.
+ */
 .section {
-  margin-top: var(--air);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: 0;
 }
 
 .sectionTitle {
@@ -101,10 +191,21 @@
   max-width: 54ch;
 }
 
+/*
+ * Two columns. Six categories in one column is a long thin list down the left
+ * of a wide window; in two it is a block, and each bar still has the width to
+ * be compared against its neighbours.
+ */
 .tallies {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  align-content: start;
+  gap: 0 var(--air);
   list-style: none;
   margin: 0;
   padding: 0;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .tally {
@@ -150,7 +251,7 @@
 }
 
 .footnote {
-  margin-top: var(--gap);
+  margin-top: 0;
   font-size: var(--type-small);
   color: var(--ink-faint);
   line-height: var(--leading-normal);
@@ -165,4 +266,116 @@
   padding: var(--sky) 0;
   color: var(--ink-faint);
   font-size: var(--type-small);
+}
+
+/* ---- asking again --------------------------------------------------------
+ *
+ * Quiet, because the figures are usually fine and this is a second opinion
+ * rather than a thing that needs doing.
+ */
+.remeasure {
+  margin-top: var(--tight);
+  font-size: var(--type-whisper);
+  color: var(--ink-faint);
+  letter-spacing: 0.02em;
+  border-bottom: var(--hair) solid transparent;
+  transition:
+    color var(--quick) var(--ease),
+    border-color var(--quick) var(--ease);
+}
+
+.remeasure:hover:not(:disabled) {
+  color: var(--ink);
+  border-bottom-color: var(--ink-ghost);
+}
+
+.remeasure:disabled {
+  cursor: default;
+  color: var(--ink-ghost);
+}
+
+/* A slow breath while it works, so the line reads as busy rather than stuck. */
+.remeasure[data-busy] {
+  animation: breathe 1.6s var(--ease) infinite;
+}
+
+@keyframes breathe {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+:global([data-motion='still']) .remeasure[data-busy] {
+  animation: none;
+}
+
+/* ---- the first measurement -----------------------------------------------
+ *
+ * Shaped like the screen it becomes, so nothing jumps when the figures land.
+ */
+.waiting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--step);
+  height: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.waitingLine {
+  font-family: var(--serif);
+  font-size: var(--type-say);
+  color: var(--ink);
+}
+
+.waitingNote {
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+}
+
+/*
+ * A band with nothing in it yet. The segments drift through a soft wash in
+ * sequence, which reads as measurement in progress rather than as a progress
+ * bar promising a percentage nobody can compute.
+ */
+.ghostBand {
+  display: flex;
+  width: 100%;
+  height: 44px;
+  border-radius: var(--round);
+  overflow: hidden;
+  gap: 2px;
+}
+
+.ghostBand span {
+  display: block;
+  background: var(--rule);
+  animation: sweep 1.9s var(--ease) infinite;
+}
+
+.ghostBand span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+.ghostBand span:nth-child(3) {
+  animation-delay: 0.36s;
+}
+.ghostBand span:nth-child(4) {
+  animation-delay: 0.54s;
+}
+
+@keyframes sweep {
+  0%,
+  100% {
+    background: var(--rule);
+  }
+  50% {
+    background: var(--honey-soft);
+  }
+}
+
+:global([data-motion='still']) .ghostBand span {
+  animation: none;
 }

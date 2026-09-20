@@ -22,6 +22,7 @@ import type {
   HistoryEntry,
   Phase,
   Progress,
+  PurgeOutcome,
   QuarantineRecord,
   QuarantineView,
   RestoreOutcome,
@@ -68,9 +69,22 @@ export const api = {
    */
   quarantineConfident: (category: Category) =>
     invoke<BulkOutcome>('quarantine_confident', { category }),
+  /** Sweep every pile. Same eligibility rule, wider scope, still no ids. */
+  quarantineAllConfident: () => invoke<BulkOutcome>('quarantine_all_confident'),
+  /**
+   * Move a hand-picked selection. Unlike the sweeps this takes ids, because
+   * the user ticked each box themselves — see the Rust side for why that
+   * difference is allowed to exist.
+   */
+  quarantineMany: (ids: string[]) => invoke<BulkOutcome>('quarantine_many', { ids }),
   quarantineList: () => invoke<QuarantineView>('quarantine_list'),
   restore: (id: string) => invoke<RestoreOutcome>('restore', { id }),
   removePermanently: (id: string) => invoke<void>('remove_permanently', { id }),
+  /**
+   * Empty the drawer. Takes nothing: the drawer is the set. This is the only
+   * call that gives disk space back — quarantining is a move.
+   */
+  emptyDrawer: () => invoke<PurgeOutcome>('empty_drawer'),
 
   keep: (id: string) => invoke<void>('keep', { id }),
   ignore: (id: string, scope: 'path' | 'app' | 'category') =>

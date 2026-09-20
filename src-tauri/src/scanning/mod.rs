@@ -525,6 +525,7 @@ impl CandidateSink for GuardedSink<'_> {
             modified_unix: finding.modified_unix,
             accessed_unix: finding.accessed_unix,
             created_unix: finding.created_unix,
+            group_bytes: crate::model::group_footprint(&finding.group, finding.size),
             group: finding.group,
             fingerprint,
         };

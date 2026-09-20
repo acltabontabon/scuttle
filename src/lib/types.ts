@@ -63,7 +63,13 @@ export interface Candidate {
   path: string
   display_name: string
   associated_app: string | null
+  /**
+   * What acting on this would free. For a group that is every redundant
+   * member — five identical files report four of them, not one and not five.
+   */
   size: number
+  /** The whole footprint, including the copy a group keeps. */
+  group_bytes: number
   confidence: Confidence
   risk: Risk
   recommended_action: RecommendedAction
@@ -83,6 +89,9 @@ export interface Pile {
   bytes: number
   count: number
   actionable: number
+  /** How many Scuttle will sweep unprompted, and what that is worth. */
+  confident_count: number
+  confident_bytes: number
   items: Candidate[]
 }
 
@@ -183,6 +192,17 @@ export interface BulkOutcome {
   bytes: number
   /** Findings Scuttle would not move. Partial success is normal. */
   refused: GroupRefusal[]
+}
+
+/**
+ * What emptying the drawer managed to do. `bytes` counts only items that were
+ * really removed, because this is the one number in Scuttle that claims space
+ * actually came back.
+ */
+export interface PurgeOutcome {
+  removed: number
+  bytes: number
+  failed: { display_name: string; reason: string }[]
 }
 
 export interface RestoreOutcome {

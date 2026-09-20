@@ -1,40 +1,132 @@
+/*
+ * The floor fills the window exactly.
+ *
+ * Three bands: the masthead, the scatter, and the quiet footer. The middle
+ * band takes whatever is left over and centres the heaps inside it, so the
+ * air in this composition sits *around* the objects rather than collecting in
+ * a dead strip under the rule while the footer falls off the bottom — which
+ * is what a single scrolling column did with the same content.
+ */
 .floor {
+  /*
+   * One measure for the whole screen.
+   *
+   * The masthead used to run to 1500px while the heaps sat in a 700px island,
+   * which left two disconnected margins and made the header and the
+   * collection look like parts of different pages. Every band below now
+   * shares `--measure`, so they line up at the same two edges.
+   *
+   * 1080px is what the fixed 1180px window leaves after its side room, and it
+   * is also exactly four slots wide — see `.scatter`.
+   */
+  --measure: 1080px;
+
   height: 100%;
-  overflow-y: auto;
-  padding: var(--gap) var(--room) var(--sky);
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  padding: var(--step) var(--room);
 }
 
-.opening {
+/* ---- the masthead --------------------------------------------------------
+ *
+ * Two poles, the full width of the room apart. A number this size wants
+ * somewhere to be looked at *from*, and the sentence that says what to do
+ * about it is the natural counterweight — so it goes to the far side and sets
+ * flush right, closing the composition instead of trailing off.
+ */
+.mast {
+  display: grid;
+  grid-template-columns: auto minmax(0, 34ch);
+  justify-content: space-between;
+  align-items: end;
+  gap: var(--room) var(--air);
+  width: 100%;
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding-bottom: var(--close);
+  border-bottom: var(--hair) solid var(--rule);
+}
+
+.poleLeft {
   display: flex;
   flex-direction: column;
   gap: var(--tight);
-  max-width: 38ch;
-  margin: 0 0 var(--room) 4%;
 }
 
+.poleRight {
+  display: flex;
+  flex-direction: column;
+  gap: var(--snug);
+  text-align: right;
+}
+
+/*
+ * Set against the viewport rather than a fixed size. This is the one thing on
+ * the screen that should be visible from across a room, and on a wide window
+ * a 46px number is just a label.
+ */
 .total {
   font-family: var(--serif);
-  font-size: var(--type-shout);
+  font-size: clamp(var(--type-shout), 8.5vw, 132px);
   font-weight: 400;
-  letter-spacing: -0.02em;
-  line-height: var(--leading-tight);
+  letter-spacing: -0.035em;
+  line-height: 0.88;
 }
 
 .totalUnit {
   color: var(--ink-faint);
-  font-size: 0.6em;
-  margin-left: 0.18em;
+  font-size: 0.42em;
+  letter-spacing: -0.01em;
+  margin-left: 0.14em;
 }
 
 .aside {
-  font-size: var(--type-body);
+  font-size: var(--type-read);
   color: var(--ink-soft);
 }
 
 .hiccups {
-  margin-top: var(--snug);
   font-size: var(--type-small);
   color: var(--ink-faint);
+  text-wrap: pretty;
+}
+
+/* ---- the route out of here ----------------------------------------------- */
+.route {
+  font-size: var(--type-read);
+  color: var(--ink-soft);
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+/*
+ * Marked the way a selected row in a pile is marked: a honey rule, and a
+ * honey wash that arrives on hover like a highlighter pass. The same gesture
+ * in both places, so the application holds one idea about what "chosen" looks
+ * like rather than two.
+ */
+.clear {
+  font-family: var(--serif);
+  font-size: 1.1em;
+  color: var(--ink);
+  padding: 1px 4px;
+  margin: 0 -2px;
+  border-bottom: 2px solid var(--honey);
+  border-radius: 2px;
+  font-variant-numeric: tabular-nums;
+  transition:
+    background var(--quick) var(--ease),
+    border-color var(--quick) var(--ease);
+}
+
+.clear:hover {
+  background: var(--honey-soft);
+  border-bottom-color: var(--honey-ink);
+}
+
+.clear:active {
+  background: var(--honey);
 }
 
 /*
@@ -44,33 +136,60 @@
  * window size; per-pile offsets and alternating vertical rhythm break the grid
  * up again so it never reads as one.
  */
+/*
+ * The scatter.
+ *
+ * Rows that wrap and centre, rather than a column grid. A grid left the last
+ * row hanging off to one side and, once the heaviest pile was given a double
+ * cell, a hole in the middle of the floor — the look of a layout that had
+ * gone wrong rather than one that had been arranged.
+ *
+ * Every heap sits on one baseline per row. These are objects poured onto a
+ * floor, and objects on a floor share a groundline; the random vertical
+ * offsets that used to sit here fought that idea and left six labels at six
+ * different heights. What varies instead is the size of each heap, which
+ * varies because the piles do.
+ */
+/*
+ * The collection.
+ *
+ * Four to a row at desktop width, so seven categories read as 4 + 3 with the
+ * short row centred, instead of 3 + 3 + 1 leaving one pile stranded on its
+ * own line. Rows wrap down to three, two and one as the window narrows —
+ * nothing here is hardcoded to seven, and eight piles simply fill two rows.
+ *
+ * The measure carries slack on purpose: four slots and three gaps come to
+ * 1048px inside 1080. Sized exactly, a scrollbar appearing would steal enough
+ * width to drop the row to three, which makes another row, which guarantees
+ * the scrollbar. Five slots need 1310px and can never fit.
+ */
 .scatter {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: var(--gap) var(--step);
-  align-items: start;
-  max-width: 1000px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-content: center;
+  gap: var(--step) var(--gap);
+  width: 100%;
+  max-width: var(--measure);
   margin: 0 auto;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .slot {
+  flex: 0 0 auto;
+  width: 238px;
   display: flex;
   justify-content: center;
-}
-
-/* Every other column sits lower, which is what stops the row reading as a row. */
-.slot:nth-child(even) {
-  margin-top: var(--gap);
-}
-.slot:nth-child(3n) {
-  margin-top: var(--close);
 }
 
 .again {
   display: flex;
   justify-content: center;
-  gap: var(--step);
-  margin-top: var(--air);
+  flex-wrap: wrap;
+  gap: var(--close) var(--step);
+  margin-top: var(--close);
+  padding-top: var(--close);
   font-size: var(--type-small);
   color: var(--ink-faint);
 }
@@ -129,4 +248,141 @@
     opacity: 1;
     transform: translateY(0) rotate(0);
   }
+}
+
+/* ---- one instruction ------------------------------------------------------ */
+.lede {
+  width: 100%;
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding-top: var(--close);
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+  text-align: center;
+}
+
+/* ---- the offer -----------------------------------------------------------
+ *
+ * Two short lines where three sentences of instruction used to be. The action
+ * opens a review; it does not move anything, and it does not say it will.
+ */
+.offer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--tight);
+}
+
+.offerLine {
+  font-size: var(--type-body);
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.offerAction {
+  font-family: var(--serif);
+  font-size: var(--type-read);
+  color: var(--ink);
+  padding: 2px 4px;
+  margin-right: -4px;
+  border-bottom: 2px solid var(--honey);
+  border-radius: 2px;
+  transition:
+    background var(--quick) var(--ease),
+    border-color var(--quick) var(--ease);
+}
+
+.offerAction:hover {
+  background: var(--honey-soft);
+  border-bottom-color: var(--honey-ink);
+}
+
+.offerAction:active {
+  background: var(--honey);
+}
+
+.offerNote {
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+  text-align: right;
+  max-width: 30ch;
+}
+
+/* ---- the footer ----------------------------------------------------------
+ *
+ * Normal flow, wraps, never overlaps. The drawer reads as an action rather
+ * than a word in a sentence, because that is what it is.
+ */
+.foot {
+  width: 100%;
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding-top: var(--close);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--tight);
+}
+
+.footRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: baseline;
+  gap: var(--close) var(--step);
+  font-size: var(--type-small);
+}
+
+.footFact {
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.footAction {
+  font-size: var(--type-small);
+  color: var(--ink-soft);
+  border-bottom: var(--hair) solid var(--ink-ghost);
+  padding-bottom: 1px;
+  transition:
+    color var(--quick) var(--ease),
+    border-color var(--quick) var(--ease);
+}
+
+.footAction:hover {
+  color: var(--ink);
+  border-bottom-color: var(--honey);
+}
+
+/* ---- what the scan could not reach --------------------------------------- */
+.notice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--tight);
+  text-align: center;
+}
+
+.noticeLine {
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+  text-wrap: pretty;
+}
+
+.noticeToggle {
+  margin-left: var(--snug);
+  font-size: var(--type-small);
+  color: var(--ink-soft);
+  border-bottom: var(--hair) solid var(--ink-ghost);
+}
+
+.noticeToggle:hover {
+  color: var(--ink);
+  border-bottom-color: var(--honey);
+}
+
+.noticeList {
+  list-style: none;
+  padding: 0;
+  font-size: var(--type-whisper);
+  color: var(--ink-faint);
 }

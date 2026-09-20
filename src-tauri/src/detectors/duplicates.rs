@@ -173,7 +173,12 @@ fn emit_group(
         display_name(&oldest.path),
     )
     .risk(Risk::Moderate)
-    .size(size)
+    // What could be freed while still keeping a copy, which is what
+    // `CleanupCandidate::size` is documented to mean for a group. This used to
+    // report one copy's size: correct for a pair by coincidence, and an
+    // understatement for every larger set — five identical 2 GB files were
+    // reported as 2 GB when 8 GB was redundant.
+    .size(size * (copies as u64 - 1))
     .with(EvidenceKind::ExactDuplicate {
         copies: (copies - 1) as u32,
     });
@@ -185,8 +190,7 @@ fn emit_group(
     }
 
     finding.group = group;
-    let reclaimable = size * (copies as u64 - 1);
-    sink.emit(finding.saying(remark(copies, reclaimable, &identical)));
+    sink.emit(finding.saying(remark(copies, size * (copies as u64 - 1), &identical)));
 }
 
 /// What Scuttle says about a set of copies. Derived from where they live:
@@ -300,7 +304,17 @@ mod tests {
         let c = one(&candidates);
         assert_eq!(c.category, Category::Copies);
         assert_eq!(c.group.len(), 3);
-        assert_eq!(c.size, 4096, "the saving is one copy, not the whole group");
+        // Three quantities, and only one of them belongs in `size`:
+        //   12288  the whole group's footprint  -> `group_bytes`
+        //    8192  the two redundant copies     -> `size`
+        //    4096  a single copy                -> neither
+        // This asserted 4096 for a long time, which is right for a pair by
+        // coincidence and an understatement for every larger set.
+        assert_eq!(c.size, 8192, "size is every redundant copy, keeping one");
+        assert_eq!(
+            c.group_bytes, 12288,
+            "the whole group is reported separately"
+        );
         assert!(c
             .evidence
             .iter()

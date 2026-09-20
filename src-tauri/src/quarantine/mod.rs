@@ -55,6 +55,27 @@ pub struct RestoreOutcome {
     pub renamed: bool,
 }
 
+/// What emptying the drawer actually managed to do.
+///
+/// `bytes` is deliberately counted from items that were really removed, not
+/// from what was held when the sweep started: this number is shown to the user
+/// as space they got back, so it has to be a claim about the disk rather than
+/// about the database.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct PurgeOutcome {
+    pub removed: usize,
+    pub bytes: u64,
+    /// Anything that would not go, and why. One stubborn item is not a reason
+    /// to abandon the rest of the drawer.
+    pub failed: Vec<PurgeFailure>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PurgeFailure {
+    pub display_name: String,
+    pub reason: String,
+}
+
 impl Quarantine {
     pub fn new(root: PathBuf, store: Arc<Store>, retention_days: u32) -> Quarantine {
         Quarantine {
@@ -103,10 +124,21 @@ impl Quarantine {
             return Err(err);
         }
 
-        let size = if candidate.size > 0 {
-            candidate.size
-        } else {
-            target.observed.size
+        // What the drawer holds is what was actually moved into it, which is
+        // this one path — not what the finding it came from was worth.
+        //
+        // A group finding's `size` covers every redundant member, but holding
+        // it moves only the anchor. Recording the finding's size made the
+        // drawer claim bytes it did not have: a screenshot burst worth 400 MB
+        // moved one 12 MB file and reported 400 MB held, so "empty the drawer
+        // to free 400 MB" was a promise nothing could keep.
+        //
+        // Directories are the reason for the fallback: `observe` does not walk
+        // them, so their observed size is zero and the finding's measured size
+        // is the only real figure available.
+        let size = match target.kind {
+            TargetKind::File if target.observed.size > 0 => target.observed.size,
+            _ => candidate.size,
         };
         let record = QuarantineRecord {
             id: id.clone(),
@@ -226,6 +258,29 @@ impl Quarantine {
             }
         }
         Ok(removed)
+    }
+
+    /// Empty the drawer: permanently remove everything currently held.
+    ///
+    /// This is the only operation that frees disk space in bulk, and it is the
+    /// end of the one path a user takes to get space back. It is still built
+    /// out of the same single-item `purge`, so every item passes the same
+    /// containment check — being part of a batch grants nothing.
+    pub fn purge_all(&self, now_unix: i64) -> Result<PurgeOutcome> {
+        let mut outcome = PurgeOutcome::default();
+        for record in self.store.held_quarantine()? {
+            match self.purge(&record.id, now_unix) {
+                Ok(()) => {
+                    outcome.removed += 1;
+                    outcome.bytes += record.size;
+                }
+                Err(error) => outcome.failed.push(PurgeFailure {
+                    display_name: record.display_name.clone(),
+                    reason: error.to_string(),
+                }),
+            }
+        }
+        Ok(outcome)
     }
 
     /// Total bytes currently held.
@@ -389,6 +444,9 @@ mod tests {
             ActionContext {
                 protected: &self.protected,
                 allowed_roots: &self.roots,
+                // Test harnesses take the strict bidding, so every existing
+                // assertion keeps meaning what it meant.
+                bidding: crate::safety::Bidding::Scuttle,
             }
         }
 
@@ -414,6 +472,7 @@ mod tests {
                 display_name: path.file_name().unwrap().to_string_lossy().into_owned(),
                 associated_app: None,
                 size: fingerprint.size,
+                group_bytes: fingerprint.size,
                 confidence: Confidence::High,
                 risk: Risk::Low,
                 recommended_action: RecommendedAction::Quarantine,
@@ -664,6 +723,61 @@ mod tests {
             f.store.quarantine_record(&held_new.id).unwrap().status,
             QuarantineStatus::Held
         );
+    }
+
+    #[test]
+    fn the_drawer_records_what_it_actually_holds_not_what_the_finding_was_worth() {
+        // A group finding's `size` covers every redundant member of the group,
+        // but holding one moves a single file. Recording the finding's size
+        // made the drawer overstate itself, and "empty the drawer to free X"
+        // is a promise that has to be keepable.
+        let f = fixture();
+        let path = f.file("Pictures/shot-1.png", "twelve bytes");
+        let mut candidate = f.candidate(&path);
+        candidate.category = Category::Screenshots;
+        candidate.group = vec![
+            GroupMember {
+                path: path.clone(),
+                size: 12,
+                modified_unix: None,
+                suggested_keep: false,
+            },
+            GroupMember {
+                path: f.home.join("Pictures/shot-2.png"),
+                size: 400,
+                modified_unix: None,
+                suggested_keep: true,
+            },
+        ];
+        // What the whole burst is worth, far more than the one file moving.
+        candidate.size = 412;
+
+        let record = f.quarantine.hold(&candidate, &f.ctx(), 1000).unwrap();
+
+        assert_eq!(
+            record.size,
+            "twelve bytes".len() as u64,
+            "the drawer holds one file and must say so"
+        );
+        assert_eq!(
+            f.quarantine.held_bytes().unwrap(),
+            "twelve bytes".len() as u64
+        );
+    }
+
+    #[test]
+    fn a_directory_still_reports_its_measured_size() {
+        // The other side of the same rule: `observe` does not walk a
+        // directory, so its observed size is zero and the measured size from
+        // the scan is the only real figure there is.
+        let f = fixture();
+        f.file("Library/Caches/thing/a.bin", "aaaa");
+        let dir = f.home.join("Library/Caches/thing");
+        let mut candidate = f.candidate(&dir);
+        candidate.size = 4096;
+
+        let record = f.quarantine.hold(&candidate, &f.ctx(), 1000).unwrap();
+        assert_eq!(record.size, 4096, "a directory keeps its measured size");
     }
 
     #[test]

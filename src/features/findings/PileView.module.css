@@ -1,45 +1,94 @@
+/*
+ * Inside a pile.
+ *
+ * A standing plate on the left and a field of objects on the right. The old
+ * layout was one 760px column with two thirds of the window empty beside it,
+ * which for a pile of four hundred screenshots meant scrolling a narrow
+ * channel past a great deal of nothing.
+ */
+/*
+ * The window is a fixed canvas, so this screen is laid out to fill it rather
+ * than to run off the bottom of it. Nothing here scrolls except the field of
+ * objects, which has to: a pile can hold two hundred things and no window is
+ * going to show two hundred things at once.
+ */
 .pile {
   height: 100%;
-  overflow-y: auto;
-  padding: var(--gap) var(--room) var(--sky);
+  overflow: hidden;
+  padding: var(--gap) var(--room) var(--step);
 }
 
-.head {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--step);
-  max-width: 760px;
-  margin: 0 auto var(--room);
+.inner {
+  display: grid;
+  grid-template-columns: minmax(230px, 290px) minmax(0, 1fr);
+  gap: var(--air);
+  align-items: stretch;
+  height: 100%;
+  min-height: 0;
+  max-width: 1500px;
+  margin: 0 auto;
 }
 
-.headText {
-  flex: 1;
-  min-width: 0;
+/* ---- the plate ------------------------------------------------------------
+ *
+ * Sticky, because a selection built by scrolling through four hundred things
+ * must never require scrolling back to act on it. Everything that answers
+ * "what is this and what have I chosen" lives here and stays put.
+ */
+/*
+ * Stationary by construction now, rather than by `position: sticky`: it owns
+ * its own column for the full height of the window, so the total and the
+ * action cannot be scrolled away from whatever is being picked.
+ */
+.plate {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: var(--tight);
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: var(--step);
+}
+
+/* The meter and the action sit at the foot of the column, so the eye lands on
+   the same place every time regardless of how long the blurb runs. */
+.meter {
+  margin-top: auto;
 }
 
 .back {
   font-size: var(--type-small);
   color: var(--ink-faint);
-  margin-bottom: var(--snug);
-  align-self: flex-start;
+  margin-bottom: var(--step);
+  border-bottom: var(--hair) solid transparent;
+  transition:
+    color var(--quick) var(--ease),
+    border-color var(--quick) var(--ease);
 }
 .back:hover {
   color: var(--ink);
+  border-bottom-color: var(--ink-ghost);
+}
+
+/* One drawn object, standing in for the heap the floor showed. */
+.crest {
+  color: var(--ink-soft);
+  margin-bottom: var(--snug);
+  opacity: 0.9;
 }
 
 .title {
   font-family: var(--serif);
   font-size: var(--type-loud);
   font-weight: 400;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
+  line-height: var(--leading-tight);
 }
 
 .blurb {
   font-size: var(--type-body);
   color: var(--ink-soft);
+  text-wrap: pretty;
 }
 
 .tally {
@@ -48,42 +97,303 @@
   font-variant-numeric: tabular-nums;
 }
 
-/*
- * The list.
+/* ---- the meter ------------------------------------------------------------
  *
- * Rows separated by hairlines rather than wrapped in cards: the containment a
- * card provides is not needed here, and eight nested boxes would bury the one
- * thing that matters, which is what each object is and why it turned up.
+ * The same serif figure the findings floor uses for the grand total, here
+ * counting what you have picked. Selecting things stops being bookkeeping and
+ * becomes the number you came here to move, climbing as you work.
  */
-.items {
-  max-width: 760px;
-  margin: 0 auto;
-  list-style: none;
-  padding: 0;
+.meter {
+  width: 100%;
+  padding-top: var(--step);
+  border-top: var(--hair) solid var(--rule);
+}
+
+.meterValue {
+  font-family: var(--serif);
+  font-size: var(--type-shout);
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--ink-ghost);
+  font-variant-numeric: tabular-nums;
+  transition: color var(--normal) var(--ease);
+}
+
+/* Ink only once there is something to count. An enormous grey nought is not
+   a number, it is a placeholder; an enormous black one is a decision. */
+.meterValue[data-live] {
+  color: var(--ink);
+}
+
+.meterUnit {
+  font-size: 0.45em;
+  color: var(--ink-faint);
+  margin-left: 0.16em;
+}
+
+.gauge {
+  height: 3px;
+  margin: var(--close) 0 var(--snug);
+  background: var(--rule);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.gaugeFill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform-origin: left center;
+  background: var(--honey);
+  transition: transform var(--normal) var(--settle);
+}
+
+:global([data-motion='still']) .gaugeFill {
+  transition: none;
+}
+
+.meterLine {
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- the action -----------------------------------------------------------
+ *
+ * The same ink-on-paper weight the home screen gives Rummage. Those two are
+ * the bookends of a session: one asks the question, this one acts on it.
+ */
+.act {
+  width: 100%;
+  margin-top: var(--step);
+  padding: 12px var(--step);
+  font-family: var(--serif);
+  font-size: var(--type-body);
+  letter-spacing: 0.01em;
+  color: var(--paper);
+  background: var(--ink);
+  border-radius: var(--round-soft);
+  font-variant-numeric: tabular-nums;
+  box-shadow: var(--lift-resting);
+  transition:
+    transform var(--quick) var(--ease),
+    box-shadow var(--quick) var(--ease),
+    opacity var(--quick) var(--ease);
+}
+
+.act:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--lift-hover);
+}
+
+.act:active:not(:disabled) {
+  transform: translateY(1px) scale(0.994);
+  box-shadow: var(--lift-resting);
 }
 
 /*
- * A row is a grid, not a button: the row-level action has to be a real button
- * of its own, and a button inside a button is invalid markup that browsers
- * and screen readers both handle badly.
+ * Present but inert while nothing is picked, rather than absent. A control
+ * that appears only once you have guessed the gesture that summons it is a
+ * control nobody finds.
+ */
+.act:disabled {
+  color: var(--ink-faint);
+  background: transparent;
+  border: var(--hair) dashed var(--rule);
+  box-shadow: none;
+  cursor: default;
+}
+
+.actHint {
+  margin-top: var(--snug);
+  font-size: var(--type-whisper);
+  color: var(--ink-faint);
+  text-wrap: pretty;
+}
+
+/* ---- picking --------------------------------------------------------------
+ *
+ * Marginalia, not a toolbar: shortcuts for building a selection, while the
+ * selection itself is the thing with weight.
+ */
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--close);
+  margin-top: var(--step);
+}
+
+.pickAll {
+  font-size: var(--type-small);
+  color: var(--ink-soft);
+  padding: 2px 0;
+  border-bottom: var(--hair) solid var(--ink-ghost);
+  transition:
+    color var(--quick) var(--ease),
+    border-color var(--quick) var(--ease);
+}
+
+.pickAll:hover {
+  color: var(--ink);
+  border-bottom-color: var(--honey);
+}
+
+.pickTip {
+  font-size: var(--type-whisper);
+  color: var(--ink-ghost);
+}
+
+/* ---- the field ------------------------------------------------------------
+ *
+ * As many columns as the window will take. A pile of four hundred is a field
+ * to sweep through, not a four-hundred-row scroll down one channel.
+ */
+.items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  align-content: start;
+  gap: 0 var(--room);
+  list-style: none;
+  padding: 0 var(--close) var(--gap) 0;
+  min-height: 0;
+  overflow-y: auto;
+  /* The field is the one scrolling region; say so at its edge rather than
+     leaving the last row clipped mid-word. */
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+}
+
+/*
+ * A row is a grid, not a button: the tick has to be a real control of its
+ * own, and an input inside a button is invalid markup that browsers and
+ * screen readers both handle badly.
  */
 .row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: var(--close);
+  /* The tick keeps a gutter of plain paper between itself and the wash it
+     refers to. Sitting them flush made two honey shapes touch and read as one
+     smeared block. */
+  gap: var(--step);
+  padding-left: var(--close);
   margin: 0 calc(var(--close) * -1);
-  padding-right: var(--close);
   border-radius: var(--round);
   border-bottom: var(--hair) solid var(--rule);
-  transition: background var(--quick) var(--ease);
 }
 
-.row:hover {
-  background: var(--paper-raised);
+/*
+ * Hover and selection live on the same element, in the same family.
+ *
+ * They used to be two different rectangles in two different temperatures:
+ * hover painted `--paper-raised` — a cool near-white — across the whole row
+ * including the tick gutter, while the selection wash painted warm honey on
+ * the inner button alone. Wherever the honey gradient faded to transparent,
+ * the pale slab showed through behind it, so a hovered, picked row read as a
+ * warm shape sitting on a white one that did not line up with it.
+ *
+ * Both are now on `.item`, so they occupy exactly the same box and the same
+ * corner radius. Ordering carries the cascade: every rule below has equal
+ * specificity, so hover is stated first and the picked states after it.
+ */
+.row:hover .item {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--honey-soft) 30%, transparent) 0%,
+    color-mix(in srgb, var(--honey-soft) 16%, transparent) 55%,
+    transparent 100%
+  );
+}
+
+/*
+ * A picked row is marked the way you would mark a page.
+ *
+ * The wash is on the content, not on the whole row, so the tick stays on
+ * paper in its own margin — the mark and the passage it marks, rather than
+ * one continuous smear of honey with a circle lost somewhere inside it.
+ *
+ * It fades out by the middle of the row for the same reason. Carried nearly
+ * the full width, a screen with every row picked became a solid honey block
+ * with the filenames sunk into it; anchored left and dissipating, the marks
+ * read as marks however many there are.
+ */
+.row[data-picked] .item {
+  background: linear-gradient(
+    90deg,
+    var(--honey-soft) 0%,
+    color-mix(in srgb, var(--honey-soft) 45%, transparent) 38%,
+    transparent 62%
+  );
+}
+
+/* Hovering something already picked deepens the same wash rather than
+   layering a second one over it. */
+.row[data-picked]:hover .item {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--honey) 26%, var(--honey-soft)) 0%,
+    color-mix(in srgb, var(--honey-soft) 58%, transparent) 42%,
+    color-mix(in srgb, var(--honey-soft) 12%, transparent) 72%,
+    transparent 100%
+  );
+}
+
+/*
+ * The tick.
+ *
+ * A native checkbox would be the one piece of operating-system chrome in an
+ * application drawn entirely by hand, so the control keeps its semantics and
+ * loses its appearance: a soft ring that fills with honey and takes a drawn
+ * check with the same slightly-off geometry as the glyphs.
+ */
+.tick {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 19px;
+  height: 19px;
+  margin: 0;
+  border: var(--hair) solid var(--ink-ghost);
+  border-radius: 50%;
+  background: var(--paper);
+  cursor: pointer;
+  transition:
+    background-color var(--quick) var(--ease),
+    border-color var(--quick) var(--ease),
+    transform var(--quick) var(--ease);
+}
+
+.tick:hover:not(:disabled) {
+  border-color: var(--ink-soft);
+  transform: scale(1.09);
+}
+
+.tick:checked {
+  background-color: var(--honey);
+  border-color: var(--honey);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 19 19'%3E%3Cpath d='M4.6 9.9c1.5 1.1 2.6 2.2 3.4 3.4 1.5-3.4 3.4-6 6.4-8.1' fill='none' stroke='%232b2520' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.tick:focus-visible {
+  outline: 2px solid var(--honey);
+  outline-offset: 2px;
+}
+
+/* Protected things keep a ring so the rows still line up, drawn as a dash:
+   visibly unavailable rather than visibly broken. */
+.tick:disabled {
+  cursor: not-allowed;
+  border-style: dashed;
+  border-color: var(--rule);
+  background: transparent;
 }
 
 .item {
+  border-radius: var(--round);
+  transition: background var(--quick) var(--ease);
   display: grid;
   grid-template-columns: 34px 1fr auto;
   align-items: baseline;
@@ -93,29 +403,6 @@
   padding: var(--step) var(--close);
   text-align: left;
   border-radius: var(--round);
-}
-
-/*
- * Visible at rest rather than revealed on hover: an action that only exists
- * once you find it is not an action, and a hover-only control is unreachable
- * by touch and awkward by keyboard.
- */
-.rowAction {
-  flex: none;
-  padding: 6px var(--close);
-  font-size: var(--type-small);
-  color: var(--ink-soft);
-  border: var(--hair) solid var(--rule);
-  border-radius: var(--round);
-  background: var(--paper);
-  transition:
-    color var(--quick) var(--ease),
-    border-color var(--quick) var(--ease);
-}
-
-.rowAction:hover {
-  color: var(--ink);
-  border-color: var(--ink-ghost);
 }
 
 .itemGlyph {
@@ -133,10 +420,24 @@
 }
 
 .itemSize {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   font-size: var(--type-body);
   color: var(--ink-soft);
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+/*
+ * For a set of copies the two figures answer different questions: what you
+ * would get back, and what the whole set weighs. Showing only the first
+ * makes a group look small; only the second promises space that keeping a
+ * copy will not give you.
+ */
+.itemWhole {
+  font-size: var(--type-whisper);
+  color: var(--ink-faint);
 }
 
 .itemRemark {
@@ -180,43 +481,37 @@
   background: var(--clay);
 }
 
-/* ---- the pile-level action ----------------------------------------------- */
-.bulk {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--close);
-  max-width: 760px;
-  margin: 0 auto var(--step);
-  padding-bottom: var(--step);
-}
-
-.bulkAction {
-  padding: 9px var(--step);
-  font-size: var(--type-body);
-  color: var(--ink);
-  background: var(--paper-raised);
-  border: var(--hair) solid var(--ink-ghost);
-  border-radius: var(--round);
-  transition:
-    background var(--quick) var(--ease),
-    border-color var(--quick) var(--ease);
-}
-
-.bulkAction:hover {
-  background: var(--honey-soft);
-  border-color: var(--honey);
-}
-
-.bulkHint {
-  font-size: var(--type-small);
-  color: var(--ink-faint);
-}
-
 .more {
-  max-width: 760px;
-  margin: var(--step) auto 0;
+  grid-column: 1 / -1;
+  margin-top: var(--step);
   font-size: var(--type-small);
   color: var(--ink-faint);
   text-align: center;
+}
+
+/* ---- narrow windows -------------------------------------------------------
+ *
+ * The plate stops standing and becomes a header. Sticky positioning on a
+ * full-width block would pin a third of the screen in place.
+ */
+@media (max-width: 900px) {
+  .inner {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: var(--room);
+  }
+
+  .plate {
+    overflow: visible;
+  }
+
+  .meter {
+    margin-top: var(--step);
+  }
+
+  .act {
+    width: auto;
+    align-self: flex-start;
+    padding-inline: var(--room);
+  }
 }

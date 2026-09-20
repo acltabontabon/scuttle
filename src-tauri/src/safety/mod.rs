@@ -12,4 +12,4 @@ pub mod protected;
 pub mod validate;
 
 pub use protected::ProtectedPaths;
-pub use validate::{authorize, authorize_path, observe, ActionContext, AuthorizedTarget};
+pub use validate::{authorize, authorize_path, observe, ActionContext, AuthorizedTarget, Bidding};

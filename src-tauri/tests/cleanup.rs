@@ -61,6 +61,9 @@ impl Bench {
         ActionContext {
             protected: &self.protected,
             allowed_roots: &self.roots,
+            // Test harnesses take the strict bidding, so every existing
+            // assertion keeps meaning what it meant.
+            bidding: scuttle_core::safety::Bidding::Scuttle,
         }
     }
 

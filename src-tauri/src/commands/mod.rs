@@ -48,6 +48,11 @@ pub struct Pile {
     pub count: u64,
     /// How many of these Scuttle would actually act on.
     pub actionable: u64,
+    /// How many Scuttle is confident enough about to sweep without being
+    /// asked item by item, and how much that is worth. Counted over the whole
+    /// pile rather than the capped `items`, because it is shown as a total.
+    pub confident_count: u64,
+    pub confident_bytes: u64,
     /// The pile's contents, capped. `count` is the real total.
     pub items: Vec<CleanupCandidate>,
 }
@@ -244,6 +249,15 @@ pub fn findings(state: State<'_, AppState>) -> Result<Findings> {
             bytes: matching.iter().map(|c| c.size).sum(),
             count: matching.len() as u64,
             actionable: matching.iter().filter(|c| c.is_actionable()).count() as u64,
+            confident_count: matching
+                .iter()
+                .filter(|c| c.recommended_action == RecommendedAction::Quarantine)
+                .count() as u64,
+            confident_bytes: matching
+                .iter()
+                .filter(|c| c.recommended_action == RecommendedAction::Quarantine)
+                .map(|c| c.size)
+                .sum(),
             items: matching
                 .into_iter()
                 .take(MAX_ITEMS_PER_PILE)
@@ -263,7 +277,10 @@ pub fn findings(state: State<'_, AppState>) -> Result<Findings> {
             .map(|c| c.size)
             .sum(),
         files_seen: scan.files_seen,
-        hiccups: HiccupSummary::default(),
+        // Reported from the scan that produced these findings. This was a
+        // hardcoded default, so "N places Scuttle could not read" never
+        // appeared and a partial scan looked exactly like a complete one.
+        hiccups: scan.hiccups.clone(),
         piles,
         has_rummaged: true,
     })
@@ -426,10 +443,27 @@ pub struct BulkOutcome {
 /// ratings.
 #[tauri::command]
 pub fn quarantine_confident(state: State<'_, AppState>, category: Category) -> Result<BulkOutcome> {
-    run_bulk_quarantine(state.inner(), category)
+    run_bulk_quarantine(state.inner(), Some(category))
 }
 
-pub(crate) fn run_bulk_quarantine(state: &AppState, category: Category) -> Result<BulkOutcome> {
+/// Sweep every pile at once.
+///
+/// The same rule as the per-pile sweep, applied across the floor: only
+/// findings the core already rated `Quarantine` are eligible, so widening the
+/// scope from one pile to all of them does not widen what may be touched. This
+/// exists because the per-pile version made the ordinary case — "deal with all
+/// of it" — into a tour of every category, and a cleanup tool that charges a
+/// tour for the common path is not a cleanup tool.
+#[tauri::command]
+pub fn quarantine_all_confident(state: State<'_, AppState>) -> Result<BulkOutcome> {
+    run_bulk_quarantine(state.inner(), None)
+}
+
+/// `category: None` means every pile.
+pub(crate) fn run_bulk_quarantine(
+    state: &AppState,
+    category: Option<Category>,
+) -> Result<BulkOutcome> {
     let Some(scan) = state.store().latest_scan()? else {
         return Ok(BulkOutcome {
             held: Vec::new(),
@@ -442,7 +476,7 @@ pub(crate) fn run_bulk_quarantine(state: &AppState, category: Category) -> Resul
         .store()
         .candidates_for_scan(&scan.id)?
         .into_iter()
-        .filter(|c| c.category == category)
+        .filter(|c| category.is_none_or(|wanted| c.category == wanted))
         .filter(|c| c.recommended_action == RecommendedAction::Quarantine)
         .collect();
 
@@ -454,6 +488,71 @@ pub(crate) fn run_bulk_quarantine(state: &AppState, category: Category) -> Resul
         // Each one still goes through the full gate: the stored finding is a
         // request, and being part of a batch does not make it an authorisation.
         match state.hold(&candidate) {
+            Ok(record) => {
+                bytes += record.size;
+                held.push(record);
+            }
+            Err(error) => refused.push(GroupRefusal {
+                display_name: candidate.display_name.clone(),
+                reason: error.to_string(),
+                code: error.code().to_string(),
+            }),
+        }
+    }
+
+    Ok(BulkOutcome {
+        held,
+        bytes,
+        refused,
+    })
+}
+
+/// Quarantine a list of findings the user picked out themselves.
+///
+/// This *does* take ids, which the per-pile sweep deliberately does not, and
+/// the distinction is the whole design. A sweep decides on your behalf, so it
+/// may only ever touch what the core already rated `Quarantine`. This acts on
+/// a selection a person built by hand with the size and risk of every item in
+/// front of them, so it will move `Review` and `InspectOnly` findings too.
+/// Ticking twelve boxes is twelve decisions, not one.
+///
+/// Refusing `InspectOnly` here would confuse an opinion with a prohibition.
+/// `InspectOnly` means *cleanup is not suggested* — a statement about what
+/// Scuttle does unprompted. Enforced as a lock it makes the largest piles
+/// most people have, screenshots and heavy strays, impossible to act on at
+/// all, which is not caution; it is an application that cannot do its job.
+///
+/// [`Risk::Protected`] is the real prohibition, and it is enforced where it
+/// belongs: inside [`safety::authorize`], against the live filesystem, for
+/// every item individually. Nothing routed through here can get past it.
+#[tauri::command]
+pub fn quarantine_many(state: State<'_, AppState>, ids: Vec<String>) -> Result<BulkOutcome> {
+    run_quarantine_many(state.inner(), &ids)
+}
+
+pub(crate) fn run_quarantine_many(state: &AppState, ids: &[String]) -> Result<BulkOutcome> {
+    let mut held = Vec::new();
+    let mut refused = Vec::new();
+    let mut bytes = 0u64;
+
+    for id in ids {
+        let candidate = match state.store().candidate(id) {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                refused.push(GroupRefusal {
+                    display_name: id.clone(),
+                    reason: error.to_string(),
+                    code: error.code().to_string(),
+                });
+                continue;
+            }
+        };
+
+        // `hold_for_user`, not `hold`: the full safety gate still runs against
+        // the live filesystem for every item — protected table, containment,
+        // links, staleness — and only Scuttle's own "not suggested" verdict
+        // steps aside, because someone looked at this one and chose it.
+        match state.hold_for_user(&candidate) {
             Ok(record) => {
                 bytes += record.size;
                 held.push(record);
@@ -529,6 +628,17 @@ pub fn remove_permanently(state: State<'_, AppState>, id: String) -> Result<()> 
     state.quarantine()?.purge(&id, now_unix())
 }
 
+/// Empty the drawer. Destroys data, in bulk, and is the only thing in Scuttle
+/// that gives the user disk space back — quarantine is a move, not a deletion,
+/// so until this runs nothing has actually been freed.
+///
+/// It takes no arguments on purpose: the drawer is the set, and there is no
+/// request shape here that can name a path.
+#[tauri::command]
+pub fn empty_drawer(state: State<'_, AppState>) -> Result<crate::quarantine::PurgeOutcome> {
+    state.quarantine()?.purge_all(now_unix())
+}
+
 /// "Keep" — drop the finding from the results without remembering anything.
 #[tauri::command]
 pub fn keep(state: State<'_, AppState>, id: String) -> Result<()> {
@@ -573,9 +683,23 @@ pub fn reveal_quarantined(state: State<'_, AppState>, id: String) -> Result<()> 
     state.platform().reveal(&record.stored_path)
 }
 
+/// Measure the volume.
+///
+/// `async`, and the measuring itself handed to a blocking thread, because a
+/// synchronous `#[tauri::command]` runs on the main thread — the same thread
+/// that draws the window. This walks real directories and takes seconds on a
+/// full disk, so as a synchronous command it froze the entire interface for
+/// the duration: no repaint, no animation, and no possibility of showing a
+/// loading state, since the code that would draw one could not run either.
+///
+/// `rummage` has always known this and put its scan on a worker. This is the
+/// same rule, applied to the other command that touches the whole disk.
 #[tauri::command]
-pub fn space(state: State<'_, AppState>) -> Result<SpaceOverview> {
-    state.space_overview()
+pub async fn space(state: State<'_, AppState>) -> Result<SpaceOverview> {
+    let handle = state.clone_handle();
+    tauri::async_runtime::spawn_blocking(move || handle.space_overview())
+        .await
+        .map_err(|e| ScuttleError::Internal(format!("measuring stopped unexpectedly: {e}")))?
 }
 
 #[tauri::command]
@@ -696,9 +820,12 @@ pub fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static
         quarantine_member,
         quarantine_group,
         quarantine_confident,
+        quarantine_all_confident,
+        quarantine_many,
         quarantine_list,
         restore,
         remove_permanently,
+        empty_drawer,
         keep,
         ignore,
         clear_ignores,
