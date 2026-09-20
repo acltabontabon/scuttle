@@ -149,7 +149,9 @@ jobs:
           # anyone who would rather check them all at once.
           cat ./*.sha256 | sort -k2 > SHA256SUMS.txt
           cat SHA256SUMS.txt
-          shasum -a 256 -c SHA256SUMS.txt
+          # Re-checked here against the files that are about to be uploaded,
+          # so a corrupted artifact transfer cannot reach the release.
+          sha256sum -c SHA256SUMS.txt
 
       - name: Write the release notes
         env:
