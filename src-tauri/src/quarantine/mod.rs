@@ -198,7 +198,14 @@ impl Quarantine {
 
         let (destination, renamed) = free_destination(&record.original_path);
         move_across(&record.stored_path, &destination)?;
-        let _ = std::fs::remove_dir_all(record.stored_path.parent().unwrap_or(&self.root));
+        // Drop the emptied cell, and only ever a cell. A malformed record
+        // whose stored path sat directly in the drawer root would otherwise
+        // take the whole drawer with it.
+        if let Some(cell) = record.stored_path.parent() {
+            if safety::paths::is_strictly_within(cell, &self.root) {
+                let _ = std::fs::remove_dir_all(cell);
+            }
+        }
 
         self.store
             .set_quarantine_status(id, QuarantineStatus::Restored, now_unix)?;
@@ -352,13 +359,31 @@ fn move_across(from: &Path, to: &Path) -> Result<()> {
         }
     }
 
+    // From here the move is a copy followed by a removal, and either half can
+    // fail on its own: a file another process is holding open refuses to be
+    // removed long after it has happily been read. Leaving the copy behind
+    // would duplicate the data, and on the way out of the drawer would hand
+    // back a file that the drawer still holds. So a failure at any point puts
+    // the filesystem back the way it was and reports what went wrong.
     let meta = std::fs::symlink_metadata(from)?;
     if meta.is_dir() {
-        copy_tree(from, to)?;
-        std::fs::remove_dir_all(from)?;
+        if let Err(err) = copy_tree(from, to) {
+            let _ = std::fs::remove_dir_all(to);
+            return Err(err);
+        }
+        if let Err(err) = std::fs::remove_dir_all(from) {
+            let _ = std::fs::remove_dir_all(to);
+            return Err(ScuttleError::Io(err));
+        }
     } else {
-        std::fs::copy(from, to)?;
-        std::fs::remove_file(from)?;
+        if let Err(err) = std::fs::copy(from, to) {
+            let _ = std::fs::remove_file(to);
+            return Err(ScuttleError::Io(err));
+        }
+        if let Err(err) = std::fs::remove_file(from) {
+            let _ = std::fs::remove_file(to);
+            return Err(ScuttleError::Io(err));
+        }
     }
     Ok(())
 }
@@ -816,6 +841,84 @@ mod tests {
         assert!(destination
             .to_string_lossy()
             .ends_with("report (restored 2).pdf"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_move_that_cannot_finish_leaves_nothing_behind() {
+        // The copy-then-remove fallback is the half of `move_across` that can
+        // stop in the middle: on Windows a file another process holds open
+        // copies perfectly well and then refuses to be deleted. A read-only
+        // parent directory reproduces that shape here — the source can be
+        // read but neither renamed nor removed.
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let locked = tmp.path().join("locked");
+        fs::create_dir_all(&locked).unwrap();
+        let source = locked.join("held.bin");
+        fs::write(&source, "the only copy").unwrap();
+        let destination = tmp.path().join("moved.bin");
+
+        let original = fs::metadata(&locked).unwrap().permissions();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+
+        let outcome = move_across(&source, &destination);
+
+        fs::set_permissions(&locked, original).unwrap();
+
+        assert!(outcome.is_err(), "a move that cannot complete must say so");
+        assert!(
+            !destination.exists(),
+            "the half-written copy must be cleaned up, not left as a duplicate"
+        );
+        assert_eq!(
+            fs::read_to_string(&source).unwrap(),
+            "the only copy",
+            "the source must survive a failed move intact"
+        );
+    }
+
+    #[test]
+    fn a_record_pointing_at_the_drawer_root_does_not_take_the_drawer_with_it() {
+        // Every real record stores its item one cell deep. A record that does
+        // not — a corrupted row, a hand-edited database — must not turn a
+        // single restore into an emptied drawer.
+        let f = fixture();
+        let root = f.quarantine.root().to_path_buf();
+        fs::create_dir_all(&root).unwrap();
+        let stray = root.join("stray.txt");
+        fs::write(&stray, "one restore").unwrap();
+        let neighbour_cell = root.join("11111111-1111-1111-1111-111111111111");
+        fs::create_dir_all(&neighbour_cell).unwrap();
+        fs::write(neighbour_cell.join("someone-elses.bin"), "still held").unwrap();
+
+        f.store
+            .insert_quarantine(&QuarantineRecord {
+                id: "shallow".into(),
+                finding_id: None,
+                original_path: f.home.join("Downloads/stray.txt"),
+                stored_path: stray,
+                display_name: "stray.txt".into(),
+                category: Category::Oddments,
+                size: 11,
+                content_hash: None,
+                evidence: vec![],
+                quarantined_unix: 0,
+                expires_unix: 0,
+                status: QuarantineStatus::Held,
+                resolved_unix: None,
+            })
+            .unwrap();
+
+        f.quarantine.restore("shallow", 2000).unwrap();
+
+        assert!(root.is_dir(), "the drawer itself must still be there");
+        assert_eq!(
+            fs::read_to_string(neighbour_cell.join("someone-elses.bin")).unwrap(),
+            "still held",
+            "restoring one item must not disturb another"
+        );
     }
 
     #[test]

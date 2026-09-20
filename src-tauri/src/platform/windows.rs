@@ -237,10 +237,20 @@ impl PlatformService for WindowsPlatformService {
     }
 
     fn reveal(&self, path: &Path) -> Result<()> {
+        use std::os::windows::process::CommandExt;
+
         // explorer.exe returns a non-zero exit code even on success, so the
         // status is deliberately not checked.
+        //
+        // `raw_arg` rather than `arg`, because Rust would quote any path
+        // containing a space and explorer reads the quoted form as one
+        // opaque token — it then opens Documents, or the user's profile,
+        // rather than the folder that was asked for. Handing the string over
+        // untouched is the only form explorer parses correctly, and a Windows
+        // path cannot contain a quote character, so there is nothing to
+        // escape.
         std::process::Command::new("explorer")
-            .arg(format!("/select,{}", path.display()))
+            .raw_arg(select_argument(path))
             .spawn()
             .map_err(ScuttleError::Io)?;
         Ok(())
@@ -259,9 +269,34 @@ impl PlatformService for WindowsPlatformService {
     }
 }
 
+/// The single argument explorer.exe expects in order to open a folder with
+/// one item already selected.
+///
+/// Built from the path's own `OsStr` rather than `Display`, so a name that is
+/// not valid Unicode still points at the file it came from instead of at a
+/// row of replacement characters.
+fn select_argument(path: &Path) -> std::ffi::OsString {
+    let mut argument = std::ffi::OsString::from("/select,");
+    argument.push(path.as_os_str());
+    argument
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_path_with_spaces_reaches_explorer_whole() {
+        // The bug this guards against is silent: explorer opens *a* window,
+        // just not the right one, so nothing errors and the user is told the
+        // file was revealed.
+        let argument = select_argument(Path::new("C:\\Users\\Sam\\My Things\\note (1).txt"));
+        assert_eq!(
+            argument.to_string_lossy(),
+            "/select,C:\\Users\\Sam\\My Things\\note (1).txt",
+            "the argument must carry the path verbatim, with no quoting"
+        );
+    }
 
     #[test]
     fn the_registry_reports_some_installed_applications() {
