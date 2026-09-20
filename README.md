@@ -40,13 +40,17 @@ No accounts. No cloud scanning. No "boost your PC" nonsense.
 
 | Your computer | Download |
 | --- | --- |
-| **Mac**, Apple silicon (M1 and later) | [`.dmg`](https://github.com/acltabontabon/scuttle/releases/latest) |
-| **Mac**, Intel | [`.dmg`](https://github.com/acltabontabon/scuttle/releases/latest) |
-| **Windows** 10 or 11, 64-bit | [`-setup.exe`](https://github.com/acltabontabon/scuttle/releases/latest) |
+| **Mac**, Apple silicon (M1 and later) | [`.dmg`](https://github.com/acltabontabon/scuttle/releases) |
+| **Mac**, Intel | [`.dmg`](https://github.com/acltabontabon/scuttle/releases) |
+| **Windows** 10 or 11, 64-bit | [`-setup.exe`](https://github.com/acltabontabon/scuttle/releases) |
 
-All three are on the [latest release](https://github.com/acltabontabon/scuttle/releases/latest),
+All three are on the [releases page](https://github.com/acltabontabon/scuttle/releases),
 each with a `.sha256` file beside it. Not sure which Mac you have? Apple menu →
 About This Mac; "Apple M1" or later means Apple silicon.
+
+The current build is **`v0.1.0-alpha.1`**, an alpha. It does what this page
+describes and its tests pass on macOS and Windows, but it has not been run on
+many machines yet — so give the drawer a look before you empty it.
 
 ### Installing
 

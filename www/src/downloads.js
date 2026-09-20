@@ -61,6 +61,25 @@ async function stableRelease() {
   return release;
 }
 
+/**
+ * The newest prerelease, for when there is no stable one yet.
+ *
+ * Offered, but never as though it were finished: the button says so, and it
+ * is only ever reached when `stableRelease` has already come back empty. A
+ * prerelease presented as a release is the one thing this must not do.
+ */
+async function newestPrerelease() {
+  const response = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=10`, {
+    headers: { Accept: 'application/vnd.github+json' },
+  });
+  if (!response.ok) return null;
+
+  const releases = await response.json();
+  if (!Array.isArray(releases)) return null;
+  // The API returns them newest first.
+  return releases.find((release) => release && !release.draft && release.prerelease) ?? null;
+}
+
 function assetsFor(release) {
   const found = new Map();
   for (const target of TARGETS) {
@@ -97,8 +116,13 @@ export async function setUpDownloads() {
   );
 
   let release = null;
+  let early = false;
   try {
     release = await stableRelease();
+    if (!release) {
+      release = await newestPrerelease();
+      early = Boolean(release);
+    }
   } catch {
     // Offline, blocked, or rate-limited. The static links stay.
     return;
@@ -150,9 +174,9 @@ export async function setUpDownloads() {
   const chosenTarget = TARGETS.find((target) => assets.get(target.slug) === chosen);
 
   if (chosen && chosenTarget) {
-    root.dataset.state = 'ready';
+    root.dataset.state = early ? 'early' : 'ready';
     primary.href = chosen.browser_download_url;
-    say(label, `Download for ${chosenTarget.os}`);
+    say(label, early ? `Try the alpha on ${chosenTarget.os}` : `Download for ${chosenTarget.os}`);
     say(
       note,
       [version && `${version}`, chosenTarget.detail, megabytes(chosen.size)]
@@ -160,6 +184,20 @@ export async function setUpDownloads() {
         .join(' · '),
     );
     rows.get(chosenTarget.slug)?.setAttribute('aria-current', 'true');
-    if (secondary) secondary.href = chosen.browser_download_url;
+    if (secondary) {
+      secondary.href = chosen.browser_download_url;
+      if (early) secondary.textContent = 'Try the alpha';
+    }
+
+    if (early) {
+      // Said in words next to the button, not only in the version number.
+      const aside = document.createElement('p');
+      aside.className = 'download-warning';
+      aside.innerHTML =
+        'This is an early build. It does what the page describes and its tests pass on both systems, ' +
+        'but it has not been run on many machines yet — so keep an eye on what you empty from the drawer. ' +
+        `<a href="${release.html_url ?? RELEASES}">What is in it</a>.`;
+      root.append(aside);
+    }
   }
 }
