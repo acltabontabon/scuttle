@@ -76,9 +76,14 @@ const sites = [
 
 // Every pattern is (what comes before)(the version)(what comes after), so
 // reading and rewriting can share one shape and neither has to count groups.
+//
+// `\r?\n` rather than `\n`, because git hands these files over with CRLF on
+// Windows and a literal `\n` then matches nothing — which is a confusing way
+// to fail on one platform only. The single-line patterns are safe already:
+// `$` in multiline mode treats a carriage return as a line terminator.
 const JSON_VERSION = /^(\s*"version":\s*")([^"]*)(",)$/m;
 const CARGO_VERSION = /^(version = ")([^"]*)(")$/m;
-const LOCK_ENTRY = /(\[\[package\]\]\nname = "scuttle"\nversion = ")([^"]*)(")/;
+const LOCK_ENTRY = /(\[\[package\]\]\r?\nname = "scuttle"\r?\nversion = ")([^"]*)(")/;
 
 function matchOnce(text, pattern, what) {
   const found = text.match(pattern);
