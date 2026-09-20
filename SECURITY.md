@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please report security issues privately through
-[GitHub's private vulnerability reporting](https://github.com/scuttle-app/scuttle/security/advisories/new)
+[GitHub's private vulnerability reporting](https://github.com/acltabontabon/scuttle/security/advisories/new)
 rather than in a public issue.
 
 Please include what you were able to make Scuttle do, the smallest filesystem
