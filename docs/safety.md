@@ -137,6 +137,32 @@ High risk is never actionable, at any confidence. Note also that the levels the
 user sees are coarse — High, Medium, Low. Internal weighted scoring is fine;
 "Confidence: 83.742%" is a tell of software that is guessing.
 
+## Acting on several things at once
+
+Doing everything one finding at a time is its own kind of failure: a tool that
+turns a tidy-up into fifty separate decisions is a chore, not a help. But bulk
+handling is also how cleanup software does its worst damage, so the line is
+drawn at **confidence**, not convenience.
+
+A bulk action only ever touches findings the core already rated
+`Quarantine` — high confidence *and* low cost of being wrong. Anything rated
+`Review` or `InspectOnly` has to be opened and acted on individually, because
+those ratings exist precisely to say "look at this yourself".
+
+Two details make that hold:
+
+* **The request names a pile, not a list of findings.** `quarantine_confident`
+  takes a `Category`. Eligibility is decided in the core from the recommended
+  action it computed, so there is no request shape the interface could send
+  that sweeps a risky finding up with the safe ones.
+* **Each item still passes the gate individually.** Being part of a batch is
+  not an authorisation. If one file changed since the scan it is refused and
+  reported, and the rest still go — partial success is the normal case, and
+  abandoning seventeen good moves because of one stale file would help nobody.
+
+The interface says the count and the size before you click, and never
+pre-selects anything.
+
 ## Quarantine first
 
 Permanent deletion is not the primary workflow and never happens as a side

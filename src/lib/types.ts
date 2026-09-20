@@ -178,6 +178,13 @@ export interface GroupOutcome {
   refused: GroupRefusal[]
 }
 
+export interface BulkOutcome {
+  held: QuarantineRecord[]
+  bytes: number
+  /** Findings Scuttle would not move. Partial success is normal. */
+  refused: GroupRefusal[]
+}
+
 export interface RestoreOutcome {
   path: string
   /** True when the original location was occupied and a new name was used. */

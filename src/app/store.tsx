@@ -112,6 +112,7 @@ export interface Store {
 
   quarantine: (candidate: Candidate, memberIndex?: number) => Promise<void>
   quarantineGroup: (candidate: Candidate, keep: KeepChoice) => Promise<void>
+  quarantineConfident: (category: Category) => Promise<void>
   keep: (candidate: Candidate) => Promise<void>
   ignore: (candidate: Candidate, scope: 'path' | 'app' | 'category') => Promise<void>
   restore: (id: string) => Promise<void>
@@ -339,6 +340,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [refreshDrawer, refreshFindings, say],
   )
 
+  const quarantineConfident = useCallback<Store['quarantineConfident']>(
+    async (category) => {
+      try {
+        const outcome = await api.quarantineConfident(category)
+        if (outcome.held.length === 0 && outcome.refused.length === 0) {
+          say('Nothing in that pile was confident enough to move.')
+          return
+        }
+        setDetail(null)
+        await Promise.all([refreshFindings(), refreshDrawer()])
+
+        const moved = `${outcome.held.length} ${outcome.held.length === 1 ? 'thing' : 'things'} in the drawer.`
+        if (outcome.refused.length > 0) {
+          say(`${moved} ${outcome.refused.length} left alone — ${outcome.refused[0]!.reason}`, {
+            tone: 'warn',
+          })
+        } else {
+          say(moved)
+        }
+      } catch (error) {
+        say(readError(error), { tone: 'warn' })
+      }
+    },
+    [refreshDrawer, refreshFindings, say],
+  )
+
   const keep = useCallback<Store['keep']>(
     async (candidate) => {
       try {
@@ -441,6 +468,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dismissNote,
       quarantine,
       quarantineGroup,
+      quarantineConfident,
       keep,
       ignore,
       restore,
@@ -450,7 +478,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [
       view, go, scan, rummage, cancel, findings, refreshFindings, detail, drawer,
       refreshDrawer, space, refreshSpace, settings, updateSettings, note, say,
-      dismissNote, quarantine, quarantineGroup, keep, ignore, restore, removePermanently, reveal,
+      dismissNote, quarantine, quarantineGroup, quarantineConfident, keep, ignore, restore, removePermanently, reveal,
     ],
   )
 

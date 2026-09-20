@@ -88,6 +88,7 @@ export function Preview() {
       dismissNote: () => {},
       quarantine: noop,
       quarantineGroup: noop,
+      quarantineConfident: noop,
       keep: noop,
       ignore: noop,
       restore: noop,

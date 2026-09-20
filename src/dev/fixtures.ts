@@ -252,7 +252,7 @@ function pile(items: Candidate[]) {
       oddments: 'Oddments',
     }[items[0]!.category],
     bytes: items.reduce((total, item) => total + item.size, 0),
-    count: items[0]!.category === 'screenshots' ? 31 : items.length,
+    count: items.length,
     actionable: items.filter((item) => item.recommended_action !== 'inspect_only').length,
     items,
   }

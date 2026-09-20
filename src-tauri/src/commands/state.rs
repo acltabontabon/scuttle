@@ -207,6 +207,15 @@ impl AppState {
         super::run_group_action(self, id, keep)
     }
 
+    /// Quarantine every confident finding in one pile. The Tauri command is a
+    /// thin wrapper over this.
+    pub fn quarantine_confident(
+        &self,
+        category: crate::model::Category,
+    ) -> Result<super::BulkOutcome> {
+        super::run_bulk_quarantine(self, category)
+    }
+
     pub fn space_overview(&self) -> Result<SpaceOverview> {
         let protected = self.protected_paths();
         crate::space::overview(

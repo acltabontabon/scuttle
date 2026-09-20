@@ -12,7 +12,9 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 import type {
+  BulkOutcome,
   Candidate,
+  Category,
   DryRunReport,
   GroupOutcome,
   KeepChoice,
@@ -59,6 +61,13 @@ export const api = {
     invoke<QuarantineRecord>('quarantine_member', { id, memberIndex }),
   quarantineGroup: (id: string, keep: KeepChoice) =>
     invoke<GroupOutcome>('quarantine_group', { id, keep }),
+  /**
+   * Sweep one pile. Deliberately takes a category, not a list of ids: which
+   * findings are eligible is the core's decision, so there is no request
+   * shape that can ask for a risky one to be swept up with the safe ones.
+   */
+  quarantineConfident: (category: Category) =>
+    invoke<BulkOutcome>('quarantine_confident', { category }),
   quarantineList: () => invoke<QuarantineView>('quarantine_list'),
   restore: (id: string) => invoke<RestoreOutcome>('restore', { id }),
   removePermanently: (id: string) => invoke<void>('remove_permanently', { id }),

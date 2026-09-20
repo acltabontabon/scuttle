@@ -62,23 +62,60 @@
   padding: 0;
 }
 
+/*
+ * A row is a grid, not a button: the row-level action has to be a real button
+ * of its own, and a button inside a button is invalid markup that browsers
+ * and screen readers both handle badly.
+ */
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--close);
+  margin: 0 calc(var(--close) * -1);
+  padding-right: var(--close);
+  border-radius: var(--round);
+  border-bottom: var(--hair) solid var(--rule);
+  transition: background var(--quick) var(--ease);
+}
+
+.row:hover {
+  background: var(--paper-raised);
+}
+
 .item {
   display: grid;
   grid-template-columns: 34px 1fr auto;
   align-items: baseline;
   gap: var(--step);
   width: 100%;
+  min-width: 0;
   padding: var(--step) var(--close);
-  margin: 0 calc(var(--close) * -1);
   text-align: left;
   border-radius: var(--round);
-  border-bottom: var(--hair) solid var(--rule);
-  transition: background var(--quick) var(--ease);
 }
 
-.item:hover,
-.item:focus-visible {
-  background: var(--paper-raised);
+/*
+ * Visible at rest rather than revealed on hover: an action that only exists
+ * once you find it is not an action, and a hover-only control is unreachable
+ * by touch and awkward by keyboard.
+ */
+.rowAction {
+  flex: none;
+  padding: 6px var(--close);
+  font-size: var(--type-small);
+  color: var(--ink-soft);
+  border: var(--hair) solid var(--rule);
+  border-radius: var(--round);
+  background: var(--paper);
+  transition:
+    color var(--quick) var(--ease),
+    border-color var(--quick) var(--ease);
+}
+
+.rowAction:hover {
+  color: var(--ink);
+  border-color: var(--ink-ghost);
 }
 
 .itemGlyph {
@@ -141,6 +178,39 @@
 .riskDot[data-risk='high'],
 .riskDot[data-risk='protected'] {
   background: var(--clay);
+}
+
+/* ---- the pile-level action ----------------------------------------------- */
+.bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--close);
+  max-width: 760px;
+  margin: 0 auto var(--step);
+  padding-bottom: var(--step);
+}
+
+.bulkAction {
+  padding: 9px var(--step);
+  font-size: var(--type-body);
+  color: var(--ink);
+  background: var(--paper-raised);
+  border: var(--hair) solid var(--ink-ghost);
+  border-radius: var(--round);
+  transition:
+    background var(--quick) var(--ease),
+    border-color var(--quick) var(--ease);
+}
+
+.bulkAction:hover {
+  background: var(--honey-soft);
+  border-color: var(--honey);
+}
+
+.bulkHint {
+  font-size: var(--type-small);
+  color: var(--ink-faint);
 }
 
 .more {

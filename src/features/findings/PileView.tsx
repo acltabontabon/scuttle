@@ -17,7 +17,7 @@ import styles from './PileView.module.css'
  * everything else is one click away in the detail sheet.
  */
 export function PileView({ category }: { category: Category }) {
-  const { findings, go, openDetail } = useStore()
+  const { findings, go, openDetail, quarantine, quarantineConfident } = useStore()
   const pile = findings?.piles.find((p) => p.category === category)
 
   if (!pile) {
@@ -35,6 +35,9 @@ export function PileView({ category }: { category: Category }) {
     )
   }
 
+  const confident = pile.items.filter((item) => item.recommended_action === 'quarantine')
+  const confidentBytes = confident.reduce((total, item) => total + item.size, 0)
+
   return (
     <div className={styles.pile}>
       <header className={styles.head}>
@@ -46,16 +49,37 @@ export function PileView({ category }: { category: Category }) {
           <p className={styles.blurb}>{CATEGORY_BLURB[pile.category]}</p>
           <p className={styles.tally}>
             {pile.count} {pile.count === 1 ? 'thing' : 'things'} · {bytes(pile.bytes)}
-            {pile.actionable > 0
-              ? ` · ${pile.actionable} Scuttle would act on`
-              : ' · nothing Scuttle suggests acting on'}
+            {confident.length > 0
+              ? ` · Scuttle is confident about ${confident.length}`
+              : ' · nothing Scuttle is confident about'}
           </p>
         </div>
       </header>
 
+      {/*
+        The pile-level action covers only what Scuttle already rated as worth
+        quarantining. Anything it wants you to look at stays out of reach of a
+        single click, which is what those ratings are for.
+      */}
+      {confident.length > 0 && (
+        <div className={styles.bulk}>
+          <button
+            className={styles.bulkAction}
+            onClick={() => void quarantineConfident(pile.category)}
+          >
+            {sweepLabel(confident.length, confidentBytes)}
+          </button>
+          <span className={styles.bulkHint}>
+            {confident.length === pile.count
+              ? 'Nothing is deleted — you can put any of it back.'
+              : `The other ${pile.count - confident.length} need a look from you.`}
+          </span>
+        </div>
+      )}
+
       <ul className={styles.items}>
         {pile.items.map((item) => (
-          <li key={item.id}>
+          <li key={item.id} className={styles.row}>
             <button className={styles.item} onClick={() => openDetail(item)}>
               <span className={styles.itemGlyph}>
                 <Glyph category={item.category} size={26} />
@@ -69,6 +93,17 @@ export function PileView({ category }: { category: Category }) {
                 <Verdict candidate={item} />
               </span>
             </button>
+
+            {item.recommended_action === 'quarantine' && (
+              <button
+                className={styles.rowAction}
+                onClick={() => void quarantine(item)}
+                title="Move it to the drawer. Nothing is deleted."
+                aria-label={`Put ${item.display_name} in the drawer`}
+              >
+                Drawer
+              </button>
+            )}
           </li>
         ))}
       </ul>
@@ -81,6 +116,17 @@ export function PileView({ category }: { category: Category }) {
       )}
     </div>
   )
+}
+
+/**
+ * The sweep button's label. Says the count and the size, so the click is never
+ * a surprise — "put all 6 in the drawer" is a different decision from "put it
+ * in the drawer".
+ */
+export function sweepLabel(count: number, size: number): string {
+  if (count === 1) return `Put it in the drawer · ${bytes(size)}`
+  if (count === 2) return `Put both in the drawer · ${bytes(size)}`
+  return `Put all ${count} in the drawer · ${bytes(size)}`
 }
 
 /**

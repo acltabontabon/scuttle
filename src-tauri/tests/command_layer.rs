@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use fixtures::*;
 use scuttle_core::commands::AppState;
-use scuttle_core::model::RecommendedAction;
+use scuttle_core::model::{Category, RecommendedAction};
 use scuttle_core::platform::PlatformService;
 use scuttle_core::scanning::{ScanObserver, ScanOptions, SilentObserver};
 
@@ -319,4 +319,126 @@ fn a_group_action_is_refused_on_a_finding_scuttle_would_not_act_on() {
         .quarantine_group(&inspect_only.id, scuttle_core::commands::KeepChoice::Newest)
         .expect_err("should refuse");
     assert_eq!(error.code(), "refused");
+}
+
+#[test]
+fn a_bulk_action_moves_only_what_scuttle_was_confident_about() {
+    // The safety line for bulk handling: anything rated Review or
+    // InspectOnly has to be opened and acted on individually, because those
+    // ratings exist precisely to say "look at this yourself".
+    let world = abandoned_game();
+    let (state, options) = state_for(&world);
+    let scan_id = state.start_scan(&options).expect("start");
+    state
+        .run_scan_with(&scan_id, options, &SilentObserver)
+        .expect("scan");
+
+    let before = state
+        .store()
+        .candidates_for_scan(&scan_id)
+        .expect("findings");
+    let confident: Vec<_> = before
+        .iter()
+        .filter(|c| c.category == Category::Ghosts)
+        .filter(|c| c.recommended_action == RecommendedAction::Quarantine)
+        .cloned()
+        .collect();
+    let spared: Vec<_> = before
+        .iter()
+        .filter(|c| c.category == Category::Ghosts)
+        .filter(|c| c.recommended_action != RecommendedAction::Quarantine)
+        .cloned()
+        .collect();
+    assert!(
+        !confident.is_empty(),
+        "fixture should have something confident"
+    );
+    assert!(!spared.is_empty(), "fixture should have something to spare");
+
+    let outcome = state
+        .quarantine_confident(Category::Ghosts)
+        .expect("bulk action");
+
+    assert_eq!(
+        outcome.held.len(),
+        confident.len(),
+        "refused: {:?}",
+        outcome.refused
+    );
+    assert_eq!(
+        outcome.bytes,
+        outcome.held.iter().map(|r| r.size).sum::<u64>()
+    );
+
+    for candidate in &confident {
+        assert!(
+            !candidate.path.exists(),
+            "{} should have moved",
+            candidate.display_name
+        );
+    }
+    for candidate in &spared {
+        assert!(
+            candidate.path.exists(),
+            "{} was swept up by a bulk action despite being {:?}",
+            candidate.display_name,
+            candidate.recommended_action
+        );
+    }
+}
+
+#[test]
+fn a_bulk_action_stays_inside_the_pile_it_was_given() {
+    let world = old_installers();
+    let (state, options) = state_for(&world);
+    let scan_id = state.start_scan(&options).expect("start");
+    state
+        .run_scan_with(&scan_id, options, &SilentObserver)
+        .expect("scan");
+
+    let outcome = state
+        .quarantine_confident(Category::Caches)
+        .expect("bulk action");
+    assert!(outcome.held.is_empty(), "no caches in this fixture");
+
+    // ...and the installers are all still there.
+    assert!(state
+        .store()
+        .candidates_for_scan(&scan_id)
+        .expect("findings")
+        .iter()
+        .any(|c| c.category == Category::Installers));
+}
+
+#[test]
+fn a_bulk_action_keeps_going_when_one_finding_has_gone_stale() {
+    let world = old_installers();
+    let (state, options) = state_for(&world);
+    let scan_id = state.start_scan(&options).expect("start");
+    state
+        .run_scan_with(&scan_id, options, &SilentObserver)
+        .expect("scan");
+
+    let confident: Vec<_> = state
+        .store()
+        .candidates_for_scan(&scan_id)
+        .expect("findings")
+        .into_iter()
+        .filter(|c| c.category == Category::Installers)
+        .filter(|c| c.recommended_action == RecommendedAction::Quarantine)
+        .collect();
+    assert!(confident.len() >= 2, "need at least two to disturb one");
+
+    let victim = confident[0].path.clone();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    std::fs::write(&victim, b"changed underneath us").expect("write");
+
+    let outcome = state
+        .quarantine_confident(Category::Installers)
+        .expect("bulk action");
+
+    assert_eq!(outcome.held.len(), confident.len() - 1);
+    assert_eq!(outcome.refused.len(), 1);
+    assert_eq!(outcome.refused[0].code, "stale");
+    assert!(victim.exists(), "the changed file must be left where it is");
 }

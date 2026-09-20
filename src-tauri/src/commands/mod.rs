@@ -405,6 +405,74 @@ pub(crate) fn run_group_action(
     })
 }
 
+/// What a bulk action did.
+#[derive(Debug, Clone, Serialize)]
+pub struct BulkOutcome {
+    pub held: Vec<QuarantineRecord>,
+    pub bytes: u64,
+    /// Findings Scuttle would not move, and why. Partial success is normal:
+    /// one file having changed since the scan is not a reason to abandon the
+    /// rest.
+    pub refused: Vec<GroupRefusal>,
+}
+
+/// Quarantine everything in one pile that Scuttle was already confident about.
+///
+/// The frontend sends a *category*, never a list of ids. Which findings are
+/// eligible is decided here, from the recommended action the core computed —
+/// so there is no request shape that can ask for a risky finding to be swept
+/// up with the safe ones. Anything rated `Review` or `InspectOnly` has to be
+/// opened and acted on individually, which is the whole point of those
+/// ratings.
+#[tauri::command]
+pub fn quarantine_confident(state: State<'_, AppState>, category: Category) -> Result<BulkOutcome> {
+    run_bulk_quarantine(state.inner(), category)
+}
+
+pub(crate) fn run_bulk_quarantine(state: &AppState, category: Category) -> Result<BulkOutcome> {
+    let Some(scan) = state.store().latest_scan()? else {
+        return Ok(BulkOutcome {
+            held: Vec::new(),
+            bytes: 0,
+            refused: Vec::new(),
+        });
+    };
+
+    let eligible: Vec<CleanupCandidate> = state
+        .store()
+        .candidates_for_scan(&scan.id)?
+        .into_iter()
+        .filter(|c| c.category == category)
+        .filter(|c| c.recommended_action == RecommendedAction::Quarantine)
+        .collect();
+
+    let mut held = Vec::new();
+    let mut refused = Vec::new();
+    let mut bytes = 0u64;
+
+    for candidate in eligible {
+        // Each one still goes through the full gate: the stored finding is a
+        // request, and being part of a batch does not make it an authorisation.
+        match state.hold(&candidate) {
+            Ok(record) => {
+                bytes += record.size;
+                held.push(record);
+            }
+            Err(error) => refused.push(GroupRefusal {
+                display_name: candidate.display_name.clone(),
+                reason: error.to_string(),
+                code: error.code().to_string(),
+            }),
+        }
+    }
+
+    Ok(BulkOutcome {
+        held,
+        bytes,
+        refused,
+    })
+}
+
 /// A candidate pointing at one member of a group.
 ///
 /// It carries the group's evidence and verdict but the member's own path and
@@ -627,6 +695,7 @@ pub fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static
         quarantine,
         quarantine_member,
         quarantine_group,
+        quarantine_confident,
         quarantine_list,
         restore,
         remove_permanently,
