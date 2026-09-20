@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Scuttle — a little creature for the files you forgot about</title>
+    <meta
+      name="description"
+      content="A desktop app for macOS and Windows that rummages through the forgotten corners of your computer — old installers, screenshots, duplicates, large files, leftovers from software you removed — and shows you why it noticed each one. Nothing is deleted without you."
+    />
+    <link rel="canonical" href="https://acltabontabon.com/scuttle/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Scuttle" />
+    <meta property="og:url" content="https://acltabontabon.com/scuttle/" />
+    <meta property="og:title" content="Scuttle — a little creature for the files you forgot about" />
+    <meta
+      property="og:description"
+      content="Rummage through the forgotten corners of your Mac or PC. See what turned up, and why. Nothing is deleted without you."
+    />
+    <meta property="og:image" content="https://acltabontabon.com/scuttle/social.png" />
+    <meta property="og:image:alt" content="Scuttle, a small round crab-like creature, sitting on warm paper beside the word Scuttle." />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icon-180.png" />
+    <meta name="theme-color" content="#f3ece0" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1d1916" media="(prefers-color-scheme: dark)" />
+
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="masthead">
+      <a class="wordmark" href="#main" aria-label="Scuttle, home">
+        <svg class="mark" viewBox="0 0 24 20" width="26" height="22" aria-hidden="true" focusable="false">
+          <path d="M12 3 C17 3 20 6.4 20 11 L20 14.6 L4 14.6 L4 11 C4 6.4 7 3 12 3 Z" fill="currentColor" />
+          <circle cx="9.4" cy="10.2" r="1.9" fill="var(--honey)" />
+          <circle cx="14.6" cy="10.2" r="1.9" fill="var(--honey)" />
+          <path d="M4.6 14.6 L1.6 17.8 M8 14.6 L6 18.4 M19.4 14.6 L22.4 17.8 M16 14.6 L18 18.4"
+                stroke="currentColor" stroke-width="1.7" stroke-linecap="round" fill="none" />
+        </svg>
+        <span>Scuttle</span>
+      </a>
+      <nav class="masthead-links" aria-label="Elsewhere">
+        <a href="#how">How it works</a>
+        <a href="#questions">Questions</a>
+        <a href="https://github.com/acltabontabon/scuttle">GitHub</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <!-- ---------------------------------------------------------------
+           The first screen. What it is, why you would want it, where to
+           get it — above everything else, with no story to scroll past.
+      ---------------------------------------------------------------- -->
+      <section class="hero">
+        <!-- Objects drifting in the margin, drawn by main.js. Decorative:
+             everything the page has to say is said in the text. -->
+        <div class="strewn" id="strewn" aria-hidden="true"></div>
+
+        <div class="hero-words">
+          <p class="overline">macOS &amp; Windows · free &amp; open source</p>
+          <h1>A little creature<br /><span class="h1-swash">for the files</span><br />you forgot about.</h1>
+
+          <p class="lede">
+            Your computer keeps things. Installers from last spring, eleven
+            attempts at the same screenshot, folders belonging to software you
+            removed months ago. <strong>Scuttle</strong> rummages through the
+            corners where all of that collects, and shows you what turned up —
+            along with why it noticed.
+          </p>
+
+          <p class="lede-quiet">
+            It never deletes anything on its own. Most of what it finds is
+            yours to keep; the point is to see it.
+          </p>
+
+          <!-- Filled in by downloads.js. The markup below is what someone
+               gets with JavaScript off or broken: a real, working link. -->
+          <div class="download" id="download" data-state="static">
+            <a class="button primary" id="download-primary"
+               href="https://github.com/acltabontabon/scuttle/releases/latest">
+              <span id="download-primary-label">Get Scuttle</span>
+              <span class="button-note" id="download-primary-note">from the releases page</span>
+            </a>
+
+            <details class="picker" id="download-picker">
+              <summary>Choose a different one</summary>
+              <ul class="picker-list" id="download-list">
+                <li>
+                  <a href="https://github.com/acltabontabon/scuttle/releases/latest" data-slug="macos-apple-silicon">
+                    <b>macOS</b><span>Apple silicon — M1 and later</span>
+                  </a>
+                </li>
+                <li>
+                  <a href="https://github.com/acltabontabon/scuttle/releases/latest" data-slug="macos-intel">
+                    <b>macOS</b><span>Intel</span>
+                  </a>
+                </li>
+                <li>
+                  <a href="https://github.com/acltabontabon/scuttle/releases/latest" data-slug="windows-x64-setup">
+                    <b>Windows</b><span>10 or 11, 64-bit</span>
+                  </a>
+                </li>
+              </ul>
+              <p class="picker-foot">
+                Not sure which Mac? Apple menu → About This Mac. “Apple M1” or
+                later means Apple silicon.
+              </p>
+            </details>
+          </div>
+
+          <p class="signing">
+            Free and open source, under
+            <a href="https://github.com/acltabontabon/scuttle/blob/main/LICENSE">Apache 2.0</a>.
+            There are no code-signing certificates behind these builds, so macOS
+            and Windows will each warn you once —
+            <a href="#prompt">here is what you will see</a>.
+          </p>
+        </div>
+
+        <div class="hero-shot">
+          <span class="tape" aria-hidden="true"></span>
+          <figure class="frame" id="hero-figure">
+            <!-- Replaced with the demo loop by main.js once the poster has
+                 loaded, and never when the visitor has asked for less motion. -->
+            <img id="hero-media" src="./media/home.png" width="1180" height="800"
+                 alt="Scuttle's window on macOS: the word Scuttle set large in a serif, the line “Your computer leaves stuff everywhere.”, a single dark Rummage button, and a small round crab-like creature with amber eyes sitting on a thin floor line below."
+                 fetchpriority="high" />
+            <button type="button" class="play" id="hero-play" hidden>
+              <span class="play-icon" aria-hidden="true"></span>
+              <span id="hero-play-label">Play the demo</span>
+            </button>
+          </figure>
+          <p class="frame-caption" id="hero-caption">Scuttle on macOS. One button, and it tells you what it found.</p>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------------
+           The real workflow, in four beats, each composed differently.
+      ---------------------------------------------------------------- -->
+        <svg class="ink-rule" viewBox="0 0 600 12" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+          <path d="M2 7.2 C62 3.4 118 9.4 176 6.2 C238 2.8 292 9.8 352 6.6 C414 3.2 468 9.2 528 5.8 C556 4.2 578 6.4 598 5.2" />
+        </svg>
+
+      <section class="story" id="how">
+        <h2 class="section-heading">Four things happen, in this order</h2>
+
+        <!-- 1. Find it — the piles, drawn the way the app draws them. -->
+        <article class="beat beat-find reveal">
+          <div class="beat-words">
+            <p class="beat-number"><span class="beat-figure" aria-hidden="true">1</span>One</p>
+            <h3>It rummages</h3>
+            <p>
+              Press the button and Scuttle walks the folders you have enabled —
+              Downloads, the Desktop, application support and cache
+              directories, screenshot folders, Steam and Epic libraries where
+              they exist. What it finds settles into piles you can dig through.
+            </p>
+            <p class="beat-aside">
+              It narrates as it goes, and a rummage of a tidy machine comes
+              back saying so.
+            </p>
+          </div>
+          <div class="beat-art" aria-hidden="true">
+            <div class="piles" id="piles"></div>
+          </div>
+        </article>
+
+        <!-- 2. Review it — the evidence, quoted from the real interface. -->
+        <article class="beat beat-review reveal">
+          <div class="beat-words">
+            <p class="beat-number"><span class="beat-figure" aria-hidden="true">2</span>Two</p>
+            <h3>It shows its working</h3>
+            <p>
+              Every finding carries the evidence behind it, and a confidence
+              separate from a risk. Scuttle can be completely certain about
+              what something is and still have no business suggesting you
+              remove it.
+            </p>
+            <p class="beat-aside">
+              When it cannot work out what something is, it says
+              <em>“Scuttle has no idea what this is. You decide.”</em> rather
+              than guessing.
+            </p>
+          </div>
+          <figure class="evidence" role="figure" aria-label="An example finding as Scuttle presents it">
+            <div class="evidence-head">
+              <span class="evidence-name">Cyberpunk 2077</span>
+              <span class="evidence-size">6.40 GB</span>
+            </div>
+            <p class="evidence-say">
+              Steam has no installation of Cyberpunk 2077. 6.40 GB stayed
+              behind, untouched for 142 days.
+            </p>
+            <p class="evidence-label">Why Scuttle noticed</p>
+            <ul class="evidence-list">
+              <li>Steam has no installation of Cyberpunk 2077</li>
+              <li>Untouched for 142 days</li>
+              <li>Contents look generated — 91% of it is cache and log files</li>
+              <li>Nothing appears to be using it</li>
+            </ul>
+            <div class="evidence-verdict">
+              <span><b>Confidence</b> High</span>
+              <span><b>Risk</b> Low</span>
+            </div>
+          </figure>
+        </article>
+
+        <!-- 3. The drawer — a shallow drawer that actually opens. -->
+        <article class="beat beat-drawer reveal">
+          <div class="beat-words">
+            <p class="beat-number"><span class="beat-figure" aria-hidden="true">3</span>Three</p>
+            <h3>It goes in the drawer</h3>
+            <p>
+              Nothing you pick is deleted. It moves to a holding folder and
+              Scuttle writes down where it came from, so putting it back is one
+              button — into exactly the folder it left, recreated if you have
+              since deleted it, and never on top of something that has taken
+              its name.
+            </p>
+            <p class="beat-aside">
+              The drawer is still on your disk, so it has not freed any space
+              yet. Scuttle says so on the drawer screen, in those words.
+            </p>
+          </div>
+
+          <div class="drawer-scene">
+            <div class="drawer" id="drawer" data-open="false">
+              <div class="drawer-body" id="drawer-body">
+                <div class="drawer-contents">
+                  <img id="drawer-media" src="./media/home.png" width="1180" height="800"
+                       alt="Scuttle's window, shown inside the drawer illustration." />
+                </div>
+              </div>
+              <div class="drawer-front">
+                <span class="drawer-grain" aria-hidden="true"></span>
+                <span class="drawer-handle" aria-hidden="true"></span>
+                <span class="drawer-label" id="drawer-label">The drawer</span>
+              </div>
+            </div>
+            <button type="button" class="button quiet" id="drawer-toggle"
+                    aria-expanded="false" aria-controls="drawer-body">
+              Open the drawer
+            </button>
+          </div>
+        </article>
+
+        <!-- 4. Let it go. -->
+        <article class="beat beat-go reveal">
+          <div class="beat-words">
+            <p class="beat-number"><span class="beat-figure" aria-hidden="true">4</span>Four</p>
+            <h3>Or you let it go</h3>
+            <p>
+              Emptying the drawer is the only thing that frees the space, and
+              the only thing that destroys anything. Items do not go to the
+              Trash or the Recycle Bin — the confirmation says exactly that
+              before you agree to it.
+            </p>
+            <p class="beat-aside">
+              Anything you leave in the drawer expires after the window you
+              choose — 7, 14 or 30 days — and is removed the next time Scuttle
+              starts.
+            </p>
+          </div>
+          <div class="go-art">
+            <blockquote class="confirm">
+              <p>
+                Delete all 3 things permanently? This frees 1.2 GB. Nothing
+                goes to the Trash and nothing can be recovered.
+              </p>
+              <p class="confirm-buttons">
+                <span class="confirm-danger">Delete all 3 permanently</span>
+                <span class="confirm-cancel">Cancel</span>
+              </p>
+            </blockquote>
+            <p class="go-caption">The wording from the app, unchanged.</p>
+          </div>
+        </article>
+      </section>
+
+      <!-- ---------------------------------------------------------------
+           Questions people actually have.
+      ---------------------------------------------------------------- -->
+        <svg class="ink-rule" viewBox="0 0 600 12" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+          <path d="M2 7.2 C62 3.4 118 9.4 176 6.2 C238 2.8 292 9.8 352 6.6 C414 3.2 468 9.2 528 5.8 C556 4.2 578 6.4 598 5.2" />
+        </svg>
+
+      <section class="questions" id="questions">
+        <h2 class="section-heading">Reasonable questions</h2>
+
+        <div class="qa reveal">
+          <div class="q">
+            <h3>What does it look for?</h3>
+            <p>
+              Leftovers from software that is no longer installed, screenshots
+              nobody looked at again, installers that already did their job,
+              byte-identical duplicates, caches it can attribute to the
+              application that made them, unusually large files, and developer
+              build debris if you switch it on. Anything it notices but cannot
+              name goes into a pile called Oddments rather than being dressed
+              up as a conclusion.
+            </p>
+          </div>
+
+          <div class="q">
+            <h3>Does it delete anything by itself?</h3>
+            <p>
+              No. Picking something moves it to the drawer, and emptying the
+              drawer is a separate, confirmed action you take. Scuttle also
+              refuses to touch whole categories of place outright — keys,
+              password vaults, browser profiles, mail, repositories,
+              cloud-sync folders — and those are not merely hidden from the
+              results, they are never walked at all.
+            </p>
+          </div>
+
+          <div class="q" id="space">
+            <h3>Does putting something in the drawer free up space?</h3>
+            <p>
+              Not yet. The drawer is a folder on the same disk, so a held file
+              still occupies exactly what it did before. The space comes back
+              when you empty the drawer, and not a moment earlier.
+            </p>
+          </div>
+
+          <div class="q">
+            <h3>Can I get something back?</h3>
+            <p>
+              Yes — that is what the drawer is for. <em>Put it back</em>
+              returns a file to where it came from. If the folder it lived in
+              has since gone, Scuttle recreates it; if something else has taken
+              its name, Scuttle restores it alongside rather than over the top,
+              and tells you where it went.
+            </p>
+          </div>
+
+          <div class="q">
+            <h3>Does it work offline?</h3>
+            <p>
+              It only works offline, in effect. There is no account, no server
+              and no telemetry, and Scuttle makes no network requests of its
+              own — it does not even check whether it is out of date. Findings
+              and drawer records live in one database on your machine, and full
+              paths are never written to its logs.
+            </p>
+          </div>
+
+          <div class="q" id="prompt">
+            <h3>Why does my Mac or PC warn me about it?</h3>
+            <p>
+              Because Scuttle is built without paid code-signing certificates,
+              so neither operating system can tell you who made it. The macOS
+              builds are not Developer&nbsp;ID signed or notarized, and the
+              Windows installer is unsigned.
+            </p>
+            <p>
+              <b>On macOS</b>, open it once from Applications, then go to
+              System&nbsp;Settings → Privacy&nbsp;&amp;&nbsp;Security, scroll to
+              Security, and click <b>Open Anyway</b>. That button appears only
+              after you have tried to open the app, and only for about an hour
+              afterwards.
+            </p>
+            <p>
+              <b>On Windows</b>, SmartScreen will say it stopped an
+              unrecognised app: click <b>More info</b>, then <b>Run anyway</b>.
+              It installs for your account only, so there is no administrator
+              prompt.
+            </p>
+            <p class="q-foot">
+              You will not be asked to switch anything off. The
+              <a href="https://github.com/acltabontabon/scuttle#installing">installation notes</a>
+              go through both in more detail, including how to tell an ordinary
+              warning from a genuinely broken download.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="closing reveal">
+        <svg class="creature" viewBox="0 0 100 86" width="128" height="110" role="img"
+             aria-label="Scuttle, a small round crab-like creature with two amber eyes, waiting.">
+          <g class="claw claw-left">
+            <path d="M32 44 L20 35" />
+            <circle class="pincer" cx="18.5" cy="33.5" r="5" />
+            <circle cx="21.5" cy="30" r="2.6" fill="var(--paper)" stroke="none" />
+          </g>
+          <g class="claw claw-right">
+            <path d="M68 44 L80 35" />
+            <circle class="pincer" cx="81.5" cy="33.5" r="5" />
+            <circle cx="78.5" cy="30" r="2.6" fill="var(--paper)" stroke="none" />
+          </g>
+          <g class="legs">
+            <path class="leg" d="M32 56 L10 62" />
+            <path class="leg" d="M37 60 L17 75" />
+            <path class="leg" d="M43 62 L31 83" />
+          </g>
+          <g class="legs mirrored" transform="translate(100, 0) scale(-1, 1)">
+            <path class="leg" d="M32 56 L10 62" />
+            <path class="leg" d="M37 60 L17 75" />
+            <path class="leg" d="M43 62 L31 83" />
+          </g>
+          <g class="shell">
+            <path d="M50 20 C67 20 79 31 79 46 L79 62 L21 62 L21 46 C21 31 33 20 50 20 Z" />
+            <ellipse class="eye" cx="42" cy="45" rx="5.4" ry="5.4" />
+            <ellipse class="eye" cx="58" cy="45" rx="5.4" ry="5.4" />
+          </g>
+        </svg>
+        <p class="closing-line">Go on, then. See what it drags out.</p>
+        <p class="closing-download">
+          <a class="button primary" id="download-secondary"
+             href="https://github.com/acltabontabon/scuttle/releases/latest">Get Scuttle</a>
+        </p>
+      </section>
+    </main>
+
+    <footer class="colophon">
+      <nav aria-label="Project links">
+        <a href="https://github.com/acltabontabon/scuttle">Source</a>
+        <a href="https://github.com/acltabontabon/scuttle/releases">Releases</a>
+        <a href="https://github.com/acltabontabon/scuttle/issues">Report a problem</a>
+        <a href="https://github.com/acltabontabon/scuttle/blob/main/CHANGELOG.md">Changelog</a>
+      </nav>
+      <p class="colophon-foot">
+        Apache 2.0 · Built by <a href="https://acltabontabon.com/">acltabontabon</a> ·
+        <a href="https://ko-fi.com/aclt_attic">Buy me a coffee</a> if you like, though
+        Scuttle is free either way.
+      </p>
+    </footer>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

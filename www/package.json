@@ -1,0 +1,17 @@
+{
+  "name": "scuttle-www",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "The marketing site for Scuttle. Deliberately separate from the desktop application's own dependencies.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "media": "node scripts/media.mjs",
+    "dev": "npm run media && vite",
+    "build": "npm run media && vite build",
+    "preview": "npm run build && node scripts/stage-subpath.mjs && vite preview --outDir .preview"
+  },
+  "devDependencies": {
+    "vite": "^7.2.0"
+  }
+}

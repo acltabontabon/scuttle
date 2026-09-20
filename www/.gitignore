@@ -1,0 +1,5 @@
+node_modules/
+dist/
+# Brought in from ../docs/media at build time; not a second copy in git.
+public/media/
+.preview/

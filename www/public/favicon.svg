@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 20">
+  <!-- Scuttle's own wordmark silhouette, from src/visuals/Mark.tsx. -->
+  <path d="M12 3 C17 3 20 6.4 20 11 L20 14.6 L4 14.6 L4 11 C4 6.4 7 3 12 3 Z" fill="#2b2520"/>
+  <circle cx="9.4" cy="10.2" r="1.9" fill="#d99a2b"/>
+  <circle cx="14.6" cy="10.2" r="1.9" fill="#d99a2b"/>
+  <path d="M4.6 14.6 L1.6 17.8 M8 14.6 L6 18.4 M19.4 14.6 L22.4 17.8 M16 14.6 L18 18.4"
+        stroke="#2b2520" stroke-width="1.7" stroke-linecap="round" fill="none"/>
+</svg>
