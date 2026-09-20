@@ -83,9 +83,15 @@ The screenshots and the demo are in `docs/media/`, where the README and the
 release notes already point at them, and are copied into the site at build
 time. One copy, one place to update.
 
-[`../scripts/demo/record.sh`](../scripts/demo/record.sh) makes them by driving
-the real application against an invented home directory. Nothing on the site
-is a mock-up.
+[`../scripts/demo/record.sh`](../scripts/demo/record.sh) makes all four by
+driving the real application against an invented home directory: `demo.gif`
+and `demo.mp4` are the same recording, and `findings.png` and `drawer.png`
+are frames of it, so a screenshot cannot drift from the run it came from.
+Nothing on the site is a mock-up.
+
+The hero shows `findings.png` and offers the recording behind a button, so
+nobody downloads a video to read a paragraph. The offer stands under reduced
+motion — nothing plays until it is pressed.
 
 ## Deploying
 

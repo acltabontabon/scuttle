@@ -15,7 +15,7 @@
 
 </div>
 
-<img width="100%" alt="Scuttle rummaging through a folder of demonstration files: the scan narrates what it is looking through, the findings settle into illustrated piles, a pile of leftovers from uninstalled software opens to show each file and the evidence behind it, one file is moved into the drawer, and then put back where it came from." src="docs/media/demo.gif">
+<img width="100%" alt="A run through Scuttle: pressing Rummage, the findings settling into four illustrated piles totalling 117 MB, opening the pile of leftovers to see two folders each marked “The app is gone.”, ticking one and putting it in the drawer — which says nothing has been deleted and the space is not back yet — then opening the drawer and putting the file back where it came from." src="docs/media/demo.gif">
 
 Scuttle is a desktop utility that rummages through the forgotten corners of your
 computer and shows you what turned up:

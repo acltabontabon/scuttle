@@ -4,7 +4,7 @@
 // that can fall out of date, so they are brought in at build time instead of
 // being committed twice.
 
-import { cpSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -12,13 +12,17 @@ const www = join(dirname(fileURLToPath(import.meta.url)), '..');
 const from = join(www, '../docs/media');
 const to = join(www, 'public/media');
 
+// Cleared first, not merged into: a copy that only ever adds files keeps
+// serving media that has since been deleted from docs/media, which is how a
+// build ends up shipping a screenshot nobody can find the source of.
+rmSync(to, { recursive: true, force: true });
+mkdirSync(to, { recursive: true });
+
 if (!existsSync(from)) {
-  console.warn(`No docs/media yet — the site will fall back to its drawn illustrations.`);
-  mkdirSync(to, { recursive: true });
+  console.warn('No docs/media yet — the site will fall back to its drawn illustrations.');
   process.exit(0);
 }
 
-mkdirSync(to, { recursive: true });
 cpSync(from, to, { recursive: true });
 
 const sizes = readdirSync(to)

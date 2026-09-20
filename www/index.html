@@ -130,15 +130,15 @@
           <figure class="frame" id="hero-figure">
             <!-- Replaced with the demo loop by main.js once the poster has
                  loaded, and never when the visitor has asked for less motion. -->
-            <img id="hero-media" src="./media/home.png" width="1180" height="800"
-                 alt="Scuttle's window on macOS: the word Scuttle set large in a serif, the line “Your computer leaves stuff everywhere.”, a single dark Rummage button, and a small round crab-like creature with amber eyes sitting on a thin floor line below."
+            <img id="hero-media" src="./media/findings.png" width="1180" height="800"
+                 alt="Scuttle's findings screen: 117 MB in large serif type, “worth reviewing, across 4 piles. Nothing has been touched.”, and four loose hand-drawn heaps labelled Installers, Ghosts, Screenshots and Copies, each with its size and how many things are in it."
                  fetchpriority="high" />
             <button type="button" class="play" id="hero-play" hidden>
               <span class="play-icon" aria-hidden="true"></span>
               <span id="hero-play-label">Play the demo</span>
             </button>
           </figure>
-          <p class="frame-caption" id="hero-caption">Scuttle on macOS. One button, and it tells you what it found.</p>
+          <p class="frame-caption" id="hero-caption">Scuttle on macOS, after rummaging through a folder of invented demonstration files.</p>
         </div>
       </section>
 
@@ -234,33 +234,11 @@
           <div class="drawer-scene">
             <div class="drawer" id="drawer" data-open="false">
               <div class="drawer-body" id="drawer-body">
-                <!-- A drawing of the drawer in the app's own words, set the
-                     same way as the finding and the confirmation above and
-                     below it. Deliberately not a screenshot: it is an
-                     illustration and reads as one. -->
+                <!-- The drawer opens onto the actual drawer screen, taken
+                     from the recording rather than drawn. -->
                 <div class="drawer-contents">
-                  <p class="held-head"><b>3 things</b> · 1.2 GB held</p>
-                  <ul class="held">
-                    <li>
-                      <span class="held-name">com.harborlight.tidepool</span>
-                      <span class="held-from">from ~/Library/Application Support</span>
-                      <span class="held-left">12 days left</span>
-                    </li>
-                    <li>
-                      <span class="held-name">Marlinspike (3).dmg</span>
-                      <span class="held-from">from ~/Downloads</span>
-                      <span class="held-left">12 days left</span>
-                    </li>
-                    <li>
-                      <span class="held-name">Screenshot 2026-02-14 at 15.24.41.png</span>
-                      <span class="held-from">from ~/Desktop</span>
-                      <span class="held-left">9 days left</span>
-                    </li>
-                  </ul>
-                  <p class="held-foot">
-                    These files still take up disk space. Put them back before
-                    they expire.
-                  </p>
+                  <img id="drawer-media" src="./media/drawer.png" width="1180" height="800"
+                       alt="Scuttle's drawer screen: “1 thing · 24.5 MB held”, the note that these files still take up disk space and should be put back before they expire, and one held folder showing where it came from, how long it has left, and buttons to put it back or delete it permanently." />
                 </div>
               </div>
               <div class="drawer-front">

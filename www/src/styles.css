@@ -738,62 +738,17 @@ img { height: auto; }
 .drawer[data-open="true"] .drawer-body { max-height: 34rem; }
 
 .drawer-contents {
-  padding: var(--gap) var(--gap) var(--step);
+  padding: var(--step) var(--step) 0;
   background: var(--paper-deep);
 }
-.held-head {
-  font-size: 0.86rem;
-  color: var(--ink-soft);
-  margin-bottom: var(--close);
-}
-.held-head b { font-weight: 600; color: var(--ink); }
-
-.held { list-style: none; margin: 0; padding: 0; }
-.held li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0 var(--step);
-  align-items: baseline;
-  padding: var(--close) var(--step);
-  background: var(--paper-raised);
+.drawer-contents img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--round) var(--round) 0 0;
   border: 1px solid var(--rule);
-  border-radius: var(--round);
-  box-shadow: var(--lift-resting);
-}
-.held li + li { margin-top: var(--snug); }
-/* Each slip sits a fraction askew, the way a stack of held things does. */
-.held li:nth-child(1) { transform: rotate(-0.35deg); }
-.held li:nth-child(2) { transform: rotate(0.3deg); }
-.held li:nth-child(3) { transform: rotate(-0.2deg); }
-
-.held-name {
-  font-size: 0.94rem;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.held-left {
-  grid-row: 1;
-  grid-column: 2;
-  font-size: 0.78rem;
-  color: var(--ink-faint);
-  white-space: nowrap;
-}
-.held-from {
-  grid-column: 1 / -1;
-  font-size: 0.8rem;
-  color: var(--ink-faint);
-  font-family: var(--mono);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.held-foot {
-  margin: var(--step) 0 0;
-  font-size: 0.84rem;
-  color: var(--ink-faint);
-  max-width: none;
+  border-bottom: 0;
+  box-shadow: 0 -3px 14px rgba(64, 48, 32, 0.1);
 }
 
 .drawer-front {

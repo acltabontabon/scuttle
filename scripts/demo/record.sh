@@ -1,147 +1,201 @@
 #!/usr/bin/env bash
-# Records docs/media/demo.gif by driving the real Scuttle application.
+# Records docs/media/demo.gif, demo.mp4 and findings.png by driving the real
+# Scuttle application.
 #
 # Nothing here is simulated. It builds a release app, points it at a pretend
-# home directory full of invented files, records the window while a short
+# home directory full of invented files, films the window while a short
 # scripted session runs, and converts the result. Every number and every
-# filename you see in the finished GIF came out of the application reading
+# filename in the finished recording came out of the application reading
 # those files.
 #
 #   scripts/demo/record.sh
 #
-# What it needs, once, on the Mac doing the recording:
+# What it needs, once, on the Mac doing the recording — both under System
+# Settings -> Privacy & Security, both prompted the first time they are
+# needed, and both applying to whatever terminal or editor is running this:
 #
-#   * Screen Recording permission for the terminal application running this
-#     (System Settings -> Privacy & Security -> Screen & System Audio Recording).
-#   * Accessibility permission for the same application, so the script can
-#     click Scuttle's buttons (System Settings -> Privacy & Security ->
-#     Accessibility).
-#   * ffmpeg:  brew install ffmpeg
+#   * Screen & System Audio Recording, to film the window.
+#   * Accessibility, to click the application's buttons. macOS caches this
+#     per process, so the application running the script has to be restarted
+#     after granting it.
 #
-# Both are prompted for the first time they are needed, and both require the
-# application to be restarted afterwards.
+# And ffmpeg:  brew install ffmpeg
 
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-work="${TMPDIR:-/tmp}/scuttle-demo.$$"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root="$(cd "$here/../.." && pwd)"
+work="$(mktemp -d "${TMPDIR:-/tmp}/scuttle-demo.XXXXXX")"
 home="$work/home"
 media="$root/docs/media"
 target="${SCUTTLE_DEMO_TARGET:-aarch64-apple-darwin}"
 app="$root/src-tauri/target/$target/release/bundle/macos/Scuttle.app"
 
-# The window is a fixed 1180x800 and cannot be resized, which is the one thing
-# that makes an unattended recording reliable: the capture rectangle and every
-# click coordinate below are stable across runs and machines.
-WIDTH=1180
-HEIGHT=800
-ORIGIN_X=40
-ORIGIN_Y=80
+# The window is a fixed 1180x800 and cannot be resized, which is what makes
+# an unattended recording reproducible: one capture rectangle, every time.
+WIN_W=1180
+WIN_H=800
+WIN_X=120
+WIN_Y=120
+# A macOS window is a rounded rectangle, so a crop of its exact bounds picks
+# up four small triangles of whatever happened to be behind it. Rather than
+# cropping inside — which clips the traffic lights — the corners are filled
+# with the window background colour afterwards, leaving a clean rectangle
+# with the whole title bar in it. This is the colour tauri.conf.json gives
+# the window, so the patch is invisible.
+CORNER=16
+PAPER=0xF4EFE6
 
+appjob=""
+recorder=""
 cleanup() {
-  [[ -n "${recorder:-}" ]] && kill "$recorder" 2>/dev/null || true
-  [[ -n "${appjob:-}" ]] && kill "$appjob" 2>/dev/null || true
+  [[ -n "$recorder" ]] && kill "$recorder" 2>/dev/null || true
+  [[ -n "$appjob" ]] && kill "$appjob" 2>/dev/null || true
   rm -rf "$work"
 }
 trap cleanup EXIT
 
-command -v ffmpeg >/dev/null || { echo 'ffmpeg is not installed: brew install ffmpeg'; exit 1; }
+command -v ffmpeg > /dev/null || { echo 'ffmpeg is not installed: brew install ffmpeg' >&2; exit 1; }
 
-if ! screencapture -x "$work-probe.png" 2>/dev/null; then
-  rm -f "$work-probe.png"
+if ! screencapture -x "$work/probe.png" 2> /dev/null; then
   cat >&2 <<'MSG'
 Screen recording is not permitted for this application.
 
   System Settings -> Privacy & Security -> Screen & System Audio Recording
-  enable the terminal (or editor) you are running this from, then restart it.
+  enable the terminal (or editor) running this, then try again.
 
 Nothing was recorded.
 MSG
   exit 1
 fi
-rm -f "$work-probe.png"
 
-# --- the pretend home ---------------------------------------------------------
-mkdir -p "$work"
-node "$root/scripts/demo/fixtures.mjs" "$home"
+if ! osascript -e 'tell application "System Events" to return name of first process' > /dev/null 2>&1; then
+  cat >&2 <<'MSG'
+Accessibility is not permitted for this application, so the session cannot
+click anything.
 
-# --- the real application, built the way a release is -------------------------
-if [[ ! -d "$app" ]]; then
-  echo "Building Scuttle for $target (this takes a few minutes)..."
-  # `app` as well as `dmg` so the bundle survives; asking for dmg alone cleans
-  # the .app up once it has been packaged.
-  ( cd "$root" && npm run tauri build -- --target "$target" --bundles app,dmg \
-      --config src-tauri/tauri.apple-silicon.conf.json )
+  System Settings -> Privacy & Security -> Accessibility
+  enable the terminal (or editor) running this, then RESTART it: macOS caches
+  this permission per process and will not notice otherwise.
+
+Nothing was recorded.
+MSG
+  exit 1
 fi
 
+# --- the pretend home -------------------------------------------------------
 # HOME is the whole isolation mechanism. Scuttle derives its scan roots, its
 # database and its drawer from it, so with HOME pointed here the running
 # application has no way to reach a real file: it has never been told where
 # one is.
-HOME="$home" "$app/Contents/MacOS/scuttle" &
-appjob=$!
-sleep 4
+node "$here/fixtures.mjs" "$home"
 
-osascript <<APPLESCRIPT
-tell application "System Events"
-  tell process "Scuttle"
-    set frontmost to true
-    set position of window 1 to {$ORIGIN_X, $ORIGIN_Y}
-  end tell
+# --- the real application, built the way a release is -----------------------
+if [[ ! -d "$app" ]]; then
+  echo "Building Scuttle for $target (a few minutes)…"
+  ( cd "$root" && npm run tauri build -- \
+      --target "$target" --bundles app \
+      --config src-tauri/tauri.apple-silicon.conf.json )
+fi
+
+pkill -f 'Scuttle.app/Contents/MacOS/scuttle' 2> /dev/null || true
+sleep 1
+HOME="$home" "$app/Contents/MacOS/scuttle" > "$work/app.log" 2>&1 &
+appjob=$!
+
+# Wait for the interface to be there rather than guessing at a sleep: the
+# window appears before the webview has published its accessibility tree, and
+# clicking into the gap fails with a confusing "invalid index".
+for _ in $(seq 1 30); do
+  if "$here/ui.sh" list 2> /dev/null | grep -q Rummage; then break; fi
+  sleep 1
+done
+
+osascript > /dev/null <<APPLESCRIPT
+tell application "System Events" to tell process "Scuttle"
+  set frontmost to true
+  set position of window 1 to {$WIN_X, $WIN_Y}
 end tell
 APPLESCRIPT
 sleep 1
 
-# --- record -------------------------------------------------------------------
-# 20 fps is enough for an interface: the settling animation still reads, and
-# the file stays small enough to sit in a README.
+# --- film it ----------------------------------------------------------------
+# The screen is captured in physical pixels and the window is placed in
+# points, so every coordinate doubles on a Retina display.
+scale=2
+crop_w=$(( WIN_W * scale ))
+crop_h=$(( WIN_H * scale ))
+crop_x=$(( WIN_X * scale ))
+crop_y=$(( WIN_Y * scale ))
+c=$(( CORNER * scale ))
+corners="drawbox=0:0:${c}:${c}:color=${PAPER}:t=fill"
+corners="${corners},drawbox=$(( crop_w - c )):0:${c}:${c}:color=${PAPER}:t=fill"
+corners="${corners},drawbox=0:$(( crop_h - c )):${c}:${c}:color=${PAPER}:t=fill"
+corners="${corners},drawbox=$(( crop_w - c )):$(( crop_h - c )):${c}:${c}:color=${PAPER}:t=fill"
+
+# `-list_devices` prints the list and then exits non-zero, every time, which
+# under `pipefail` would take the whole script with it.
+screen=$(ffmpeg -hide_banner -f avfoundation -list_devices true -i "" 2>&1 \
+  | sed -n 's/.*\[\([0-9]*\)\] Capture screen 0.*/\1/p' | head -1 || true)
+: "${screen:=3}"
+echo "Filming screen device $screen, window ${WIN_W}x${WIN_H} at ${WIN_X},${WIN_Y}."
+
+# `-pixel_format` belongs to the input: the screen device offers uyvy422 and
+# friends, not the yuv420p the encoder wants, and asking it for yuv420p is
+# refused rather than converted.
 ffmpeg -hide_banner -loglevel error -y \
-  -f avfoundation -capture_cursor 1 -framerate 20 -i "3:none" \
-  -vf "crop=${WIDTH}:${HEIGHT}:${ORIGIN_X}:${ORIGIN_Y}" \
-  -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
+  -f avfoundation -capture_cursor 1 -framerate 30 -pixel_format uyvy422 -i "${screen}:none" \
+  -vf "crop=${crop_w}:${crop_h}:${crop_x}:${crop_y},${corners}" \
+  -c:v libx264 -preset ultrafast -qp 0 -pix_fmt yuv420p \
   "$work/raw.mp4" &
 recorder=$!
-sleep 2
+sleep 2.5
 
-click() { # x y [pause]
-  osascript -e "tell application \"System Events\" to tell process \"Scuttle\" to click at {$((ORIGIN_X + $1)), $((ORIGIN_Y + $2))}"
-  sleep "${3:-1.5}"
-}
+ui() { "$here/ui.sh" "$@" > /dev/null; }
+beat() { sleep "$1"; }
 
-# The session. Coordinates are relative to the window's own top-left corner.
-# Keep the pauses generous: a demo that has to be paused to be read is a demo
-# nobody reads.
-source "$root/scripts/demo/session.sh"
+# shellcheck source=session.sh
+source "$here/session.sh"
 
-sleep 2
-kill "$recorder" 2>/dev/null || true
-wait "$recorder" 2>/dev/null || true
-kill "$appjob" 2>/dev/null || true
+sleep 1.5
+kill "$recorder" 2> /dev/null || true
+wait "$recorder" 2> /dev/null || true
+recorder=""
+kill "$appjob" 2> /dev/null || true
+appjob=""
 
-# --- convert ------------------------------------------------------------------
+# --- convert ----------------------------------------------------------------
 mkdir -p "$media"
 
-# Two passes: one to work out a palette that suits this particular footage,
-# one to apply it. A generic palette turns Scuttle's paper background into
-# visible banding.
+# A small h.264 copy for the site, which offers it behind a button rather
+# than making everybody download it to read a paragraph.
 ffmpeg -hide_banner -loglevel error -y -i "$work/raw.mp4" \
-  -vf "fps=14,scale=960:-1:flags=lanczos,palettegen=max_colors=96:stats_mode=diff" \
+  -vf "scale=1180:-2:flags=lanczos" \
+  -c:v libx264 -preset slow -crf 26 -pix_fmt yuv420p -movflags +faststart -an \
+  "$media/demo.mp4"
+
+# Two passes for the GIF: one to work out a palette that suits this footage,
+# one to apply it. A generic palette turns Scuttle's paper into banding.
+ffmpeg -hide_banner -loglevel error -y -i "$work/raw.mp4" \
+  -vf "fps=12,scale=900:-1:flags=lanczos,palettegen=max_colors=96:stats_mode=diff" \
   "$work/palette.png"
 ffmpeg -hide_banner -loglevel error -y -i "$work/raw.mp4" -i "$work/palette.png" \
-  -lavfi "fps=14,scale=960:-1:flags=lanczos[v];[v][1:v]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle" \
+  -lavfi "fps=12,scale=900:-1:flags=lanczos[v];[v][1:v]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" \
   "$media/demo.gif"
 
-# A still for anywhere the GIF does not play, and for the site's link preview.
-# Taken from the findings screen rather than frame zero, so the fallback shows
-# the product rather than an empty window.
-ffmpeg -hide_banner -loglevel error -y -i "$work/raw.mp4" \
-  -vf "select=eq(n\,${SCUTTLE_DEMO_POSTER_FRAME:-220}),scale=1180:-1" -vframes 1 \
-  "$media/findings.png"
+# A still for anywhere the recording does not play, and for the link preview.
+# Taken from the findings screen rather than frame zero, so what somebody sees
+# first is the product rather than an empty window.
+ffmpeg -hide_banner -loglevel error -y -ss "${SCUTTLE_DEMO_POSTER_AT:-9}" -i "$work/raw.mp4" \
+  -vf "scale=2360:-2" -frames:v 1 "$media/findings.png"
 
-cp "$work/raw.mp4" "$media/demo.mp4"
+# And one of the drawer holding something, for the section of the site that
+# is about the drawer. Both are frames of this recording rather than separate
+# captures, so they cannot drift from it.
+ffmpeg -hide_banner -loglevel error -y -ss "${SCUTTLE_DEMO_DRAWER_AT:-22}" -i "$work/raw.mp4" \
+  -vf "scale=2360:-2" -frames:v 1 "$media/drawer.png"
 
 echo
-echo "Wrote:"
-ls -lh "$media/demo.gif" "$media/demo.mp4" "$media/findings.png"
+ls -lh "$media"/demo.gif "$media"/demo.mp4 "$media"/findings.png "$media"/drawer.png
 echo
-echo "If demo.gif is over about 6 MB, lower the fps or the scale above."
+echo "If demo.gif is much over 6 MB, drop the fps or the width in the two passes above."

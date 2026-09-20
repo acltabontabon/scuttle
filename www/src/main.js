@@ -121,16 +121,25 @@ function setUpDemo() {
   const poster = document.getElementById('hero-media');
   const source = './media/demo.mp4';
 
-  // Only offer it once we know it is there. A missing file should leave a
-  // clean screenshot rather than a button that does nothing.
+  // Only offer it once we know it is there. A missing recording should leave
+  // a clean screenshot rather than a button that does nothing.
+  //
+  // The offer stands under reduced motion too. Asking for less motion means
+  // "do not move things at me", not "hide the video" — nothing plays until
+  // somebody presses the button, and taking the button away would remove the
+  // choice rather than respect it.
   fetch(source, { method: 'HEAD' })
     .then((response) => {
-      if (!response.ok || stillness.matches) return;
-      play.hidden = false;
+      if (response.ok) play.hidden = false;
     })
     .catch(() => {});
 
   let video = null;
+
+  const show = (playing) => {
+    play.dataset.playing = String(playing);
+    if (label) label.textContent = playing ? 'Pause' : 'Play the demo';
+  };
 
   play.addEventListener('click', () => {
     if (!video) {
@@ -140,6 +149,12 @@ function setUpDemo() {
       video.loop = true;
       video.playsInline = true;
       video.setAttribute('aria-label', poster?.alt ?? 'A run through Scuttle');
+      // The button reports what the video is actually doing rather than what
+      // it was asked to do: play() can be refused — a background tab, a power
+      // saving rule — and a button reading "Pause" over a still frame is
+      // worse than no button at all.
+      video.addEventListener('play', () => show(true));
+      video.addEventListener('pause', () => show(false));
       figure.insertBefore(video, play);
       poster?.remove();
       if (caption) {
@@ -148,13 +163,9 @@ function setUpDemo() {
       }
     }
     if (video.paused) {
-      video.play();
-      play.dataset.playing = 'true';
-      if (label) label.textContent = 'Pause';
+      video.play().catch(() => show(false));
     } else {
       video.pause();
-      play.dataset.playing = 'false';
-      if (label) label.textContent = 'Play the demo';
     }
   });
 }

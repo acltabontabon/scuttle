@@ -161,7 +161,7 @@ function main() {
   const parts = [];
   for (const [file, alt] of [
     ['demo.gif', 'Scuttle finding, reviewing and restoring files'],
-    ['home.png', "Scuttle's window: one button, and a small creature waiting"],
+    ['findings.png', "Scuttle's findings, drawn as four piles on a paper floor"],
   ]) {
     if (existsSync(join(root, 'docs/media', file))) {
       parts.push(`![${alt}](https://raw.githubusercontent.com/${REPO}/v${version}/docs/media/${file})`, '');
