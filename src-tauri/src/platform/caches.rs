@@ -396,28 +396,20 @@ const SPECS: &[Spec] = &[
         Some("unity"),
         true,
     ),
-    spec(
-        "Google Chrome",
-        "Chrome cache",
-        "AppData\\Local\\Google\\Chrome\\User Data\\Default\\Cache",
-        CacheSafety::RegeneratesWhenClosed,
-        Some("chrome"),
-        false,
-    ),
+    // Chrome and Edge are deliberately absent here. On Windows both keep
+    // their cache *inside* the profile directory
+    // (`...\\User Data\\Default\\Cache`), and the whole profile is protected
+    // because it also holds logins, cookies and history. A rule pointing in
+    // there could never fire, and the alternative — carving a hole in the
+    // browser-profile protection — is not a trade worth making for a cache
+    // the browser will clear itself. Firefox is different: it keeps profiles
+    // in Roaming and caches in Local, so its rule reaches something.
     spec(
         "Firefox",
         "Firefox cache",
         "AppData\\Local\\Mozilla\\Firefox\\Profiles",
         CacheSafety::RegeneratesWhenClosed,
         Some("firefox"),
-        false,
-    ),
-    spec(
-        "Microsoft Edge",
-        "Edge cache",
-        "AppData\\Local\\Microsoft\\Edge\\User Data\\Default\\Cache",
-        CacheSafety::RegeneratesWhenClosed,
-        Some("msedge"),
         false,
     ),
     spec(
@@ -516,14 +508,16 @@ mod tests {
         // could never fire — and a sign someone had written a dangerous one.
         let home = test_home("testuser");
         let protected = ProtectedPaths::for_home(&home);
-        for rule in all_rules_for_home(&home) {
-            assert!(
-                !protected.is_protected(&rule.path),
-                "cache rule for {} points into protected territory: {}",
-                rule.owner,
-                rule.path.display()
-            );
-        }
+        let collisions: Vec<String> = all_rules_for_home(&home)
+            .into_iter()
+            .filter(|rule| protected.is_protected(&rule.path))
+            .map(|rule| format!("  {} -> {}", rule.owner, rule.path.display()))
+            .collect();
+        assert!(
+            collisions.is_empty(),
+            "cache rules pointing into protected territory:\n{}",
+            collisions.join("\n")
+        );
     }
 
     #[test]

@@ -72,6 +72,10 @@ on its own.
   releases page by hand, on purpose.
 - Scuttle asks for no special permissions, so folders that need Full Disk Access
   on macOS are simply skipped and counted as places that could not be read.
+- On Windows there are **no cache rules for Chrome or Edge**. Both keep their
+  cache inside the browser profile directory, which Scuttle protects outright
+  because it also holds logins, cookies and history. Firefox, which keeps its
+  cache somewhere else, is covered.
 
 [Unreleased]: https://github.com/acltabontabon/scuttle/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/acltabontabon/scuttle/releases/tag/v0.1.0
