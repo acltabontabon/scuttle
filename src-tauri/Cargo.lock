@@ -2898,6 +2898,7 @@ dependencies = [
  "chrono",
  "dirs",
  "image",
+ "libc",
  "plist",
  "rayon",
  "rusqlite",
@@ -2912,6 +2913,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "walkdir",
+ "windows-sys 0.61.2",
  "winreg",
 ]
 

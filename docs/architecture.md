@@ -106,8 +106,17 @@ events (`scuttle://phase`, `progress`, `found`, `done`), each tagged with the
 scan id so a superseded scan's events are discarded. React never calls into
 Rust per file.
 
-Operations are `quarantine(id)`, `restore(id)`, `keep(id)`, `ignore(id, scope)`
-— ids throughout.
+Operations are `start_move(request)`, `restore(id)`, `keep(id)`,
+`ignore(id, scope)` — ids throughout.
+
+`start_move` does almost nothing itself: it claims the operation gate, records a
+job, starts a worker thread and returns. Progress arrives on `scuttle://move`.
+Every snapshot carries a **job id** and a **revision** that only rise, so a late,
+repeated or reordered event cannot overwrite newer state, and `move_status`
+lets a listener that missed events catch up. Updates are counts, not lists, and
+are sent at most every 100 ms. A synchronous Tauri command runs on the main
+thread, which is the thread that draws the window, so anything that touches the
+disk for long is a worker or a blocking-pool task, never a plain command.
 
 ## Storage
 
@@ -135,7 +144,14 @@ Two details worth knowing:
 
 Findings move into a holding area, one directory per item, with a JSON manifest
 beside them so the drawer is legible even without the database. The move is a
-rename where possible and a copy-then-remove across volumes.
+no-replace rename; across volumes a file (never a whole folder) is copied,
+verified and then removed. A shared cache folder is not moved at all: its
+reviewed files are, one at a time, and the record is a `contents` record listing
+exactly what it holds. See [safety.md](safety.md#how-files-actually-move).
+
+A record is written as *moving* before anything moves and settled afterwards,
+with a per-file checkpoint in between, so an interrupted move can be understood
+on the next start instead of guessed at.
 
 Restore never overwrites: if something now occupies the original path, the item
 is placed beside it under a new name and the caller is told where it went.

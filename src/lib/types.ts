@@ -148,7 +148,7 @@ export interface RummageStarted {
   roots: RootDescription[]
 }
 
-export type QuarantineStatus = 'held' | 'restored' | 'removed'
+export type QuarantineStatus = 'held' | 'restored' | 'removed' | 'moving' | 'restoring' | 'abandoned'
 
 export interface QuarantineRecord {
   id: string
@@ -164,6 +164,12 @@ export interface QuarantineRecord {
   expires_unix: number
   status: QuarantineStatus
   resolved_unix: number | null
+  /** `contents`: the reviewed files of a shared folder, not the folder. */
+  mode?: 'whole' | 'contents'
+  /** Files held. One for a whole item. */
+  item_count?: number
+  /** An interrupted move left something Scuttle would not settle on its own. */
+  attention?: boolean
 }
 
 export interface QuarantineView {
@@ -209,7 +215,124 @@ export interface RestoreOutcome {
   path: string
   /** True when the original location was occupied and a new name was used. */
   renamed: boolean
+  /** Files put back. One for a whole item. */
+  restored: number
+  /** Files that could not be put back and are still in the drawer. */
+  remaining: number
+  failed: IssueGroup[]
 }
+
+// ---- moving into the drawer ------------------------------------------------
+
+/** What went wrong, in terms of what a person could do about it. */
+export type FailureKind =
+  | 'stale'
+  | 'replaced'
+  | 'access_denied'
+  | 'in_use'
+  | 'missing'
+  | 'collision'
+  | 'no_space'
+  | 'read_only'
+  | 'path_too_long'
+  | 'cross_volume_refused'
+  | 'unsupported'
+  | 'unsafe'
+  | 'cancelled'
+  | 'other'
+
+export type NextStep = 'refresh' | 'retry' | 'free_space' | 'leave_alone' | 'close_app'
+
+export type FailurePhase =
+  | 'check'
+  | 'snapshot'
+  | 'prepare'
+  | 'publish'
+  | 'copy'
+  | 'verify'
+  | 'remove_source'
+  | 'record'
+  | 'restore'
+
+/** One kind of failure, counted. Only file *names* are ever carried. */
+export interface IssueGroup {
+  kind: FailureKind
+  phase: FailurePhase
+  /** The code the operating system gave, kept exactly. */
+  os_code: number | null
+  count: number
+  samples: string[]
+  next_step: NextStep
+  explanation: string
+}
+
+export type MovePhase =
+  | 'checking'
+  | 'moving'
+  | 'finalizing'
+  | 'completed'
+  | 'partial'
+  | 'failed'
+  | 'cancelled'
+
+export type FindingStatus = 'moved' | 'partial' | 'skipped' | 'failed'
+
+export interface FindingResult {
+  finding_id: string
+  display_name: string
+  category: Category | null
+  /** What the counts are counts of: a folder's files, or one whole thing. */
+  unit: 'files' | 'item'
+  status: FindingStatus
+  moved: number
+  skipped: number
+  failed: number
+  moved_bytes: number
+  record_id: string | null
+  needs_refresh: boolean
+  retryable: boolean
+  issues: IssueGroup[]
+  refusal: { code: string; message: string } | null
+}
+
+export interface MoveReport {
+  outcome: MovePhase
+  moved_files: number
+  /** Bytes now in the drawer. Moved, not freed. */
+  moved_bytes: number
+  skipped: number
+  failed: number
+  remaining: number
+  cancelled: boolean
+  kept: string | null
+  findings: FindingResult[]
+  notice: string | null
+}
+
+/** One moment in a move. `job_id` and `rev` only ever rise. */
+export interface MoveSnapshot {
+  job_id: number
+  rev: number
+  phase: MovePhase
+  cancelling: boolean
+  /** Unknown (null) until Scuttle has finished checking. */
+  total: number | null
+  processed: number
+  moved: number
+  skipped: number
+  failed: number
+  moved_bytes: number
+  /** Bytes actually copied across a drive. Zero for a rename. */
+  copied_bytes: number
+  label: string
+  report: MoveReport | null
+}
+
+export type MoveRequest =
+  | { kind: 'selection'; ids: string[]; retry?: boolean }
+  | { kind: 'confident'; category?: Category | null }
+  | { kind: 'group'; id: string; keep: KeepChoice }
+  | { kind: 'member'; id: string; member_index: number }
 
 export interface SpaceArea {
   label: string
@@ -301,8 +424,17 @@ export interface ScuttleError {
     | 'stale'
     | 'refused'
     | 'scan_busy'
+    | 'busy'
+    | 'transfer'
     | 'internal'
   message: string
+  /** For `transfer`: what kind, in which phase, with which OS code. */
+  failure?: {
+    kind: FailureKind
+    phase: FailurePhase
+    os_code: number | null
+    item: string
+  }
 }
 
 export function isScuttleError(value: unknown): value is ScuttleError {

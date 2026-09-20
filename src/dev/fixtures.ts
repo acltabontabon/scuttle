@@ -15,6 +15,10 @@ import type {
   Candidate,
   Evidence,
   Findings,
+  FindingResult,
+  IssueGroup,
+  MoveReport,
+  MoveSnapshot,
   QuarantineView,
   Settings,
   SpaceOverview,
@@ -373,3 +377,172 @@ export const SETTINGS: Settings = {
 }
 
 export const CANDIDATES = [...GHOSTS, ...SCREENSHOTS, ...INSTALLERS, ...HEAVY, ...COPIES, ...CACHES, ...ODDMENTS]
+
+
+// ---- a move into the drawer, at each moment worth looking at ---------------
+
+const MB = 1024 * 1024
+
+function moveSnap(over: Partial<MoveSnapshot>): MoveSnapshot {
+  return {
+    job_id: 1,
+    rev: 10,
+    phase: 'moving',
+    cancelling: false,
+    total: 3001,
+    processed: 1204,
+    moved: 1190,
+    skipped: 9,
+    failed: 5,
+    moved_bytes: 412 * MB,
+    copied_bytes: 0,
+    label: 'DirectX shader cache',
+    report: null,
+    ...over,
+  }
+}
+
+function issue(over: Partial<IssueGroup>): IssueGroup {
+  return {
+    kind: 'in_use',
+    phase: 'publish',
+    os_code: 32,
+    count: 6,
+    samples: ['shader-0a41.bin', 'shader-77c2.bin'],
+    next_step: 'close_app',
+    explanation: 'Another program is using it.',
+    ...over,
+  }
+}
+
+function result(over: Partial<FindingResult>): FindingResult {
+  return {
+    finding_id: 'c1',
+    display_name: 'DirectX shader cache',
+    category: 'caches',
+    unit: 'files',
+    status: 'partial',
+    moved: 418,
+    skipped: 0,
+    failed: 6,
+    moved_bytes: 412 * MB,
+    record_id: 'r1',
+    needs_refresh: false,
+    retryable: true,
+    issues: [issue({})],
+    refusal: null,
+    ...over,
+  }
+}
+
+function report(over: Partial<MoveReport>): MoveReport {
+  return {
+    outcome: 'partial',
+    moved_files: 418,
+    moved_bytes: 412 * MB,
+    skipped: 0,
+    failed: 6,
+    remaining: 0,
+    cancelled: false,
+    kept: null,
+    findings: [result({})],
+    notice: null,
+    ...over,
+  }
+}
+
+export const MOVE_SCENES: { id: string; label: string; snapshot: MoveSnapshot | null; pending?: boolean }[] = [
+  { id: 'none', label: 'No move', snapshot: null },
+  { id: 'pending', label: 'Just clicked', snapshot: null, pending: true },
+  { id: 'checking', label: 'Checking', snapshot: moveSnap({ phase: 'checking', total: null, processed: 0, moved: 0, skipped: 0, failed: 0, moved_bytes: 0 }) },
+  { id: 'moving', label: 'Moving (renames)', snapshot: moveSnap({}) },
+  { id: 'copying', label: 'Moving (copying)', snapshot: moveSnap({ copied_bytes: 6.2 * 1024 * MB, moved_bytes: 6.2 * 1024 * MB }) },
+  { id: 'finalizing', label: 'Finalizing', snapshot: moveSnap({ phase: 'finalizing', processed: 3001, moved: 2987, skipped: 9, failed: 5 }) },
+  { id: 'stopping', label: 'Stopping', snapshot: moveSnap({ cancelling: true }) },
+  {
+    id: 'partial',
+    label: 'Done, some in use',
+    snapshot: moveSnap({
+      phase: 'partial',
+      processed: 424,
+      total: 424,
+      moved: 418,
+      skipped: 0,
+      failed: 6,
+      report: report({}),
+    }),
+  },
+  {
+    id: 'changed',
+    label: 'Done, changed since scan',
+    snapshot: moveSnap({
+      phase: 'partial',
+      processed: 22,
+      total: 22,
+      moved: 20,
+      skipped: 2,
+      failed: 0,
+      report: report({
+        moved_files: 20,
+        skipped: 2,
+        failed: 0,
+        findings: [
+          result({
+            moved: 20,
+            skipped: 2,
+            failed: 0,
+            needs_refresh: true,
+            retryable: false,
+            issues: [
+              issue({ kind: 'stale', count: 1, os_code: null, phase: 'check', next_step: 'refresh', explanation: 'It changed since Scuttle looked at it.', samples: ['index.dat'] }),
+              issue({ kind: 'missing', count: 1, os_code: null, phase: 'check', next_step: 'refresh', explanation: 'It was already gone.', samples: ['tmp-91.cache'] }),
+            ],
+          }),
+        ],
+      }),
+    }),
+  },
+  {
+    id: 'denied',
+    label: 'Could not access',
+    snapshot: moveSnap({
+      phase: 'failed',
+      processed: 1,
+      total: 1,
+      moved: 0,
+      skipped: 0,
+      failed: 1,
+      report: report({
+        outcome: 'failed',
+        moved_files: 0,
+        moved_bytes: 0,
+        failed: 1,
+        findings: [
+          result({
+            status: 'failed',
+            moved: 0,
+            failed: 1,
+            moved_bytes: 0,
+            record_id: null,
+            retryable: true,
+            issues: [issue({ kind: 'access_denied', os_code: 5, count: 1, next_step: 'leave_alone', explanation: "The system wouldn't let Scuttle change it. Scuttle uses your normal access and doesn't try to override that.", samples: ['NVIDIA'] })],
+          }),
+        ],
+      }),
+    }),
+  },
+  {
+    id: 'cancelled',
+    label: 'Stopped',
+    snapshot: moveSnap({
+      phase: 'cancelled',
+      cancelling: true,
+      processed: 12,
+      total: 400,
+      moved: 12,
+      skipped: 0,
+      failed: 0,
+      report: report({ outcome: 'cancelled', cancelled: true, moved_files: 12, failed: 0, remaining: 388, findings: [result({ status: 'partial', moved: 12, failed: 0, issues: [], retryable: true })] }),
+    }),
+  },
+]

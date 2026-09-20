@@ -235,9 +235,15 @@
     border-color var(--quick) var(--ease);
 }
 
-.pickAll:hover {
+.pickAll:hover:not(:disabled) {
   color: var(--ink);
   border-bottom-color: var(--honey);
+}
+
+.pickAll:disabled {
+  color: var(--ink-faint);
+  border-bottom-color: transparent;
+  cursor: default;
 }
 
 .pickTip {

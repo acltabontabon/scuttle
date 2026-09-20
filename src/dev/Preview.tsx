@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 
 import { App } from '@/app/App'
 import { StoreContext, type Store, type View } from '@/app/store'
 import type { Candidate, Findings, Settings } from '@/lib/types'
-import { CANDIDATES, DRAWER, EMPTY_FINDINGS, FINDINGS, SETTINGS, SPACE } from './fixtures'
+import { isTerminal } from '@/features/move/progress'
+import { CANDIDATES, DRAWER, EMPTY_FINDINGS, FINDINGS, MOVE_SCENES, SETTINGS, SPACE } from './fixtures'
 
 import styles from './Preview.module.css'
 
@@ -43,9 +45,88 @@ export function Preview() {
   const [sceneId, setSceneId] = useState(SCENES[1]!.id)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [theme, setTheme] = useState<Settings['appearance']>('system')
+  const [moveId, setMoveId] = useState('none')
+  const [stream, setStream] = useState<{ running: boolean; result: string } | null>(null)
+  const [streamed, setStreamed] = useState<number | null>(null)
+  const streamStart = useRef(0)
+  const [detailsOpen, setDetailsOpen] = useState(false)
 
   const scene = SCENES.find((s) => s.id === sceneId)!
   const detail = detailId ? (CANDIDATES.find((c) => c.id === detailId) ?? null) : null
+
+  const baseScene = MOVE_SCENES.find((m) => m.id === moveId)!
+  // A stress run replaces the moving scene's counts with a fast-changing
+  // stream, to see what a burst of updates costs the interface.
+  const moveScene = useMemo(
+    () =>
+      streamed !== null && baseScene.snapshot
+        ? { ...baseScene, snapshot: { ...baseScene.snapshot, processed: streamed, moved: streamed } }
+        : baseScene,
+    [baseScene, streamed],
+  )
+
+  // Ten updates a second is what the core sends at most; this sends a hundred,
+  // for six seconds, while watching how long each frame takes to arrive and
+  // whether the main thread ever stalls.
+  useEffect(() => {
+    if (!stream?.running) return
+    let frames = 0
+    let last = performance.now()
+    let worstGap = 0
+    let longTasks = 0
+    let raf = 0
+    // A 5 ms timer that should arrive every 5 ms. Any gap much longer than
+    // that is the main thread being busy — which is what "the window froze"
+    // means — and, unlike animation frames, it is not throttled when the pane
+    // is in the background.
+    let lastBeat = performance.now()
+    let worstBeat = 0
+    const beat = window.setInterval(() => {
+      const now = performance.now()
+      worstBeat = Math.max(worstBeat, now - lastBeat)
+      lastBeat = now
+    }, 5)
+    const observer =
+      typeof PerformanceObserver !== 'undefined'
+        ? new PerformanceObserver((list) => (longTasks += list.getEntries().length))
+        : null
+    try {
+      observer?.observe({ entryTypes: ['longtask'] })
+    } catch {
+      /* not supported here */
+    }
+    const tick = (now: number) => {
+      frames += 1
+      worstGap = Math.max(worstGap, now - last)
+      last = now
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    streamStart.current = performance.now()
+    let n = 0
+    const timer = window.setInterval(() => {
+      n += 1
+      setStreamed(n)
+      if (performance.now() - streamStart.current > 6000) {
+        window.clearInterval(timer)
+        window.clearInterval(beat)
+        cancelAnimationFrame(raf)
+        observer?.disconnect()
+        const seconds = (performance.now() - streamStart.current) / 1000
+        setStreamed(null)
+        setStream({
+          running: false,
+          result: `${n} updates in ${seconds.toFixed(1)}s · slowest 5 ms beat took ${worstBeat.toFixed(0)} ms · ${longTasks} long tasks · ${(frames / seconds).toFixed(0)} fps (throttled if the pane is hidden) · worst frame gap ${worstGap.toFixed(0)} ms`,
+        })
+      }
+    }, 10)
+    return () => {
+      window.clearInterval(timer)
+      window.clearInterval(beat)
+      cancelAnimationFrame(raf)
+      observer?.disconnect()
+    }
+  }, [stream?.running])
 
   const store = useMemo<Store>(() => {
     const noop = async () => {}
@@ -89,6 +170,19 @@ export function Preview() {
       note: null,
       say: () => {},
       dismissNote: () => {},
+      move: { snapshot: moveScene.snapshot, pending: moveScene.pending === true },
+      moving:
+        moveScene.pending === true ||
+        (moveScene.snapshot !== null && !isTerminal(moveScene.snapshot.phase)),
+      cancelMove: noop,
+      dismissMove: async () => {
+        setMoveId('none')
+        setDetailsOpen(false)
+      },
+      retryMove: noop,
+      reviewAgain: noop,
+      moveDetailsOpen: detailsOpen,
+      setMoveDetailsOpen: setDetailsOpen,
       quarantine: noop,
       quarantineGroup: noop,
       quarantineConfident: noop,
@@ -101,7 +195,7 @@ export function Preview() {
       removePermanently: ok,
       reveal: noop,
     }
-  }, [scene, detail, theme])
+  }, [scene, detail, theme, moveScene, detailsOpen])
 
   return (
     <div className={styles.workbench}>
@@ -132,6 +226,62 @@ export function Preview() {
             {d.label}
           </button>
         ))}
+
+        <p className={styles.railTitle}>A move</p>
+        {MOVE_SCENES.map((m) => (
+          <button
+            key={m.id}
+            className={styles.railItem}
+            aria-current={m.id === moveId}
+            onClick={() => {
+              setMoveId(m.id)
+              setDetailsOpen(false)
+            }}
+          >
+            {m.label}
+          </button>
+        ))}
+
+        <button
+          className={styles.railItem}
+          onClick={() => {
+            setMoveId('moving')
+            setStream({ running: true, result: '' })
+          }}
+        >
+          Stream 100 updates/s
+        </button>
+        <button
+          className={styles.railItem}
+          onClick={() => {
+            // Commit 500 updates one after another, synchronously, and time
+            // each. Unlike a timer this is not slowed by a hidden pane, so it
+            // says what one progress event costs the interface to show.
+            setMoveId('moving')
+            setTimeout(() => {
+              const times: number[] = []
+              for (let i = 1; i <= 500; i += 1) {
+                const t = performance.now()
+                flushSync(() => setStreamed(i))
+                times.push(performance.now() - t)
+              }
+              setStreamed(null)
+              times.sort((a, b) => a - b)
+              const total = times.reduce((a, b) => a + b, 0)
+              setStream({
+                running: false,
+                result: `500 commits: mean ${(total / 500).toFixed(2)} ms · p95 ${times[474]!.toFixed(2)} ms · worst ${times[499]!.toFixed(2)} ms`,
+              })
+            }, 50)
+          }}
+        >
+          Render cost ×500
+        </button>
+        {stream && (
+          <p className={styles.railTitle} data-testid="stream-result">
+            {stream.running ? 'running…' : stream.result}
+          </p>
+        )}
 
         <p className={styles.railTitle}>Theme</p>
         <div className={styles.railRow}>

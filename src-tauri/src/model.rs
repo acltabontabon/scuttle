@@ -242,6 +242,16 @@ pub struct StateFingerprint {
 }
 
 impl CleanupCandidate {
+    /// A shared folder whose *contents* are what get cleaned: a cache root
+    /// that some other program owns and recreates, like the temp directory or
+    /// a graphics shader cache.
+    ///
+    /// The folder itself is never the thing that moves. It is reviewed as a
+    /// set of files, and only those files go — see `scanning::snapshot`.
+    pub fn is_shared_contents(&self) -> bool {
+        self.category == Category::Caches && self.target_kind == TargetKind::Directory
+    }
+
     /// Whether the user is allowed to move this into quarantine from the UI.
     /// The backend re-derives this; it does not trust the frontend's copy.
     pub fn is_actionable(&self) -> bool {

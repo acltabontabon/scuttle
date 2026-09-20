@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useStore } from '@/app/store'
+import { MoveControls, MoveLine, MoveTrack } from '@/features/move/MoveStatus'
 import { bytes, bytesParts } from '@/lib/format'
 import type { Candidate, Category } from '@/lib/types'
 import { CATEGORY_BLURB, RISK_WORD } from '@/visuals/CategoryMeta'
@@ -38,7 +39,7 @@ export function PileView({
   category: Category
   preselect?: 'suggested'
 }) {
-  const { findings, go, openDetail, quarantineMany } = useStore()
+  const { findings, go, openDetail, quarantineMany, move, moving, cancelMove } = useStore()
   const pile = findings?.piles.find((p) => p.category === category)
   // Arriving from "Review suggestion" starts with Scuttle's picks ticked, so
   // the first thing shown is what it would act on — not a blank list and a
@@ -54,8 +55,31 @@ export function PileView({
   )
   /** Anchor for shift-click, so a run of four hundred is one gesture. */
   const anchor = useRef<string | null>(null)
+  const actButton = useRef<HTMLButtonElement>(null)
+  const controls = useRef<HTMLDivElement>(null)
+  const title = useRef<HTMLHeadingElement>(null)
 
   const shown = useMemo(() => pile?.items ?? [], [pile])
+
+  // The selection stays exactly as it was while work runs — the meter and the
+  // list keep telling the truth about what was asked for. Nothing needs
+  // clearing afterwards: what is chosen is always worked out from the items
+  // that are still here, so whatever moved simply drops out of it, and
+  // anything left behind stays ticked for another go.
+
+  // Focus follows the button that was pressed: to the status when it appears,
+  // and back to the action (or the pile's title) when it goes, so a keyboard
+  // user is never left on something that no longer exists.
+  const wasMoving = useRef(false)
+  useEffect(() => {
+    if (moving && !wasMoving.current) {
+      controls.current?.focus({ preventScroll: true })
+    } else if (!moving && wasMoving.current) {
+      const target = actButton.current && !actButton.current.disabled ? actButton.current : title.current
+      target?.focus({ preventScroll: true })
+    }
+    wasMoving.current = moving
+  }, [moving])
 
   /**
    * Protected findings are the only ones held back, because those are the
@@ -120,7 +144,9 @@ export function PileView({
             <Glyph category={pile.category} size={58} />
           </span>
 
-          <h2 className={styles.title}>{pile.title}</h2>
+          <h2 className={styles.title} ref={title} tabIndex={-1}>
+            {pile.title}
+          </h2>
           <p className={styles.blurb}>{CATEGORY_BLURB[pile.category]}</p>
           <p className={styles.tally}>
             {pile.count} {pile.count === 1 ? 'thing' : 'things'} · {bytes(pile.bytes)} worth
@@ -140,29 +166,48 @@ export function PileView({
               {tally.value}
               <span className={styles.meterUnit}>{tally.unit}</span>
             </p>
-            <div className={styles.gauge} aria-hidden="true">
-              <span className={styles.gaugeFill} style={{ transform: `scaleX(${share})` }} />
-            </div>
+            {moving ? (
+              // The same thin line, now showing real progress.
+              <MoveTrack snapshot={move.snapshot} pending={move.pending} />
+            ) : (
+              <div className={styles.gauge} aria-hidden="true">
+                <span className={styles.gaugeFill} style={{ transform: `scaleX(${share})` }} />
+              </div>
+            )}
             <p className={styles.meterLine}>
-              {chosen.length === 0
-                ? 'nothing picked yet'
-                : `${chosen.length} of ${selectable.length} picked`}
+              {moving ? (
+                <MoveLine snapshot={move.snapshot} />
+              ) : chosen.length === 0 ? (
+                'nothing picked yet'
+              ) : (
+                `${chosen.length} of ${selectable.length} picked`
+              )}
             </p>
           </div>
 
-          <button
-            className={styles.act}
-            disabled={chosen.length === 0}
-            onClick={() => {
-              void quarantineMany(chosen.map((item) => item.id))
-              setPicked(new Set())
-              anchor.current = null
-            }}
-          >
-            {chosen.length === 0
-              ? 'Pick something first'
-              : sweepLabel(chosen.length, chosenBytes)}
-          </button>
+          {moving ? (
+            <MoveControls
+              snapshot={move.snapshot}
+              pending={move.pending}
+              onCancel={() => void cancelMove()}
+              controlRef={controls}
+            />
+          ) : (
+            <button
+              ref={actButton}
+              className={styles.act}
+              disabled={chosen.length === 0}
+              onClick={() => {
+                // The selection is kept: it is cleared only once the outcome
+                // is known and what moved has left the list.
+                void quarantineMany(chosen.map((item) => item.id))
+              }}
+            >
+              {chosen.length === 0
+                ? 'Pick something first'
+                : sweepLabel(chosen.length, chosenBytes)}
+            </button>
+          )}
 
           <p className={styles.actHint}>
             Nothing is deleted yet — empty the drawer to get the space back.
@@ -172,6 +217,7 @@ export function PileView({
             <div className={styles.picker}>
               <button
                 className={styles.pickAll}
+                disabled={moving}
                 onClick={() => {
                   setPicked(allPicked ? new Set() : new Set(selectable.map((i) => i.id)))
                   anchor.current = null
@@ -182,6 +228,7 @@ export function PileView({
               {suggested.length > 0 && suggested.length < selectable.length && (
                 <button
                   className={styles.pickAll}
+                  disabled={moving}
                   onClick={() => {
                     setPicked(new Set(suggested.map((i) => i.id)))
                     anchor.current = null
@@ -210,7 +257,7 @@ export function PileView({
                   type="checkbox"
                   className={styles.tick}
                   checked={on}
-                  disabled={locked}
+                  disabled={locked || moving}
                   onChange={() => undefined}
                   onClick={(event) => click(item.id, event.shiftKey)}
                   aria-label={

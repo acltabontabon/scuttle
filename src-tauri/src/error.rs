@@ -32,14 +32,30 @@ pub enum ScuttleError {
     #[error("{0}")]
     Refused(String),
 
+    /// A move, copy or removal the operating system or the transfer layer
+    /// refused, with the phase and OS code it happened in.
+    #[error("{0}")]
+    Transfer(crate::quarantine::transfer::FsFailure),
+
     #[error("scan already running")]
     ScanBusy,
+
+    /// Something else is changing files or the Drawer right now. Scuttle does
+    /// one such thing at a time.
+    #[error("{0}")]
+    Busy(String),
 
     #[error("{0}")]
     Internal(String),
 }
 
 pub type Result<T> = std::result::Result<T, ScuttleError>;
+
+impl From<crate::quarantine::transfer::FsFailure> for ScuttleError {
+    fn from(failure: crate::quarantine::transfer::FsFailure) -> Self {
+        Self::Transfer(failure)
+    }
+}
 
 impl ScuttleError {
     pub fn not_found(what: impl Into<String>) -> Self {
@@ -56,7 +72,9 @@ impl ScuttleError {
             Self::NotFound { .. } => "not_found",
             Self::Stale(_) => "stale",
             Self::Refused(_) => "refused",
+            Self::Transfer(_) => "transfer",
             Self::ScanBusy => "scan_busy",
+            Self::Busy(_) => "busy",
             Self::Internal(_) => "internal",
         }
     }
@@ -109,9 +127,14 @@ pub fn classify_io(err: &std::io::Error, path: &Path) -> Hiccup {
 impl serde::Serialize for ScuttleError {
     fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let mut st = s.serialize_struct("ScuttleError", 2)?;
+        let mut st = s.serialize_struct("ScuttleError", 3)?;
         st.serialize_field("code", self.code())?;
         st.serialize_field("message", &self.to_string())?;
+        if let Self::Transfer(failure) = self {
+            // What kind, where, and the raw OS code — the parts a person or a
+            // bug report needs, and none of the path.
+            st.serialize_field("failure", failure)?;
+        }
         st.end()
     }
 }

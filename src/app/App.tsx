@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react'
 
 import { Detail } from '@/features/detail/Detail'
+import { MoveIndicator } from '@/features/move/MoveIndicator'
 import { Findings } from '@/features/findings/Findings'
 import { PileView } from '@/features/findings/PileView'
 import { Drawer } from '@/features/quarantine/Drawer'
@@ -20,7 +21,9 @@ import styles from './App.module.css'
  */
 const NAV: { view: View; label: string; available: (state: NavState) => boolean }[] = [
   { view: { name: 'findings' }, label: 'Findings', available: (s) => s.hasRummaged },
-  { view: { name: 'drawer' }, label: 'Drawer', available: (s) => s.heldCount > 0 },
+  // Also reachable while something is on its way in, so the place it is going
+  // exists before the first item arrives.
+  { view: { name: 'drawer' }, label: 'Drawer', available: (s) => s.heldCount > 0 || s.moving },
   { view: { name: 'space' }, label: 'Space', available: (s) => s.hasRummaged },
   { view: { name: 'settings' }, label: 'Settings', available: () => true },
 ]
@@ -28,6 +31,7 @@ const NAV: { view: View; label: string; available: (state: NavState) => boolean 
 interface NavState {
   hasRummaged: boolean
   heldCount: number
+  moving: boolean
 }
 
 /** Rough platform sniff, used only to leave room for the traffic lights. */
@@ -80,6 +84,7 @@ export function App() {
   const navState: NavState = {
     hasRummaged: findings?.has_rummaged === true,
     heldCount: drawer?.items.length ?? 0,
+    moving: store.moving,
   }
   const heldCount = navState.heldCount
   const sections = NAV.filter((item) => item.available(navState))
@@ -125,7 +130,10 @@ export function App() {
           {view.name !== 'home' && <span className={styles.wordmarkDot}>·</span>}
         </button>
 
-        {sections.length > 0 && (
+        <div className={styles.barRight}>
+          {/* Work in progress, and work that left something to look at, wherever you are. */}
+          <MoveIndicator />
+          {sections.length > 0 && (
           <nav className={styles.nav} aria-label="Sections">
             {sections.map(({ view: target, label }) => (
               <button
@@ -141,7 +149,8 @@ export function App() {
               </button>
             ))}
           </nav>
-        )}
+          )}
+        </div>
       </header>
 
       <main className={styles.stage}>{stage}</main>

@@ -254,6 +254,18 @@ impl PlatformService for MacPlatformService {
     fn installer_extensions(&self) -> &'static [&'static str] {
         &["dmg", "pkg", "mpkg", "iso"]
     }
+
+    fn own_data_dirs(&self) -> Vec<PathBuf> {
+        vec![
+            self.data_dir(),
+            self.quarantine_root(),
+            // The webview's own storage, keyed by the application identifier.
+            self.home.join("Library/WebKit/app.scuttle.desktop"),
+            self.home.join("Library/Caches/app.scuttle.desktop"),
+            self.home
+                .join("Library/Application Support/app.scuttle.desktop"),
+        ]
+    }
 }
 
 #[cfg(test)]

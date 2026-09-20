@@ -9,14 +9,18 @@ import {
   type ReactNode,
 } from 'react'
 
+import { describeReport } from '@/features/move/phrasing'
+import { applySnapshot, isTerminal, seedJob } from '@/features/move/progress'
 import { bytes } from '@/lib/format'
-import { api, watchRummage } from '@/lib/ipc'
+import { api, watchMoves, watchRummage } from '@/lib/ipc'
 import {
   isScuttleError,
   type Candidate,
   type Category,
   type Findings,
   type KeepChoice,
+  type MoveRequest,
+  type MoveSnapshot,
   type Phase,
   type Progress,
   type QuarantineView,
@@ -119,6 +123,30 @@ export interface Store {
   say: (text: string, options?: { tone?: Note['tone']; action?: Note['action'] }) => void
   dismissNote: () => void
 
+  /**
+   * The move into the drawer, if there is one to speak of. `snapshot` is the
+   * running job or, once it has finished, its outcome — kept until dismissed,
+   * so failures stay reachable after the toast is gone. `pending` covers the
+   * moment between a click and the first word from the worker, so the
+   * interface responds to the click itself.
+   */
+  move: { snapshot: MoveSnapshot | null; pending: boolean }
+  /** True from the click until the outcome is in. Prevents a second start. */
+  moving: boolean
+  cancelMove: () => Promise<void>
+  dismissMove: () => Promise<void>
+  /** Try the unfinished findings of the last move again; never the moved ones. */
+  retryMove: () => Promise<void>
+  /** Take a fresh look at findings that changed, so they can be chosen again. */
+  reviewAgain: (ids: string[]) => Promise<void>
+  /** Whether the details of the last move are open. */
+  moveDetailsOpen: boolean
+  setMoveDetailsOpen: (open: boolean) => void
+
+  /**
+   * All of these start a move and return once it has *started*. What happens
+   * next is reported through `move`.
+   */
   quarantine: (candidate: Candidate, memberIndex?: number) => Promise<void>
   quarantineGroup: (candidate: Candidate, keep: KeepChoice) => Promise<void>
   quarantineConfident: (category: Category) => Promise<void>
@@ -146,18 +174,6 @@ export interface Store {
  */
 export const StoreContext = createContext<Store | null>(null)
 
-/**
- * What to say when things land in the drawer.
- *
- * States the consequence at the moment it happens rather than leaving it for
- * whenever somebody next opens the drawer: nothing has been deleted, and the
- * bytes are not back yet.
- */
-function heldNote(count: number, movedBytes: number): string {
-  const what = `${count} ${count === 1 ? 'thing' : 'things'}`
-  return `${what} moved to the drawer, ${bytes(movedBytes)}. Nothing deleted — empty the drawer to free it.`
-}
-
 /** Turn whatever came back from IPC into something worth showing a person. */
 function readError(error: unknown): string {
   if (isScuttleError(error)) return error.message
@@ -175,10 +191,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [space, setSpace] = useState<SpaceOverview | null>(null)
   const [settings, setSettings] = useState<Settings | null>(null)
   const [note, setNote] = useState<Note | null>(null)
+  const [moveSnapshot, setMoveSnapshot] = useState<MoveSnapshot | null>(null)
+  const [movePending, setMovePending] = useState(false)
+  const [moveDetailsOpen, setMoveDetailsOpen] = useState(false)
 
   const noteId = useRef(0)
   const noteTimer = useRef<number | null>(null)
   const activeScan = useRef<string | null>(null)
+  // Mirrors of the move state for use inside event handlers, which must see
+  // the latest value without being re-created on every progress event.
+  const moveRef = useRef<MoveSnapshot | null>(null)
+  const pendingRef = useRef(false)
+  // The newest job whose outcome has been dismissed. Nothing at or below it is
+  // taken back in: a straggling event from a job someone has already let go
+  // of must not bring it back on screen.
+  const dismissedJob = useRef(0)
 
   const say = useCallback<Store['say']>((text, options) => {
     noteId.current += 1
@@ -312,134 +339,236 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [say],
   )
 
-  const quarantine = useCallback<Store['quarantine']>(
-    async (candidate, memberIndex) => {
+  const restore = useCallback<Store['restore']>(
+    async (id) => {
       try {
-        const record =
-          memberIndex === undefined
-            ? await api.quarantine(candidate.id)
-            : await api.quarantineMember(candidate.id, memberIndex)
-        setDetail(null)
-        await Promise.all([refreshFindings(), refreshDrawer()])
-        say(`${record.display_name} is in the drawer.`, {
-          action: {
-            label: 'Put it back',
-            run: () => {
-              void (async () => {
-                try {
-                  await api.restore(record.id)
-                  await Promise.all([refreshFindings(), refreshDrawer()])
-                  say(`${record.display_name} is back where it was.`)
-                } catch (error) {
-                  say(readError(error), { tone: 'warn' })
-                }
-              })()
-            },
-          },
-        })
-      } catch (error) {
-        // `stale` and `refused` are the interesting ones: they mean the safety
-        // layer did its job, and the user deserves the real reason.
-        say(readError(error), { tone: 'warn' })
-        if (isScuttleError(error) && error.code === 'stale') {
-          await refreshFindings()
-          setDetail(null)
+        const outcome = await api.restore(id)
+        await Promise.all([refreshDrawer(), refreshFindings()])
+        if (outcome.remaining > 0) {
+          const all = outcome.restored + outcome.remaining
+          say(
+            `Put back ${outcome.restored} of ${all}. ${outcome.remaining} could not go back and ${outcome.remaining === 1 ? 'is' : 'are'} still in the drawer.`,
+            { tone: 'warn' },
+          )
+          return false
         }
+        say(
+          outcome.renamed
+            ? 'Something was already there, so it went back under a new name.'
+            : 'Back where it came from.',
+        )
+        return true
+      } catch (error) {
+        say(readError(error), { tone: 'warn' })
+        return false
       }
     },
     [refreshDrawer, refreshFindings, say],
+  )
+
+  /**
+   * Take a snapshot from the worker — live, or fetched to catch up — and fold
+   * it into what is known. Only a live transition into a finished state speaks
+   * and refreshes: a snapshot fetched later about something that ended earlier
+   * updates the picture and stays quiet.
+   */
+  const applyMove = useCallback(
+    (incoming: MoveSnapshot, live: boolean) => {
+      if (incoming.job_id <= dismissedJob.current) return
+      const before = moveRef.current
+      const next = applySnapshot(before, incoming)
+      if (next === before || next === null) return
+      moveRef.current = next
+      setMoveSnapshot(next)
+      pendingRef.current = false
+      setMovePending(false)
+
+      const justFinished =
+        isTerminal(next.phase) &&
+        !(before !== null && before.job_id === next.job_id && isTerminal(before.phase))
+      if (!live || !justFinished) return
+
+      void Promise.all([refreshFindings(), refreshDrawer()])
+      if (next.report) {
+        const outcome = describeReport(next.report)
+        const only = next.report.findings.length === 1 ? next.report.findings[0]! : null
+        const undoable =
+          next.report.outcome === 'completed' && only?.record_id && only.unit === 'item'
+            ? only.record_id
+            : null
+        say(outcome.headline, {
+          tone: outcome.tone,
+          action: undoable
+            ? { label: 'Put it back', run: () => void restore(undoable) }
+            : outcome.hasDetails
+              ? { label: 'Details', run: () => setMoveDetailsOpen(true) }
+              : undefined,
+        })
+        // A clean finish leaves nothing to look at, so nothing is kept. Anything
+        // else stays in the header until it is dealt with or dismissed.
+        if (next.report.outcome === 'completed' && !outcome.hasDetails) {
+          dismissedJob.current = next.job_id
+          moveRef.current = null
+          setMoveSnapshot(null)
+          void api.dismissMove().catch(() => undefined)
+        }
+      }
+    },
+    [refreshDrawer, refreshFindings, restore, say],
+  )
+
+  // One subscription for the app's lifetime, plus a catch-up on load and
+  // whenever the window comes back: events are not replayed, so a listener
+  // that was not there for them asks where things stand instead.
+  useEffect(() => {
+    let dispose: (() => void) | undefined
+    let stopped = false
+    const catchUp = () => {
+      void api
+        .moveStatus()
+        .then((snapshot) => {
+          if (snapshot && !stopped) applyMove(snapshot, false)
+        })
+        .catch(() => undefined)
+    }
+
+    watchMoves((snapshot) => applyMove(snapshot, true)).then((off) => {
+      if (stopped) off()
+      else {
+        dispose = off
+        catchUp()
+      }
+    })
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') catchUp()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      stopped = true
+      dispose?.()
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [applyMove])
+
+  /**
+   * Start a move. The interface answers the click at once — `pending` flips
+   * before anything is sent — and a second start while one is running is
+   * refused here as well as in the core.
+   */
+  const startMove = useCallback(
+    async (request: MoveRequest): Promise<boolean> => {
+      const running = moveRef.current !== null && !isTerminal(moveRef.current.phase)
+      if (running || pendingRef.current) return false
+      pendingRef.current = true
+      setMovePending(true)
+      setDetail(null)
+      setMoveDetailsOpen(false)
+      try {
+        const { job_id } = await api.startMove(request)
+        // Events may already have arrived, even the last one; only fill in
+        // what is still missing.
+        const seeded = job_id > dismissedJob.current ? seedJob(moveRef.current, job_id) : moveRef.current
+        if (seeded !== moveRef.current) {
+          moveRef.current = seeded
+          setMoveSnapshot(seeded)
+        }
+        return true
+      } catch (error) {
+        pendingRef.current = false
+        setMovePending(false)
+        say(readError(error), { tone: 'warn' })
+        if (isScuttleError(error) && error.code === 'busy') {
+          void api
+            .moveStatus()
+            .then((snapshot) => snapshot && applyMove(snapshot, false))
+            .catch(() => undefined)
+        }
+        return false
+      }
+    },
+    [applyMove, say],
+  )
+
+  const cancelMove = useCallback(async () => {
+    try {
+      await api.cancelMove()
+    } catch (error) {
+      say(readError(error), { tone: 'warn' })
+    }
+  }, [say])
+
+  const dismissMove = useCallback(async () => {
+    const current = moveRef.current
+    if (current === null || !isTerminal(current.phase)) return
+    dismissedJob.current = current.job_id
+    moveRef.current = null
+    setMoveSnapshot(null)
+    setMoveDetailsOpen(false)
+    try {
+      await api.dismissMove()
+    } catch {
+      /* the interface has already let go; the core forgets on the next job */
+    }
+  }, [])
+
+  const retryMove = useCallback(async () => {
+    const report = moveRef.current?.report
+    if (!report) return
+    const ids = describeReport(report).retryIds
+    if (ids.length === 0) return
+    setMoveDetailsOpen(false)
+    await startMove({ kind: 'selection', ids, retry: true })
+  }, [startMove])
+
+  const reviewAgain = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return
+      try {
+        await api.refreshFindings(ids)
+        await refreshFindings()
+        say('Had another look. They are up to date, and yours to choose again.')
+      } catch (error) {
+        say(readError(error), { tone: 'warn' })
+      }
+    },
+    [refreshFindings, say],
+  )
+
+  const quarantine = useCallback<Store['quarantine']>(
+    async (candidate, memberIndex) => {
+      await startMove(
+        memberIndex === undefined
+          ? { kind: 'selection', ids: [candidate.id] }
+          : { kind: 'member', id: candidate.id, member_index: memberIndex },
+      )
+    },
+    [startMove],
   )
 
   const quarantineGroup = useCallback<Store['quarantineGroup']>(
     async (candidate, keepWhich) => {
-      try {
-        const outcome = await api.quarantineGroup(candidate.id, keepWhich)
-        setDetail(null)
-        await Promise.all([refreshFindings(), refreshDrawer()])
-
-        // Partial success is the normal case, so the report has to be able to
-        // describe one rather than pretending everything worked.
-        const moved = `${outcome.held.length} ${outcome.held.length === 1 ? 'copy' : 'copies'} in the drawer, ${outcome.kept} kept.`
-        if (outcome.refused.length > 0) {
-          say(`${moved} ${outcome.refused.length} left alone — ${outcome.refused[0]!.reason}`, {
-            tone: 'warn',
-          })
-        } else {
-          say(moved)
-        }
-      } catch (error) {
-        say(readError(error), { tone: 'warn' })
-      }
+      await startMove({ kind: 'group', id: candidate.id, keep: keepWhich })
     },
-    [refreshDrawer, refreshFindings, say],
+    [startMove],
   )
 
   const quarantineConfident = useCallback<Store['quarantineConfident']>(
     async (category) => {
-      try {
-        const outcome = await api.quarantineConfident(category)
-        if (outcome.held.length === 0 && outcome.refused.length === 0) {
-          say('Nothing in that pile was confident enough to move.')
-          return
-        }
-        setDetail(null)
-        await Promise.all([refreshFindings(), refreshDrawer()])
-
-        const moved = heldNote(outcome.held.length, outcome.bytes)
-        if (outcome.refused.length > 0) {
-          say(`${moved} ${outcome.refused.length} left alone — ${outcome.refused[0]!.reason}`, {
-            tone: 'warn',
-          })
-        } else {
-          say(moved)
-        }
-      } catch (error) {
-        say(readError(error), { tone: 'warn' })
-      }
+      await startMove({ kind: 'confident', category })
     },
-    [refreshDrawer, refreshFindings, say],
+    [startMove],
   )
 
   const quarantineAllConfident = useCallback<Store['quarantineAllConfident']>(async () => {
-    try {
-      const outcome = await api.quarantineAllConfident()
-      if (outcome.held.length === 0 && outcome.refused.length === 0) {
-        say('Nothing on the floor was confident enough to move on its own.')
-        return
-      }
-      setDetail(null)
-      await Promise.all([refreshFindings(), refreshDrawer()])
-      const moved = heldNote(outcome.held.length, outcome.bytes)
-      if (outcome.refused.length > 0) {
-        say(`${moved} ${outcome.refused.length} left alone.`, { tone: 'warn' })
-      } else {
-        say(moved)
-      }
-    } catch (error) {
-      say(readError(error), { tone: 'warn' })
-    }
-  }, [refreshDrawer, refreshFindings, say])
+    await startMove({ kind: 'confident' })
+  }, [startMove])
 
   const quarantineMany = useCallback<Store['quarantineMany']>(
     async (ids) => {
       if (ids.length === 0) return
-      try {
-        const outcome = await api.quarantineMany(ids)
-        setDetail(null)
-        await Promise.all([refreshFindings(), refreshDrawer()])
-        const moved = heldNote(outcome.held.length, outcome.bytes)
-        if (outcome.refused.length > 0) {
-          say(`${moved} ${outcome.refused.length} would not go — ${outcome.refused[0]!.reason}`, {
-            tone: 'warn',
-          })
-        } else {
-          say(moved)
-        }
-      } catch (error) {
-        say(readError(error), { tone: 'warn' })
-      }
+      await startMove({ kind: 'selection', ids })
     },
-    [refreshDrawer, refreshFindings, say],
+    [startMove],
   )
 
   const emptyDrawer = useCallback<Store['emptyDrawer']>(async () => {
@@ -493,25 +622,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [refreshFindings, say],
   )
 
-  const restore = useCallback<Store['restore']>(
-    async (id) => {
-      try {
-        const outcome = await api.restore(id)
-        await Promise.all([refreshDrawer(), refreshFindings()])
-        say(
-          outcome.renamed
-            ? 'Something was already there, so it went back under a new name.'
-            : 'Back where it came from.',
-        )
-        return true
-      } catch (error) {
-        say(readError(error), { tone: 'warn' })
-        return false
-      }
-    },
-    [refreshDrawer, refreshFindings, say],
-  )
-
   const removePermanently = useCallback<Store['removePermanently']>(
     async (id) => {
       try {
@@ -543,6 +653,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setView(next)
   }, [])
 
+  const move = useMemo(
+    () => ({ snapshot: moveSnapshot, pending: movePending }),
+    [moveSnapshot, movePending],
+  )
+  const moving =
+    movePending || (moveSnapshot !== null && !isTerminal(moveSnapshot.phase))
+
   const value = useMemo<Store>(
     () => ({
       view,
@@ -563,6 +680,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       note,
       say,
       dismissNote,
+      move,
+      moving,
+      cancelMove,
+      dismissMove,
+      retryMove,
+      reviewAgain,
+      moveDetailsOpen,
+      setMoveDetailsOpen,
       quarantine,
       quarantineGroup,
       quarantineConfident,
@@ -578,8 +703,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [
       view, go, scan, rummage, cancel, findings, refreshFindings, detail, drawer,
       refreshDrawer, space, refreshSpace, settings, updateSettings, note, say,
-      dismissNote, quarantine, quarantineGroup, quarantineConfident, quarantineAllConfident,
-      quarantineMany, emptyDrawer, keep, ignore, restore, removePermanently, reveal,
+      dismissNote, move, moving, cancelMove, dismissMove, retryMove, reviewAgain,
+      moveDetailsOpen, quarantine, quarantineGroup, quarantineConfident,
+      quarantineAllConfident, quarantineMany, emptyDrawer, keep, ignore, restore,
+      removePermanently, reveal,
     ],
   )
 

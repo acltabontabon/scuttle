@@ -267,6 +267,16 @@ impl PlatformService for WindowsPlatformService {
     fn installer_extensions(&self) -> &'static [&'static str] {
         &["exe", "msi", "msix", "appx", "msp", "iso"]
     }
+
+    fn own_data_dirs(&self) -> Vec<PathBuf> {
+        vec![
+            self.data_dir(),
+            self.quarantine_root(),
+            // The webview's own profile: the application identifier under
+            // local app data. Scuttle is running out of it.
+            self.local_app_data().join("app.scuttle.desktop"),
+        ]
+    }
 }
 
 /// The single argument explorer.exe expects in order to open a folder with

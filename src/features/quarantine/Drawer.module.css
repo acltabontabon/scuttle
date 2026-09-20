@@ -560,3 +560,18 @@
   background: var(--clay-soft);
   border-radius: var(--round-soft);
 }
+
+.cardCount {
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* An interrupted move that Scuttle would not settle by guessing. A sentence,
+   not an alarm: nothing was lost. */
+.cardAttention {
+  grid-column: 1 / -1;
+  margin-top: var(--snug);
+  font-size: var(--type-small);
+  color: var(--clay-ink);
+  text-wrap: pretty;
+}

@@ -4,6 +4,7 @@
 //! decide, and what is still recoverable" — and nothing else. There is no
 //! index of every file on the machine. Everything here stays on the machine.
 
+pub mod entries;
 pub mod migrations;
 
 use std::path::{Path, PathBuf};
@@ -19,6 +20,8 @@ use crate::model::{
     TargetKind,
 };
 use crate::scanning::{IgnoreKind, IgnoreSet, ScanOptions, ScanSummary};
+pub use entries::{journal, JournalEntry, SnapshotEntry, SnapshotInfo, SnapshotState};
+
 use crate::Result;
 
 /// The user's preferences. Small on purpose.
@@ -66,6 +69,14 @@ pub enum QuarantineStatus {
     Restored,
     /// Gone for good.
     Removed,
+    /// A move into the drawer is in progress, or was interrupted. Invisible to
+    /// every listing until it is finalised or reconciled, so a half-finished
+    /// move is never presented as held content.
+    Moving,
+    /// A restore is in progress, or was interrupted.
+    Restoring,
+    /// A move that put nothing in the drawer.
+    Abandoned,
 }
 
 impl QuarantineStatus {
@@ -74,13 +85,46 @@ impl QuarantineStatus {
             QuarantineStatus::Held => "held",
             QuarantineStatus::Restored => "restored",
             QuarantineStatus::Removed => "removed",
+            QuarantineStatus::Moving => "moving",
+            QuarantineStatus::Restoring => "restoring",
+            QuarantineStatus::Abandoned => "abandoned",
         }
     }
     fn parse(s: &str) -> QuarantineStatus {
         match s {
             "restored" => QuarantineStatus::Restored,
             "removed" => QuarantineStatus::Removed,
+            "moving" => QuarantineStatus::Moving,
+            "restoring" => QuarantineStatus::Restoring,
+            "abandoned" => QuarantineStatus::Abandoned,
             _ => QuarantineStatus::Held,
+        }
+    }
+}
+
+/// What a drawer record holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordMode {
+    /// One item that moved whole: a file, or a directory renamed in one step.
+    #[default]
+    Whole,
+    /// The reviewed files of a shared folder (a cache root). The folder itself
+    /// never moved; the record holds exactly the files listed for it.
+    Contents,
+}
+
+impl RecordMode {
+    fn as_str(&self) -> &'static str {
+        match self {
+            RecordMode::Whole => "whole",
+            RecordMode::Contents => "contents",
+        }
+    }
+    fn parse(s: &str) -> RecordMode {
+        match s {
+            "contents" => RecordMode::Contents,
+            _ => RecordMode::Whole,
         }
     }
 }
@@ -103,6 +147,19 @@ pub struct QuarantineRecord {
     pub expires_unix: i64,
     pub status: QuarantineStatus,
     pub resolved_unix: Option<i64>,
+    #[serde(default)]
+    pub mode: RecordMode,
+    /// Files held. One for a whole item.
+    #[serde(default = "one")]
+    pub item_count: u64,
+    /// True when an interrupted move left something Scuttle could not settle on
+    /// its own. Nothing is deleted on that account; the person is told.
+    #[serde(default)]
+    pub attention: bool,
+}
+
+fn one() -> u64 {
+    1
 }
 
 /// A summary of a past rummage.
@@ -444,8 +501,8 @@ impl Store {
         conn.execute(
             "INSERT INTO quarantine_items (id, finding_id, original_path, stored_path,
                 display_name, category, size, content_hash, evidence, quarantined_unix,
-                expires_unix, status, resolved_unix)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+                expires_unix, status, resolved_unix, mode, item_count, attention)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
             params![
                 record.id,
                 record.finding_id,
@@ -460,6 +517,9 @@ impl Store {
                 record.expires_unix,
                 record.status.as_str(),
                 record.resolved_unix,
+                record.mode.as_str(),
+                record.item_count,
+                record.attention as i32,
             ],
         )?;
         Ok(())
@@ -469,7 +529,8 @@ impl Store {
         let conn = self.lock();
         conn.query_row(
             "SELECT id, finding_id, original_path, stored_path, display_name, category, size,
-                    content_hash, evidence, quarantined_unix, expires_unix, status, resolved_unix
+                    content_hash, evidence, quarantined_unix, expires_unix, status, resolved_unix,
+                    mode, item_count, attention
              FROM quarantine_items WHERE id = ?1",
             params![id],
             row_to_quarantine,
@@ -483,7 +544,8 @@ impl Store {
         let conn = self.lock();
         let mut statement = conn.prepare(
             "SELECT id, finding_id, original_path, stored_path, display_name, category, size,
-                    content_hash, evidence, quarantined_unix, expires_unix, status, resolved_unix
+                    content_hash, evidence, quarantined_unix, expires_unix, status, resolved_unix,
+                    mode, item_count, attention
              FROM quarantine_items WHERE status = 'held' ORDER BY quarantined_unix DESC",
         )?;
         let rows = statement.query_map([], row_to_quarantine)?;
@@ -494,8 +556,9 @@ impl Store {
         let conn = self.lock();
         let mut statement = conn.prepare(
             "SELECT id, finding_id, original_path, stored_path, display_name, category, size,
-                    content_hash, evidence, quarantined_unix, expires_unix, status, resolved_unix
-             FROM quarantine_items WHERE status = 'held' AND expires_unix <= ?1",
+                    content_hash, evidence, quarantined_unix, expires_unix, status, resolved_unix,
+                    mode, item_count, attention
+             FROM quarantine_items WHERE status = 'held' AND attention = 0 AND expires_unix <= ?1",
         )?;
         let rows = statement.query_map(params![now_unix], row_to_quarantine)?;
         Ok(rows.filter_map(std::result::Result::ok).collect())
@@ -637,7 +700,7 @@ fn read_evidence(conn: &Connection, finding_id: &str) -> Result<Vec<Evidence>> {
     Ok(rows.filter_map(std::result::Result::ok).collect())
 }
 
-fn row_to_quarantine(row: &rusqlite::Row<'_>) -> rusqlite::Result<QuarantineRecord> {
+pub(crate) fn row_to_quarantine(row: &rusqlite::Row<'_>) -> rusqlite::Result<QuarantineRecord> {
     Ok(QuarantineRecord {
         id: row.get(0)?,
         finding_id: row.get(1)?,
@@ -652,6 +715,9 @@ fn row_to_quarantine(row: &rusqlite::Row<'_>) -> rusqlite::Result<QuarantineReco
         expires_unix: row.get(10)?,
         status: QuarantineStatus::parse(&row.get::<_, String>(11)?),
         resolved_unix: row.get(12)?,
+        mode: RecordMode::parse(&row.get::<_, String>(13)?),
+        item_count: row.get::<_, i64>(14)?.max(0) as u64,
+        attention: row.get::<_, i64>(15)? != 0,
     })
 }
 
@@ -879,6 +945,9 @@ mod tests {
             expires_unix: 500 + 14 * 86_400,
             status: QuarantineStatus::Held,
             resolved_unix: None,
+            mode: crate::storage::RecordMode::Whole,
+            item_count: 1,
+            attention: false,
         };
         store.insert_quarantine(&record).unwrap();
 
@@ -920,6 +989,9 @@ mod tests {
                     expires_unix: expires,
                     status,
                     resolved_unix: None,
+                    mode: crate::storage::RecordMode::Whole,
+                    item_count: 1,
+                    attention: false,
                 })
                 .unwrap();
         }

@@ -50,6 +50,12 @@
   color: var(--ink-faint);
 }
 
+.barRight {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap);
+}
+
 .nav {
   display: flex;
   align-items: baseline;

@@ -487,6 +487,7 @@ mod tests {
             safety: crate::platform::caches::CacheSafety::Regenerates,
             owner_process: None,
             developer_only: true,
+            settle_secs: 0,
         }];
 
         let candidates = h.run_bare(GhostDetector::new());

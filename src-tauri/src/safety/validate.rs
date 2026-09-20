@@ -93,6 +93,44 @@ pub fn authorize(
     })
 }
 
+/// The gate for cleaning the *contents* of a shared folder.
+///
+/// It is [`authorize`] with exactly one check left out: comparing the folder's
+/// own modification time and child count with the scan. Those change whenever
+/// anything is created or deleted inside it, which for a temp or cache folder
+/// is constantly, so with them in place such a finding could never pass. What
+/// the reviewed set replaces them with is a per-file check, made immediately
+/// before each file moves.
+///
+/// Everything structural still applies — protected table, containment, links
+/// below the scanned root, the target being a real directory — and the folder
+/// itself is never a candidate to move.
+pub fn authorize_contents(
+    candidate: &CleanupCandidate,
+    ctx: &ActionContext<'_>,
+) -> Result<PathBuf> {
+    let path = paths::normalize(&candidate.path);
+
+    if candidate.risk == Risk::Protected {
+        return Err(ScuttleError::Refused(
+            "Scuttle will not act on this at all.".into(),
+        ));
+    }
+    if ctx.bidding == Bidding::Scuttle && !candidate.is_actionable() {
+        return Err(ScuttleError::Refused(format!(
+            "Scuttle does not act on findings marked {} unless you pick them yourself.",
+            candidate.recommended_action_label()
+        )));
+    }
+    if !candidate.is_shared_contents() {
+        return Err(ScuttleError::Refused(
+            "That is not a folder whose contents Scuttle cleans.".into(),
+        ));
+    }
+    authorize_path(&path, TargetKind::Directory, ctx)?;
+    Ok(path)
+}
+
 /// The path-shaped half of the gate, shared with restore (which has a
 /// destination rather than a finding).
 pub fn authorize_path(path: &Path, kind: TargetKind, ctx: &ActionContext<'_>) -> Result<()> {

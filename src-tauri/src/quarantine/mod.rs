@@ -13,6 +13,11 @@
 //!   path, the restored item is placed beside it under a new name and the
 //!   caller is told where it went.
 
+pub mod contents;
+pub mod fsx;
+pub mod transfer;
+pub mod volume;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -23,6 +28,7 @@ use crate::model::{CleanupCandidate, TargetKind};
 use crate::safety::{self, ActionContext};
 use crate::storage::{HistoryEntry, QuarantineRecord, QuarantineStatus, Store};
 use crate::Result;
+use transfer::{hash_file, Ctl, FailureKind};
 
 /// Files larger than this are not hashed on the way in: the check would cost
 /// minutes and the path plus size plus timestamp already identify the item.
@@ -39,6 +45,13 @@ struct Manifest {
     expires_unix: i64,
     size: u64,
     reasons: Vec<String>,
+    /// `whole`, or `contents` for the reviewed files of a shared folder.
+    #[serde(default)]
+    mode: crate::storage::RecordMode,
+    /// `moving` while a move is under way or was interrupted; `held` once it
+    /// settled. A person reading a cell with no database can tell which.
+    #[serde(default)]
+    state: String,
 }
 
 pub struct Quarantine {
@@ -51,8 +64,15 @@ pub struct Quarantine {
 #[derive(Debug, Clone, Serialize)]
 pub struct RestoreOutcome {
     pub path: PathBuf,
-    /// True when the original location was occupied and a new name was used.
+    /// True when the original location was occupied and a new name was used
+    /// (for a folder's files: for at least one of them).
     pub renamed: bool,
+    /// Files put back. One for a whole item.
+    pub restored: u64,
+    /// Files that could not be put back and are still in the drawer.
+    pub remaining: u64,
+    /// Why, grouped, for the ones that could not.
+    pub failed: Vec<transfer::IssueGroup>,
 }
 
 /// What emptying the drawer actually managed to do.
@@ -96,6 +116,28 @@ impl Quarantine {
         ctx: &ActionContext<'_>,
         now_unix: i64,
     ) -> Result<QuarantineRecord> {
+        self.hold_controlled(candidate, ctx, now_unix, &Ctl::none())
+    }
+
+    /// [`Quarantine::hold`], stoppable: a copy across a volume boundary checks
+    /// `ctl` between chunks.
+    pub fn hold_controlled(
+        &self,
+        candidate: &CleanupCandidate,
+        ctx: &ActionContext<'_>,
+        now_unix: i64,
+        ctl: &Ctl<'_>,
+    ) -> Result<QuarantineRecord> {
+        // A shared folder is never moved whole; its reviewed files are moved
+        // one by one. Reaching this with one means the caller skipped that
+        // path, so refuse rather than move the folder.
+        if candidate.is_shared_contents() {
+            return Err(ScuttleError::Refused(
+                "That is a shared folder. Scuttle moves its files one by one, never the folder."
+                    .into(),
+            ));
+        }
+
         // Everything is re-derived here. The stored finding is a request, not
         // an authorisation.
         let target = safety::authorize(candidate, ctx)?;
@@ -112,17 +154,10 @@ impl Quarantine {
 
         let content_hash =
             if target.kind == TargetKind::File && target.observed.size <= MAX_HASH_BYTES {
-                hash_file(&target.path)
+                hash_file(&target.path).ok()
             } else {
                 None
             };
-
-        // The move itself. Anything that fails here leaves the original in
-        // place, which is the right way round to fail.
-        if let Err(err) = move_across(&target.path, &stored_path) {
-            let _ = std::fs::remove_dir_all(&cell);
-            return Err(err);
-        }
 
         // What the drawer holds is what was actually moved into it, which is
         // this one path — not what the finding it came from was worth.
@@ -140,7 +175,7 @@ impl Quarantine {
             TargetKind::File if target.observed.size > 0 => target.observed.size,
             _ => candidate.size,
         };
-        let record = QuarantineRecord {
+        let mut record = QuarantineRecord {
             id: id.clone(),
             finding_id: Some(candidate.id.clone()),
             original_path: target.path.clone(),
@@ -152,19 +187,48 @@ impl Quarantine {
             evidence: candidate.evidence.clone(),
             quarantined_unix: now_unix,
             expires_unix: now_unix + i64::from(self.retention_days) * 86_400,
-            status: QuarantineStatus::Held,
+            // Recorded as *moving* before anything moves. A crash between the
+            // move and the record settling leaves a record that says what was
+            // intended, which is what startup reconciliation reads.
+            status: QuarantineStatus::Moving,
             resolved_unix: None,
+            mode: crate::storage::RecordMode::Whole,
+            item_count: 1,
+            attention: false,
         };
-
-        write_manifest(&cell, &record);
-
-        // If the database write fails the item is already moved, so put it
-        // back rather than leaving it stranded with no record.
+        write_manifest(&cell, &record, "moving");
         if let Err(err) = self.store.insert_quarantine(&record) {
-            let _ = move_across(&stored_path, &target.path);
-            let _ = std::fs::remove_dir_all(&cell);
+            contents::remove_empty_cell(&cell);
             return Err(err);
         }
+
+        // The move itself. Anything that fails here leaves the original in
+        // place, which is the right way round to fail. Only an empty cell is
+        // removed: nothing published means nothing to lose.
+        if let Err(failure) = transfer::move_entry(&target.path, &stored_path, ctl) {
+            let _ = self.store.delete_quarantine(&id);
+            contents::remove_empty_cell(&cell);
+            return Err(failure.into());
+        }
+
+        // Settle. If that fails the item is already moved, so put it back
+        // rather than leaving it stranded. The cell is dropped only once the
+        // item is safely home: if putting it back fails too, the cell — and its
+        // manifest and its `moving` record — is the trace left, and it stays.
+        record.status = QuarantineStatus::Held;
+        if let Err(err) =
+            self.store
+                .settle_record(&id, QuarantineStatus::Held, size, 1, false, None)
+        {
+            if transfer::move_entry(&stored_path, &target.path, &Ctl::none()).is_ok() {
+                let _ = self.store.delete_quarantine(&id);
+                contents::remove_empty_cell(&cell);
+            } else {
+                tracing::warn!("could not undo a move after a database failure; the cell was kept");
+            }
+            return Err(err);
+        }
+        write_manifest(&cell, &record, "held");
 
         let _ = self.store.forget_candidate(&candidate.id);
         self.log(now_unix, "quarantine", &record, "held");
@@ -174,10 +238,18 @@ impl Quarantine {
     /// Put something back. Never overwrites.
     pub fn restore(&self, id: &str, now_unix: i64) -> Result<RestoreOutcome> {
         let record = self.store.quarantine_record(id)?;
-        if record.status != QuarantineStatus::Held {
-            return Err(ScuttleError::Refused(
-                "That item has already left the drawer.".into(),
-            ));
+        match record.status {
+            QuarantineStatus::Held => {}
+            QuarantineStatus::Moving | QuarantineStatus::Restoring => {
+                return Err(ScuttleError::Refused(
+                    "That item is still being moved. Try again in a moment.".into(),
+                ))
+            }
+            _ => {
+                return Err(ScuttleError::Refused(
+                    "That item has already left the drawer.".into(),
+                ))
+            }
         }
         // The stored path must be inside the drawer. A record pointing
         // anywhere else is not something to act on.
@@ -192,12 +264,32 @@ impl Quarantine {
             ));
         }
 
+        if record.mode == crate::storage::RecordMode::Contents {
+            let done = self.restore_contents(&record, now_unix, &Ctl::none())?;
+            return Ok(RestoreOutcome {
+                path: record.original_path.clone(),
+                renamed: done.renamed > 0,
+                restored: done.restored,
+                remaining: done.remaining,
+                failed: done.issues.into_groups(),
+            });
+        }
+
         if let Some(parent) = record.original_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
-        let (destination, renamed) = free_destination(&record.original_path);
-        move_across(&record.stored_path, &destination)?;
+        // Marked before anything moves, so an interruption is recognisable.
+        self.store.set_quarantine_restoring(id)?;
+        let (destination, renamed) = match restore_into(&record.stored_path, &record.original_path)
+        {
+            Ok(placed) => placed,
+            Err(err) => {
+                // Nothing moved: it is still held.
+                let _ = self.store.set_record_status(id, QuarantineStatus::Held);
+                return Err(err);
+            }
+        };
         // Drop the emptied cell, and only ever a cell. A malformed record
         // whose stored path sat directly in the drawer root would otherwise
         // take the whole drawer with it.
@@ -223,6 +315,9 @@ impl Quarantine {
         Ok(RestoreOutcome {
             path: destination,
             renamed,
+            restored: 1,
+            remaining: 0,
+            failed: Vec::new(),
         })
     }
 
@@ -232,6 +327,14 @@ impl Quarantine {
         let record = self.store.quarantine_record(id)?;
         if record.status == QuarantineStatus::Removed {
             return Ok(());
+        }
+        if matches!(
+            record.status,
+            QuarantineStatus::Moving | QuarantineStatus::Restoring
+        ) {
+            return Err(ScuttleError::Refused(
+                "That item is still being moved. Try again in a moment.".into(),
+            ));
         }
         if !safety::paths::is_strictly_within(&record.stored_path, &self.root) {
             return Err(ScuttleError::Refused(
@@ -308,13 +411,13 @@ impl Quarantine {
     }
 }
 
-/// Find a destination that does not already exist.
-///
-/// `report.pdf` becomes `report (restored).pdf`, then `report (restored 2).pdf`.
-/// The original is never touched.
-fn free_destination(original: &Path) -> (PathBuf, bool) {
-    if !original.exists() {
-        return (original.to_path_buf(), false);
+/// The name to try for a restore. Attempt 0 is the original path itself;
+/// `report.pdf` then becomes `report (restored).pdf`, `report (restored 2).pdf`
+/// and so on. This only proposes names; that nothing is overwritten is
+/// guaranteed by the no-replace publish that uses them.
+pub(crate) fn restored_name(original: &Path, attempt: u32) -> PathBuf {
+    if attempt == 0 {
+        return original.to_path_buf();
     }
     let parent = original.parent().unwrap_or(Path::new("."));
     let stem = original
@@ -325,97 +428,43 @@ fn free_destination(original: &Path) -> (PathBuf, bool) {
         .extension()
         .map(|e| format!(".{}", e.to_string_lossy()))
         .unwrap_or_default();
+    let suffix = if attempt == 1 {
+        " (restored)".to_string()
+    } else {
+        format!(" (restored {attempt})")
+    };
+    parent.join(format!("{stem}{suffix}{extension}"))
+}
 
-    for attempt in 1..1000 {
-        let suffix = if attempt == 1 {
-            " (restored)".to_string()
-        } else {
-            format!(" (restored {attempt})")
-        };
-        let candidate = parent.join(format!("{stem}{suffix}{extension}"));
-        if !candidate.exists() {
-            return (candidate, true);
+/// Put `stored` back at `original`, or beside it if something has arrived
+/// there in the meantime. Never overwrites: each candidate name is published
+/// with a rename that fails if the name is taken, and a collision — including
+/// one that appears between choosing the name and using it — moves on to the
+/// next name.
+fn restore_into(stored: &Path, original: &Path) -> Result<(PathBuf, bool)> {
+    for attempt in 0..1000 {
+        let candidate = restored_name(original, attempt);
+        match transfer::move_entry(stored, &candidate, &Ctl::none()) {
+            Ok(_) => return Ok((candidate, attempt > 0)),
+            Err(failure) if failure.kind == FailureKind::Collision => continue,
+            Err(failure) => return Err(failure.into()),
         }
     }
     // Pathological, but never overwrite.
-    (
-        parent.join(format!(
-            "{stem} (restored {}){extension}",
-            uuid::Uuid::new_v4()
-        )),
-        true,
-    )
+    let candidate = original.with_file_name(format!(
+        "{} (restored {})",
+        original
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        uuid::Uuid::new_v4()
+    ));
+    transfer::move_entry(stored, &candidate, &Ctl::none())
+        .map(|_| (candidate, true))
+        .map_err(Into::into)
 }
 
-/// Move a file or directory, falling back to copy-then-remove when the source
-/// and destination are on different volumes.
-fn move_across(from: &Path, to: &Path) -> Result<()> {
-    match std::fs::rename(from, to) {
-        Ok(()) => return Ok(()),
-        Err(err) => {
-            // A rename can fail for reasons a copy would also fail for, but
-            // the common one — crossing a volume boundary — is recoverable.
-            tracing::debug!(error = %err.kind(), "rename failed, copying instead");
-        }
-    }
-
-    // From here the move is a copy followed by a removal, and either half can
-    // fail on its own: a file another process is holding open refuses to be
-    // removed long after it has happily been read. Leaving the copy behind
-    // would duplicate the data, and on the way out of the drawer would hand
-    // back a file that the drawer still holds. So a failure at any point puts
-    // the filesystem back the way it was and reports what went wrong.
-    let meta = std::fs::symlink_metadata(from)?;
-    if meta.is_dir() {
-        if let Err(err) = copy_tree(from, to) {
-            let _ = std::fs::remove_dir_all(to);
-            return Err(err);
-        }
-        if let Err(err) = std::fs::remove_dir_all(from) {
-            let _ = std::fs::remove_dir_all(to);
-            return Err(ScuttleError::Io(err));
-        }
-    } else {
-        if let Err(err) = std::fs::copy(from, to) {
-            let _ = std::fs::remove_file(to);
-            return Err(ScuttleError::Io(err));
-        }
-        if let Err(err) = std::fs::remove_file(from) {
-            let _ = std::fs::remove_file(to);
-            return Err(ScuttleError::Io(err));
-        }
-    }
-    Ok(())
-}
-
-fn copy_tree(from: &Path, to: &Path) -> Result<()> {
-    std::fs::create_dir_all(to)?;
-    for entry in std::fs::read_dir(from)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let destination = to.join(entry.file_name());
-        if file_type.is_symlink() {
-            // Links are not followed. Copying the target would silently
-            // duplicate data that lives somewhere else entirely.
-            continue;
-        }
-        if file_type.is_dir() {
-            copy_tree(&entry.path(), &destination)?;
-        } else {
-            std::fs::copy(entry.path(), &destination)?;
-        }
-    }
-    Ok(())
-}
-
-fn hash_file(path: &Path) -> Option<String> {
-    let mut file = std::fs::File::open(path).ok()?;
-    let mut hasher = blake3::Hasher::new();
-    std::io::copy(&mut file, &mut hasher).ok()?;
-    Some(hasher.finalize().to_hex().to_string())
-}
-
-fn write_manifest(cell: &Path, record: &QuarantineRecord) {
+pub(crate) fn write_manifest(cell: &Path, record: &QuarantineRecord, state: &str) {
     let manifest = Manifest {
         id: record.id.clone(),
         original_path: record.original_path.to_string_lossy().into_owned(),
@@ -424,11 +473,16 @@ fn write_manifest(cell: &Path, record: &QuarantineRecord) {
         expires_unix: record.expires_unix,
         size: record.size,
         reasons: record.evidence.iter().map(|e| e.summary.clone()).collect(),
+        mode: record.mode,
+        state: state.to_string(),
     };
     if let Ok(json) = serde_json::to_string_pretty(&manifest) {
         let _ = std::fs::write(cell.join("scuttle-manifest.json"), json);
     }
 }
+
+#[cfg(test)]
+mod contents_tests;
 
 #[cfg(test)]
 mod tests {
@@ -688,6 +742,9 @@ mod tests {
                 expires_unix: 0,
                 status: QuarantineStatus::Held,
                 resolved_unix: None,
+                mode: crate::storage::RecordMode::Whole,
+                item_count: 1,
+                attention: false,
             })
             .unwrap();
 
@@ -826,21 +883,41 @@ mod tests {
         assert!(record.content_hash.is_some());
 
         f.quarantine.restore(&record.id, 2000).unwrap();
-        assert_eq!(hash_file(&path), record.content_hash);
+        assert_eq!(hash_file(&path).ok(), record.content_hash);
     }
 
     #[test]
-    fn free_destination_keeps_trying_until_it_finds_a_gap() {
+    fn restore_names_are_proposed_in_order_and_the_first_is_the_original() {
+        let original = Path::new("/somewhere/report.pdf");
+        assert_eq!(restored_name(original, 0), original);
+        assert!(restored_name(original, 1)
+            .to_string_lossy()
+            .ends_with("report (restored).pdf"));
+        assert!(restored_name(original, 2)
+            .to_string_lossy()
+            .ends_with("report (restored 2).pdf"));
+    }
+
+    #[test]
+    fn restoring_skips_every_taken_name_and_touches_none_of_them() {
         let tmp = tempfile::tempdir().unwrap();
         let original = tmp.path().join("report.pdf");
         fs::write(&original, "a").unwrap();
         fs::write(tmp.path().join("report (restored).pdf"), "b").unwrap();
+        let stored = tmp.path().join("held.pdf");
+        fs::write(&stored, "held").unwrap();
 
-        let (destination, renamed) = free_destination(&original);
+        let (destination, renamed) = restore_into(&stored, &original).unwrap();
         assert!(renamed);
         assert!(destination
             .to_string_lossy()
             .ends_with("report (restored 2).pdf"));
+        assert_eq!(fs::read_to_string(&original).unwrap(), "a");
+        assert_eq!(
+            fs::read_to_string(tmp.path().join("report (restored).pdf")).unwrap(),
+            "b"
+        );
+        assert_eq!(fs::read_to_string(&destination).unwrap(), "held");
     }
 
     #[test]
@@ -863,7 +940,7 @@ mod tests {
         let original = fs::metadata(&locked).unwrap().permissions();
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
 
-        let outcome = move_across(&source, &destination);
+        let outcome = transfer::move_entry(&source, &destination, &Ctl::none());
 
         fs::set_permissions(&locked, original).unwrap();
 
@@ -908,6 +985,9 @@ mod tests {
                 expires_unix: 0,
                 status: QuarantineStatus::Held,
                 resolved_unix: None,
+                mode: crate::storage::RecordMode::Whole,
+                item_count: 1,
+                attention: false,
             })
             .unwrap();
 
@@ -919,31 +999,5 @@ mod tests {
             "still held",
             "restoring one item must not disturb another"
         );
-    }
-
-    #[test]
-    fn copying_a_tree_does_not_follow_links_out_of_it() {
-        let tmp = tempfile::tempdir().unwrap();
-        let outside = tmp.path().join("outside");
-        fs::create_dir_all(&outside).unwrap();
-        fs::write(outside.join("secret.txt"), "not yours").unwrap();
-
-        let source = tmp.path().join("source");
-        fs::create_dir_all(&source).unwrap();
-        fs::write(source.join("real.txt"), "mine").unwrap();
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&outside, source.join("link")).unwrap();
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&outside, source.join("link")).unwrap();
-
-        let destination = tmp.path().join("destination");
-        copy_tree(&source, &destination).unwrap();
-
-        assert!(destination.join("real.txt").exists());
-        assert!(
-            !destination.join("link").exists(),
-            "links must not be traversed"
-        );
-        assert!(outside.join("secret.txt").exists());
     }
 }

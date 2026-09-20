@@ -97,6 +97,23 @@ pub trait PlatformService: Send + Sync {
 
     /// Installer file extensions that mean something on this platform.
     fn installer_extensions(&self) -> &'static [&'static str];
+
+    /// Everything that belongs to Scuttle itself: its database, its drawer and
+    /// the folders the app's own runtime keeps. None of it may ever be offered
+    /// as something to clean up, however close to a scanned cache it sits.
+    fn own_data_dirs(&self) -> Vec<PathBuf> {
+        vec![self.data_dir(), self.quarantine_root()]
+    }
+}
+
+/// Mark Scuttle's own files as off limits in a protected-path table.
+pub fn protect_own_files(
+    protected: &mut crate::safety::ProtectedPaths,
+    platform: &dyn PlatformService,
+) {
+    for dir in platform.own_data_dirs() {
+        protected.also_protect("Scuttle's own files", dir);
+    }
 }
 
 /// Build the service for whatever this is running on.

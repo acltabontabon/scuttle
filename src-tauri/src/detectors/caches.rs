@@ -152,6 +152,7 @@ mod tests {
             safety,
             owner_process: process,
             developer_only: dev,
+            settle_secs: 0,
         }
     }
 

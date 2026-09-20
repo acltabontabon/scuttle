@@ -19,6 +19,7 @@
 //! Detectors never delete anything and never decide their own confidence.
 
 pub mod contents;
+pub mod snapshot;
 pub mod walk;
 
 use std::collections::HashMap;
@@ -136,7 +137,7 @@ impl ScanContext {
         // Scuttle's own database and quarantine drawer live inside a
         // directory Scuttle scans. Finding its own held items and offering to
         // quarantine them again would be absurd.
-        protected_paths.also_protect("Scuttle's own files", platform.data_dir());
+        crate::platform::protect_own_files(&mut protected_paths, platform.as_ref());
         let protected = Arc::new(protected_paths);
         let apps = AppIndex::new(platform.installed_apps());
         let libraries = platform.game_libraries();

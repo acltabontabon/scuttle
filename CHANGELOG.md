@@ -8,7 +8,39 @@ major version is 0, a minor bump may change behaviour.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **Moving a folder that is in use no longer fails with "modified since Scuttle
+  found it".** Cache and temp folders change whenever anything inside them does,
+  so comparing the folder's own timestamp meant the Windows temp folder could
+  never be moved, and "rummage again" only led back to the same refusal. Shared
+  folders are now cleaned from the set of files reviewed at scan time, each
+  checked just before it moves; files that changed, vanished or are in use are
+  skipped and counted, and the rest go. The folder itself never moves.
+- **A failed folder move could lose files.** After a refused rename the old code
+  copied the folder, deleted the original file by file, and on a locked file
+  deleted the copy as well. Copying is now used only across drives, only for
+  files, and the original is removed last.
+- **Moving no longer freezes the window.** It ran on the thread that draws the
+  window. It now runs on a worker, and starting one returns at once.
+- Nothing is ever overwritten by a move or a restore, enforced by the operating
+  system rather than by a check that can lose a race.
+
+### Added
+
+- **Progress you can see.** The selection panel turns into a thin progress track
+  with the phase in words, real counts, and Cancel; a small indicator in the
+  header follows the move around Scuttle; and anything left unfinished stays
+  reachable, with what happened, the operating system's error code, and what to
+  do about it — retry the rest, review again, or copy the details.
+- Failures are classified — in use, access denied, changed since the scan, no
+  room on the drawer's drive, and more — and only an in-use failure ever
+  suggests closing an app.
+- **Recovery from an interrupted move.** Each batch is checkpointed before it
+  happens, and on the next start Scuttle settles what really moved, keeps
+  anything it is unsure of and flags it, and deletes nothing uncertain.
+- Moving, restoring, emptying the drawer and scanning no longer run over each
+  other.
 
 ## [0.1.0-alpha.1] - 2026-09-21
 

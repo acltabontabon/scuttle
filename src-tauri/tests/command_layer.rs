@@ -547,3 +547,73 @@ fn a_hand_picked_selection_still_cannot_touch_anything_protected() {
         );
     }
 }
+
+/// The whole path for a shared folder, as the bug report describes it: a
+/// cache that is being written to between the scan and the click.
+#[test]
+fn a_live_cache_is_cleaned_from_its_reviewed_files_and_its_folder_stays() {
+    use scuttle_core::platform::caches::{CacheRule, CacheSafety};
+    use scuttle_core::storage::SnapshotState;
+
+    let mut world = World::new();
+    let cache = world.path("Library/Caches/owner");
+    world.file("Library/Caches/owner/big.bin", 40, 60 * MB);
+    for n in 0..20 {
+        world.file(&format!("Library/Caches/owner/shard-{n}.bin"), 40, 1024);
+    }
+    world.platform = world.platform.clone().with_cache_rule(CacheRule {
+        owner: "Owner",
+        label: "Owner cache",
+        path: cache.clone(),
+        safety: CacheSafety::Regenerates,
+        owner_process: None,
+        developer_only: false,
+        settle_secs: 0,
+    });
+    let (state, options) = state_for(&world);
+
+    let scan_id = state.start_scan(&options).expect("start");
+    state
+        .run_scan_with(&scan_id, options, &SilentObserver)
+        .expect("scan");
+    let candidate = state
+        .store()
+        .candidates_for_scan(&scan_id)
+        .expect("findings")
+        .into_iter()
+        .find(|c| c.category == Category::Caches)
+        .expect("the cache is found");
+
+    // A scan records what it reviewed, and the number shown is that set.
+    let info = state.store().snapshot_info(&candidate.id).unwrap();
+    assert_eq!(info.state, SnapshotState::Complete);
+    assert_eq!(info.files, 21);
+    assert_eq!(candidate.size, info.bytes);
+
+    // The program that owns the cache keeps writing to it.
+    world.file("Library/Caches/owner/written-after-the-scan.bin", 0, 2048);
+    std::fs::remove_file(cache.join("shard-0.bin")).unwrap();
+
+    let record = state.hold(&candidate).expect("the live cache is cleaned");
+
+    assert_eq!(
+        record.item_count, 20,
+        "every reviewed file that still exists"
+    );
+    assert!(cache.is_dir(), "the shared folder is never what moves");
+    assert!(
+        cache.join("written-after-the-scan.bin").exists(),
+        "a file that arrived after the review is not touched"
+    );
+    assert!(!cache.join("big.bin").exists());
+    assert_eq!(state.store().held_quarantine().unwrap().len(), 1);
+
+    let outcome = state
+        .quarantine()
+        .unwrap()
+        .restore(&record.id, 0)
+        .expect("restore");
+    assert_eq!(outcome.restored, 20);
+    assert!(cache.join("big.bin").exists());
+    assert!(cache.join("written-after-the-scan.bin").exists());
+}

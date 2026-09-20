@@ -67,7 +67,16 @@ export function DrawerItem({ item, index, onRestore, onDelete }: DrawerItemProps
       <span className={styles.cardName} title={item.display_name}>
         {item.display_name}
       </span>
-      <span className={styles.cardSize}>{bytes(item.size)}</span>
+      <span className={styles.cardSize}>
+        {bytes(item.size)}
+        {item.mode === 'contents' && (item.item_count ?? 0) > 0 && (
+          <span className={styles.cardCount}>
+            {' · '}
+            {(item.item_count ?? 0).toLocaleString('en-US')}{' '}
+            {item.item_count === 1 ? 'file' : 'files'}
+          </span>
+        )}
+      </span>
 
       <span className={styles.cardMeta}>
         {/*
@@ -106,6 +115,13 @@ export function DrawerItem({ item, index, onRestore, onDelete }: DrawerItemProps
           {busy === 'deleting' ? 'Deleting…' : 'Delete permanently'}
         </button>
       </span>
+
+      {item.attention && (
+        <p className={styles.cardAttention}>
+          A move into the drawer was interrupted, and Scuttle kept everything it was not sure
+          about. Nothing was deleted, and the originals were left where they were.
+        </p>
+      )}
 
       {failure && (
         <p className={styles.cardFailure} role="status">

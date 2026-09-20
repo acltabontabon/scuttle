@@ -11,10 +11,15 @@
 //!   React never calls into Rust per file.
 
 mod dry_run;
+mod moves;
 mod state;
 
 pub use dry_run::{DryRunReport, DryRunRow};
-pub use state::AppState;
+pub use moves::{
+    FindingResult, FindingStatus, MovePhase, MoveReport, MoveRequest, MoveSink, MoveSnapshot,
+    Refusal, Unit,
+};
+pub use state::{AppState, Operation, OperationGuard};
 
 use std::path::PathBuf;
 
@@ -33,6 +38,8 @@ pub mod events {
     pub const PROGRESS: &str = "scuttle://progress";
     pub const FOUND: &str = "scuttle://found";
     pub const DONE: &str = "scuttle://done";
+    /// Progress of a move into the Drawer. One channel, for every job.
+    pub const MOVE: &str = "scuttle://move";
 }
 
 // ---------------------------------------------------------------------------
@@ -292,25 +299,8 @@ pub fn finding(state: State<'_, AppState>, id: String) -> Result<CleanupCandidat
 }
 
 /// Move a finding into the drawer.
-#[tauri::command]
-pub fn quarantine(state: State<'_, AppState>, id: String) -> Result<QuarantineRecord> {
-    let candidate = state.store().candidate(&id)?;
-    state.hold(&candidate)
-}
-
 /// Move one member of a group finding — a specific duplicate or screenshot —
 /// rather than the one Scuttle proposed.
-#[tauri::command]
-pub fn quarantine_member(
-    state: State<'_, AppState>,
-    id: String,
-    member_index: usize,
-) -> Result<QuarantineRecord> {
-    let candidate = state.store().candidate(&id)?;
-    let derived = derive_member(&candidate, member_index)?;
-    state.hold(&derived)
-}
-
 /// Which member of a group to hold on to.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -342,21 +332,17 @@ pub struct GroupRefusal {
 /// The *policy* — which copy survives — is resolved here rather than in the
 /// interface, from the group data the scan recorded. The frontend names an
 /// intent ("keep the newest"); it does not choose paths.
-#[tauri::command]
-pub fn quarantine_group(
-    state: State<'_, AppState>,
-    id: String,
-    keep: KeepChoice,
-) -> Result<GroupOutcome> {
-    run_group_action(state.inner(), &id, keep)
+/// Which members of a group finding will move, and which one is kept.
+pub(super) struct GroupPlan {
+    /// One entry per member that is not the keeper: the derived finding to
+    /// move, or why that member cannot be.
+    pub members: Vec<std::result::Result<CleanupCandidate, GroupRefusal>>,
+    pub kept: String,
 }
 
-pub(crate) fn run_group_action(
-    state: &AppState,
-    id: &str,
-    keep: KeepChoice,
-) -> Result<GroupOutcome> {
-    let candidate = state.store().candidate(id)?;
+/// Resolve a group action's *policy* — which copy survives — from the group
+/// data the scan recorded.
+pub(super) fn plan_group(candidate: &CleanupCandidate, keep: KeepChoice) -> Result<GroupPlan> {
     if candidate.group.len() < 2 {
         return Err(ScuttleError::Refused(
             "That finding is a single thing, not a group.".into(),
@@ -387,21 +373,34 @@ pub(crate) fn run_group_action(
         keeper.ok_or_else(|| ScuttleError::not_found("Anything to keep"))?;
     let kept = display_of(&keeper_member.path);
 
+    let members = (0..candidate.group.len())
+        .filter(|index| *index != keeper_index)
+        .map(|index| {
+            derive_member(candidate, index).map_err(|error| GroupRefusal {
+                display_name: display_of(&candidate.group[index].path),
+                reason: error.to_string(),
+                code: error.code().to_string(),
+            })
+        })
+        .collect();
+    Ok(GroupPlan { members, kept })
+}
+
+pub(crate) fn run_group_action(
+    state: &AppState,
+    id: &str,
+    keep: KeepChoice,
+) -> Result<GroupOutcome> {
+    let candidate = state.store().candidate(id)?;
+    let plan = plan_group(&candidate, keep)?;
+
     let mut held = Vec::new();
     let mut refused = Vec::new();
-
-    for index in 0..candidate.group.len() {
-        if index == keeper_index {
-            continue;
-        }
-        let derived = match derive_member(&candidate, index) {
+    for member in plan.members {
+        let derived = match member {
             Ok(derived) => derived,
-            Err(error) => {
-                refused.push(GroupRefusal {
-                    display_name: display_of(&candidate.group[index].path),
-                    reason: error.to_string(),
-                    code: error.code().to_string(),
-                });
+            Err(refusal) => {
+                refused.push(refusal);
                 continue;
             }
         };
@@ -417,7 +416,7 @@ pub(crate) fn run_group_action(
 
     Ok(GroupOutcome {
         held,
-        kept,
+        kept: plan.kept,
         refused,
     })
 }
@@ -441,11 +440,6 @@ pub struct BulkOutcome {
 /// up with the safe ones. Anything rated `Review` or `InspectOnly` has to be
 /// opened and acted on individually, which is the whole point of those
 /// ratings.
-#[tauri::command]
-pub fn quarantine_confident(state: State<'_, AppState>, category: Category) -> Result<BulkOutcome> {
-    run_bulk_quarantine(state.inner(), Some(category))
-}
-
 /// Sweep every pile at once.
 ///
 /// The same rule as the per-pile sweep, applied across the floor: only
@@ -454,11 +448,6 @@ pub fn quarantine_confident(state: State<'_, AppState>, category: Category) -> R
 /// exists because the per-pile version made the ordinary case — "deal with all
 /// of it" — into a tour of every category, and a cleanup tool that charges a
 /// tour for the common path is not a cleanup tool.
-#[tauri::command]
-pub fn quarantine_all_confident(state: State<'_, AppState>) -> Result<BulkOutcome> {
-    run_bulk_quarantine(state.inner(), None)
-}
-
 /// `category: None` means every pile.
 pub(crate) fn run_bulk_quarantine(
     state: &AppState,
@@ -525,11 +514,6 @@ pub(crate) fn run_bulk_quarantine(
 /// [`Risk::Protected`] is the real prohibition, and it is enforced where it
 /// belongs: inside [`safety::authorize`], against the live filesystem, for
 /// every item individually. Nothing routed through here can get past it.
-#[tauri::command]
-pub fn quarantine_many(state: State<'_, AppState>, ids: Vec<String>) -> Result<BulkOutcome> {
-    run_quarantine_many(state.inner(), &ids)
-}
-
 pub(crate) fn run_quarantine_many(state: &AppState, ids: &[String]) -> Result<BulkOutcome> {
     let mut held = Vec::new();
     let mut refused = Vec::new();
@@ -577,7 +561,10 @@ pub(crate) fn run_quarantine_many(state: &AppState, ids: &[String]) -> Result<Bu
 /// It carries the group's evidence and verdict but the member's own path and
 /// scan-time state, so the staleness check still means something for the file
 /// actually being moved.
-fn derive_member(candidate: &CleanupCandidate, index: usize) -> Result<CleanupCandidate> {
+pub(super) fn derive_member(
+    candidate: &CleanupCandidate,
+    index: usize,
+) -> Result<CleanupCandidate> {
     let member = candidate
         .group
         .get(index)
@@ -598,7 +585,7 @@ fn derive_member(candidate: &CleanupCandidate, index: usize) -> Result<CleanupCa
     Ok(derived)
 }
 
-fn display_of(path: &std::path::Path) -> String {
+pub(super) fn display_of(path: &std::path::Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
@@ -614,18 +601,46 @@ pub fn quarantine_list(state: State<'_, AppState>) -> Result<QuarantineView> {
     })
 }
 
+/// Run something that changes files or the Drawer on a blocking thread, while
+/// holding the operation gate.
+///
+/// A synchronous `#[tauri::command]` runs on the main thread, the thread that
+/// draws the window; restoring or emptying a Drawer of a large folder's files
+/// can take a long time. The gate makes it one such operation at a time, so a
+/// restore cannot run underneath a move, an empty, or a scan.
+async fn gated<T, F>(state: &AppState, operation: Operation, work: F) -> Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce(&AppState) -> Result<T> + Send + 'static,
+{
+    let guard = state.begin_operation(operation)?;
+    let handle = state.clone_handle();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        work(&handle)
+    })
+    .await
+    .map_err(|e| ScuttleError::Internal(format!("that stopped unexpectedly: {e}")))?
+}
+
 #[tauri::command]
-pub fn restore(
+pub async fn restore(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<crate::quarantine::RestoreOutcome> {
-    state.quarantine()?.restore(&id, now_unix())
+    gated(state.inner(), Operation::Restore, move |state| {
+        state.quarantine()?.restore(&id, now_unix())
+    })
+    .await
 }
 
 /// The only command that destroys data. Named so nobody calls it by accident.
 #[tauri::command]
-pub fn remove_permanently(state: State<'_, AppState>, id: String) -> Result<()> {
-    state.quarantine()?.purge(&id, now_unix())
+pub async fn remove_permanently(state: State<'_, AppState>, id: String) -> Result<()> {
+    gated(state.inner(), Operation::RemoveItem, move |state| {
+        state.quarantine()?.purge(&id, now_unix())
+    })
+    .await
 }
 
 /// Empty the drawer. Destroys data, in bulk, and is the only thing in Scuttle
@@ -635,19 +650,26 @@ pub fn remove_permanently(state: State<'_, AppState>, id: String) -> Result<()> 
 /// It takes no arguments on purpose: the drawer is the set, and there is no
 /// request shape here that can name a path.
 #[tauri::command]
-pub fn empty_drawer(state: State<'_, AppState>) -> Result<crate::quarantine::PurgeOutcome> {
-    state.quarantine()?.purge_all(now_unix())
+pub async fn empty_drawer(state: State<'_, AppState>) -> Result<crate::quarantine::PurgeOutcome> {
+    gated(state.inner(), Operation::EmptyDrawer, |state| {
+        state.quarantine()?.purge_all(now_unix())
+    })
+    .await
 }
 
 /// "Keep" — drop the finding from the results without remembering anything.
 #[tauri::command]
 pub fn keep(state: State<'_, AppState>, id: String) -> Result<()> {
+    // Changing the findings while a move works from them would pull the rug
+    // from under it.
+    let _guard = state.begin_operation(Operation::Decide)?;
     state.store().forget_candidate(&id)
 }
 
 /// "Don't show me this again."
 #[tauri::command]
 pub fn ignore(state: State<'_, AppState>, id: String, scope: IgnoreScope) -> Result<()> {
+    let _guard = state.begin_operation(Operation::Decide)?;
     let store = state.store();
     let candidate = store.candidate(&id)?;
     let now = now_unix();
@@ -875,12 +897,11 @@ pub fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static
         cancel_rummage,
         findings,
         finding,
-        quarantine,
-        quarantine_member,
-        quarantine_group,
-        quarantine_confident,
-        quarantine_all_confident,
-        quarantine_many,
+        moves::start_move,
+        moves::cancel_move,
+        moves::move_status,
+        moves::dismiss_move,
+        moves::refresh_findings,
         quarantine_list,
         restore,
         remove_permanently,
@@ -909,6 +930,20 @@ pub fn init(app: &tauri::App) -> std::result::Result<(), Box<dyn std::error::Err
     let platform = crate::platform::current();
     let state = AppState::new(platform)?;
 
+    // Settle anything a crash left half-done *before* anything is allowed to
+    // expire: an interrupted move must be understood, not swept.
+    if let Ok(quarantine) = state.quarantine() {
+        match quarantine.reconcile(now_unix()) {
+            Ok(report) if report.settled > 0 || report.orphan_cells > 0 => tracing::info!(
+                settled = report.settled,
+                attention = report.attention,
+                orphan_cells = report.orphan_cells,
+                "settled an interrupted move"
+            ),
+            Ok(_) => {}
+            Err(err) => tracing::warn!(error = %err, "could not settle interrupted moves"),
+        }
+    }
     // Anything past its retention window goes on launch, quietly.
     if let Ok(quarantine) = state.quarantine() {
         match quarantine.sweep_expired(now_unix()) {

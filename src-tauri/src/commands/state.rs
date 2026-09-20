@@ -16,6 +16,23 @@ use crate::space::SpaceOverview;
 use crate::storage::{QuarantineRecord, Store};
 use crate::{Result, ScuttleError};
 
+/// What the safety gate needs, gathered once. Building the protected-path table
+/// costs something, and a run over many findings should not rebuild it for each.
+pub struct ActionScope {
+    protected: ProtectedPaths,
+    roots: Vec<PathBuf>,
+}
+
+impl ActionScope {
+    pub fn ctx(&self, bidding: Bidding) -> ActionContext<'_> {
+        ActionContext {
+            protected: &self.protected,
+            allowed_roots: &self.roots,
+            bidding,
+        }
+    }
+}
+
 /// Shared, cheap to clone, safe to hand to a worker thread.
 #[derive(Clone)]
 pub struct AppState {
@@ -29,11 +46,76 @@ struct Inner {
     running: Mutex<Option<RunningScan>>,
     /// The roots of the most recent scan. Nothing outside them can be acted on.
     allowed_roots: Mutex<Vec<PathBuf>>,
+    /// Who, if anyone, is changing files or the Drawer right now.
+    gate: Mutex<Option<GateHold>>,
+    /// The move in progress, and the last one's outcome.
+    jobs: Mutex<super::moves::JobBook>,
 }
 
 struct RunningScan {
     id: String,
     cancel: Arc<AtomicBool>,
+    /// Held for as long as the scan runs, so nothing that could invalidate its
+    /// results starts underneath it.
+    _guard: OperationGuard,
+}
+
+/// The things that change files, the Drawer, or the findings a selection was
+/// made from. Scuttle does one of them at a time.
+///
+/// This is deliberately coarse for the alpha. A move and a restore touching
+/// unrelated files would be safe in principle; proving that they are unrelated
+/// — ownership of every record and path — is more machinery than the
+/// guarantee is worth right now. Reads (the findings, the Drawer listing, the
+/// space overview) are never gated, so the interface stays usable throughout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Operation {
+    Scan,
+    Move,
+    Restore,
+    EmptyDrawer,
+    RemoveItem,
+    Refresh,
+    Sweep,
+    /// Keeping or ignoring a finding: quick, but it changes what a selection
+    /// was made from.
+    Decide,
+}
+
+impl Operation {
+    fn doing(&self) -> &'static str {
+        match self {
+            Operation::Scan => "looking around",
+            Operation::Move => "moving files into the Drawer",
+            Operation::Restore => "putting something back",
+            Operation::EmptyDrawer => "emptying the Drawer",
+            Operation::RemoveItem => "removing something from the Drawer",
+            Operation::Refresh => "reviewing findings again",
+            Operation::Sweep => "tidying the Drawer",
+            Operation::Decide => "updating the findings",
+        }
+    }
+}
+
+struct GateHold {
+    id: u64,
+    operation: Operation,
+}
+
+/// Releases the operation gate when dropped — on success, on an error, and
+/// when a worker unwinds from a panic.
+pub struct OperationGuard {
+    state: AppState,
+    id: u64,
+}
+
+impl Drop for OperationGuard {
+    fn drop(&mut self) {
+        let mut gate = self.state.lock_gate();
+        if gate.as_ref().is_some_and(|hold| hold.id == self.id) {
+            *gate = None;
+        }
+    }
 }
 
 impl AppState {
@@ -60,6 +142,8 @@ impl AppState {
                 platform,
                 running: Mutex::new(None),
                 allowed_roots: Mutex::new(roots),
+                gate: Mutex::new(None),
+                jobs: Mutex::new(super::moves::JobBook::default()),
             }),
         })
     }
@@ -91,10 +175,14 @@ impl AppState {
         if running.is_some() {
             return Err(ScuttleError::ScanBusy);
         }
+        // A scan replaces the findings a selection was made from, so it cannot
+        // start while something is moving them.
+        let guard = self.begin_operation(Operation::Scan)?;
         let id = uuid::Uuid::new_v4().to_string();
         *running = Some(RunningScan {
             id: id.clone(),
             cancel: Arc::new(AtomicBool::new(false)),
+            _guard: guard,
         });
         drop(running);
 
@@ -114,7 +202,45 @@ impl AppState {
     }
 
     fn finish_scan(&self) {
-        *self.lock_running() = None;
+        // Dropping the scan releases the operation gate with it.
+        let finished = self.lock_running().take();
+        drop(finished);
+    }
+
+    /// Claim the right to change files or the Drawer, or be told what is in
+    /// the way. The claim ends when the returned guard is dropped.
+    pub fn begin_operation(&self, operation: Operation) -> Result<OperationGuard> {
+        let mut gate = self.lock_gate();
+        if let Some(hold) = gate.as_ref() {
+            return Err(ScuttleError::Busy(format!(
+                "Scuttle is busy {}. Try again when that finishes.",
+                hold.operation.doing()
+            )));
+        }
+        let id = self.next_gate_id();
+        *gate = Some(GateHold { id, operation });
+        Ok(OperationGuard {
+            state: self.clone(),
+            id,
+        })
+    }
+
+    /// What holds the gate, if anything.
+    pub fn current_operation(&self) -> Option<Operation> {
+        self.lock_gate().as_ref().map(|hold| hold.operation)
+    }
+
+    fn next_gate_id(&self) -> u64 {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    }
+
+    pub(super) fn jobs(&self) -> std::sync::MutexGuard<'_, super::moves::JobBook> {
+        self.inner.jobs.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn lock_gate(&self) -> std::sync::MutexGuard<'_, Option<GateHold>> {
+        self.inner.gate.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Run a scan to completion, emitting events as it goes.
@@ -161,6 +287,7 @@ impl AppState {
             let outcome = scanning::run(scan_id, &ctx, detectors, observer);
 
             self.store().save_candidates(scan_id, &outcome.candidates)?;
+            self.record_reviewed_sets(&outcome.candidates, &ctx);
             self.store()
                 .finish_scan(&outcome.summary, super::now_unix())?;
 
@@ -175,6 +302,41 @@ impl AppState {
 
         self.finish_scan();
         result
+    }
+
+    /// Record, for every shared folder that was found, the files it was
+    /// reviewed as. A move later acts on that set and nothing else.
+    ///
+    /// A failure here costs a finding its ability to be moved file by file — it
+    /// will ask to be reviewed again — and never fails the scan.
+    fn record_reviewed_sets(&self, candidates: &[CleanupCandidate], ctx: &ScanContext) {
+        let rules = self.inner.platform.cache_rules();
+        for candidate in candidates.iter().filter(|c| c.is_shared_contents()) {
+            if ctx.cancelled() {
+                return;
+            }
+            let settle_secs = rules
+                .iter()
+                .find(|rule| {
+                    crate::safety::paths::normalize(&rule.path)
+                        == crate::safety::paths::normalize(&candidate.path)
+                })
+                .map(|rule| rule.settle_secs)
+                .unwrap_or(0);
+            let cancelled = || ctx.cancelled();
+            let policy = scanning::snapshot::SnapshotPolicy {
+                protected: &ctx.protected,
+                settle_secs,
+                now_unix: super::now_unix(),
+                cancelled: &cancelled,
+                limit: scanning::snapshot::MAX_ENTRIES,
+            };
+            if let Err(err) =
+                scanning::snapshot::record(self.store(), &candidate.id, &candidate.path, &policy)
+            {
+                tracing::warn!(error = %err, "could not record the files of a shared folder");
+            }
+        }
     }
 
     /// Move a candidate into the drawer on Scuttle's own judgement, through
@@ -197,14 +359,104 @@ impl AppState {
         candidate: &CleanupCandidate,
         bidding: Bidding,
     ) -> Result<QuarantineRecord> {
-        let protected = self.protected_paths();
-        let roots = self.lock_roots().clone();
-        let ctx = ActionContext {
-            protected: &protected,
-            allowed_roots: &roots,
-            bidding,
-        };
-        self.quarantine()?.hold(candidate, &ctx, super::now_unix())
+        let scope = self.action_scope();
+        let ctx = scope.ctx(bidding);
+        let quarantine = self.quarantine()?;
+
+        if candidate.is_shared_contents() {
+            // A shared folder is cleaned file by file from its reviewed set;
+            // the folder itself is never what moves. The caller of this
+            // blocking helper wants one record or one refusal, so a run that
+            // moved nothing is reported as the first reason it did not.
+            let outcome = quarantine.hold_contents(
+                candidate,
+                &ctx,
+                super::now_unix(),
+                false,
+                &crate::quarantine::transfer::Ctl::none(),
+                &crate::quarantine::contents::Unobserved,
+            )?;
+            return match outcome.record {
+                Some(record) => Ok(record),
+                None => Err(match outcome.issues.groups().first() {
+                    Some(group) => crate::quarantine::transfer::FsFailure {
+                        kind: group.kind,
+                        phase: group.phase,
+                        os_code: group.os_code,
+                        item: group.samples.first().cloned().unwrap_or_default(),
+                    }
+                    .into(),
+                    None => ScuttleError::Stale("There was nothing left in it to move.".into()),
+                }),
+            };
+        }
+        quarantine.hold(candidate, &ctx, super::now_unix())
+    }
+
+    /// The safety gate's inputs for the current scan roots.
+    pub fn action_scope(&self) -> ActionScope {
+        ActionScope {
+            protected: self.protected_paths(),
+            roots: self.lock_roots().clone(),
+        }
+    }
+
+    /// Take a fresh reviewed set of the files each finding covers, and
+    /// re-measure it, so it can be looked at and chosen again. Never moves
+    /// anything, and never starts a move.
+    ///
+    /// For a shared folder that is a new set of its eligible files; for
+    /// anything else it is a fresh fingerprint of what is there now. Either way
+    /// the finding is returned as it now stands, and it is the person's call
+    /// what to do with it.
+    pub fn refresh_findings(&self, ids: &[String]) -> Result<Vec<CleanupCandidate>> {
+        let scope = self.action_scope();
+        let rules = self.inner.platform.cache_rules();
+        let mut refreshed = Vec::new();
+        for id in ids {
+            let candidate = match self.store().candidate(id) {
+                Ok(candidate) => candidate,
+                Err(_) => continue,
+            };
+            let ctx = scope.ctx(Bidding::User);
+            if candidate.is_shared_contents() {
+                // Structural checks only: the reviewed set replaces the
+                // freshness comparison.
+                if crate::safety::authorize_contents(&candidate, &ctx).is_err() {
+                    continue;
+                }
+                let settle_secs = rules
+                    .iter()
+                    .find(|rule| {
+                        crate::safety::paths::normalize(&rule.path)
+                            == crate::safety::paths::normalize(&candidate.path)
+                    })
+                    .map(|rule| rule.settle_secs)
+                    .unwrap_or(0);
+                let never = || false;
+                let policy = scanning::snapshot::SnapshotPolicy {
+                    protected: &scope.protected,
+                    settle_secs,
+                    now_unix: super::now_unix(),
+                    cancelled: &never,
+                    limit: scanning::snapshot::MAX_ENTRIES,
+                };
+                scanning::snapshot::record(self.store(), &candidate.id, &candidate.path, &policy)?;
+            } else {
+                if crate::safety::authorize_path(&candidate.path, candidate.target_kind, &ctx)
+                    .is_err()
+                {
+                    continue;
+                }
+                let fingerprint = crate::safety::observe(&candidate.path)?;
+                self.store()
+                    .update_fingerprint(&candidate.id, &fingerprint)?;
+            }
+            if let Ok(updated) = self.store().candidate(id) {
+                refreshed.push(updated);
+            }
+        }
+        Ok(refreshed)
     }
 
     /// The id of the most recent completed scan, if there is one.
@@ -298,7 +550,7 @@ impl AppState {
 
     pub fn protected_paths(&self) -> ProtectedPaths {
         let mut protected = ProtectedPaths::for_current_user();
-        protected.also_protect("Scuttle's own files", self.inner.platform.data_dir());
+        crate::platform::protect_own_files(&mut protected, self.inner.platform.as_ref());
         protected
     }
 

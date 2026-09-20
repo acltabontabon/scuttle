@@ -48,6 +48,14 @@ pub struct CacheRule {
     /// True when this belongs to the developer-debris opt-in rather than the
     /// default rummage.
     pub developer_only: bool,
+    /// Files changed more recently than this many seconds are left out of the
+    /// reviewed set. Zero means no such rule.
+    ///
+    /// A shared folder like the Windows temp directory is full of files that
+    /// programs are using right now, and old-enough-to-move is not the same as
+    /// safe-to-take: a file someone touched in the last day is a file
+    /// someone may still want.
+    pub settle_secs: i64,
 }
 
 impl CacheRule {
@@ -63,6 +71,7 @@ struct Spec {
     safety: CacheSafety,
     owner_process: Option<&'static str>,
     developer_only: bool,
+    settle_secs: i64,
 }
 
 const fn spec(
@@ -80,8 +89,13 @@ const fn spec(
         safety,
         owner_process,
         developer_only,
+        settle_secs: 0,
     }
 }
+
+/// A day. See [`CacheRule::settle_secs`].
+#[allow(dead_code)]
+const SETTLE_A_DAY: i64 = 86_400;
 
 // Deliberately absent: Docker. Its credentials live in `~/.docker` and its
 // images live inside `~/Library/Containers`, both of which are protected — and
@@ -268,14 +282,17 @@ const SPECS: &[Spec] = &[
 
 #[cfg(target_os = "windows")]
 const SPECS: &[Spec] = &[
-    spec(
-        "Windows",
-        "Temporary files",
-        "AppData\\Local\\Temp",
-        CacheSafety::Regenerates,
-        None,
-        false,
-    ),
+    Spec {
+        settle_secs: SETTLE_A_DAY,
+        ..spec(
+            "Windows",
+            "Temporary files",
+            "AppData\\Local\\Temp",
+            CacheSafety::Regenerates,
+            None,
+            false,
+        )
+    },
     spec(
         "Windows",
         "Crash dumps",
@@ -453,6 +470,7 @@ pub fn rules_for_home(home: &Path) -> Vec<CacheRule> {
             safety: s.safety,
             owner_process: s.owner_process,
             developer_only: s.developer_only,
+            settle_secs: s.settle_secs,
         })
         .filter(|rule| rule.path.is_dir())
         .collect()
@@ -470,6 +488,7 @@ pub fn all_rules_for_home(home: &Path) -> Vec<CacheRule> {
             safety: s.safety,
             owner_process: s.owner_process,
             developer_only: s.developer_only,
+            settle_secs: s.settle_secs,
         })
         .collect()
 }

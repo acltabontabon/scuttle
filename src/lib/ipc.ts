@@ -12,19 +12,16 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 import type {
-  BulkOutcome,
   Candidate,
-  Category,
   DryRunReport,
-  GroupOutcome,
-  KeepChoice,
   Findings,
   HistoryEntry,
   IgnoredEntry,
+  MoveRequest,
+  MoveSnapshot,
   Phase,
   Progress,
   PurgeOutcome,
-  QuarantineRecord,
   QuarantineView,
   RestoreOutcome,
   RootDescription,
@@ -39,6 +36,7 @@ export const EVENTS = {
   progress: 'scuttle://progress',
   found: 'scuttle://found',
   done: 'scuttle://done',
+  move: 'scuttle://move',
 } as const
 
 /** Scan events all carry the id of the scan they belong to. */
@@ -58,26 +56,27 @@ export const api = {
   findings: () => invoke<Findings>('findings'),
   finding: (id: string) => invoke<Candidate>('finding', { id }),
 
-  quarantine: (id: string) => invoke<QuarantineRecord>('quarantine', { id }),
-  quarantineMember: (id: string, memberIndex: number) =>
-    invoke<QuarantineRecord>('quarantine_member', { id, memberIndex }),
-  quarantineGroup: (id: string, keep: KeepChoice) =>
-    invoke<GroupOutcome>('quarantine_group', { id, keep }),
   /**
-   * Sweep one pile. Deliberately takes a category, not a list of ids: which
-   * findings are eligible is the core's decision, so there is no request
-   * shape that can ask for a risky one to be swept up with the safe ones.
+   * Start moving findings into the drawer. Returns as soon as the work has
+   * been handed to a worker; progress arrives on the move channel, and
+   * `moveStatus` tells a listener that missed it where things stand.
+   *
+   * Findings are named by id, never by path. Which are eligible for a sweep is
+   * the core's decision, so there is no request shape that can ask for a
+   * risky one to be swept up with the safe ones; a hand-picked selection may
+   * name any finding the person ticked, and the core's safety gate still
+   * checks every one against the live filesystem.
    */
-  quarantineConfident: (category: Category) =>
-    invoke<BulkOutcome>('quarantine_confident', { category }),
-  /** Sweep every pile. Same eligibility rule, wider scope, still no ids. */
-  quarantineAllConfident: () => invoke<BulkOutcome>('quarantine_all_confident'),
+  startMove: (request: MoveRequest) => invoke<{ job_id: number }>('start_move', { request }),
+  cancelMove: () => invoke<boolean>('cancel_move'),
+  /** The running move's snapshot, or the last finished one's until dismissed. */
+  moveStatus: () => invoke<MoveSnapshot | null>('move_status'),
+  dismissMove: () => invoke<void>('dismiss_move'),
   /**
-   * Move a hand-picked selection. Unlike the sweeps this takes ids, because
-   * the user ticked each box themselves — see the Rust side for why that
-   * difference is allowed to exist.
+   * Take a fresh look at findings that have changed since they were scanned,
+   * so they can be reviewed and chosen again. Moves nothing.
    */
-  quarantineMany: (ids: string[]) => invoke<BulkOutcome>('quarantine_many', { ids }),
+  refreshFindings: (ids: string[]) => invoke<Candidate[]>('refresh_findings', { ids }),
   quarantineList: () => invoke<QuarantineView>('quarantine_list'),
   restore: (id: string) => invoke<RestoreOutcome>('restore', { id }),
   removePermanently: (id: string) => invoke<void>('remove_permanently', { id }),
@@ -141,4 +140,13 @@ export async function watchRummage(handlers: {
   ])
 
   return () => unlisteners.forEach((off) => off())
+}
+
+/**
+ * Subscribe to move snapshots. Delivery may be delayed, repeated or reordered;
+ * the receiver is expected to keep only what is newer than what it has (see
+ * `features/move/progress.ts`).
+ */
+export async function watchMoves(onSnapshot: (snapshot: MoveSnapshot) => void): Promise<UnlistenFn> {
+  return listen<MoveSnapshot>(EVENTS.move, ({ payload }) => onSnapshot(payload))
 }

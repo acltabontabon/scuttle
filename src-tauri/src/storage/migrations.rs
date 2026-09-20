@@ -109,6 +109,47 @@ pub const MIGRATIONS: &[&str] = &[
         value TEXT NOT NULL
     );
     "#,
+    // 2 — reviewed contents, and a journal for interrupted moves.
+    //
+    // `finding_entries` is the set of files a directory finding was reviewed
+    // as: the files that existed, and were eligible, when it was scanned. A move
+    // acts on that set and nothing else. `outcome` records what became of each
+    // entry so a retry never re-touches what already moved.
+    //
+    // `drawer_entries` is the per-file checkpoint of a move into (or a restore
+    // out of) the drawer. It is written ahead of the operation, so that after a
+    // crash it is possible to tell what had and had not happened. It is also
+    // the manifest a restore works from: exactly the files that were recorded.
+    r#"
+    ALTER TABLE findings ADD COLUMN snapshot_state TEXT NOT NULL DEFAULT 'none';
+    ALTER TABLE findings ADD COLUMN snapshot_at_unix INTEGER;
+    ALTER TABLE findings ADD COLUMN snapshot_files INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE findings ADD COLUMN snapshot_bytes INTEGER NOT NULL DEFAULT 0;
+
+    CREATE TABLE finding_entries (
+        finding_id TEXT NOT NULL REFERENCES findings(id) ON DELETE CASCADE,
+        rel        TEXT NOT NULL,
+        size       INTEGER NOT NULL,
+        mtime_ns   INTEGER,
+        created_ns INTEGER,
+        file_id    TEXT,
+        outcome    TEXT,
+        PRIMARY KEY (finding_id, rel)
+    ) WITHOUT ROWID;
+
+    ALTER TABLE quarantine_items ADD COLUMN mode TEXT NOT NULL DEFAULT 'whole';
+    ALTER TABLE quarantine_items ADD COLUMN item_count INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE quarantine_items ADD COLUMN attention INTEGER NOT NULL DEFAULT 0;
+
+    CREATE TABLE drawer_entries (
+        record_id TEXT NOT NULL REFERENCES quarantine_items(id) ON DELETE CASCADE,
+        rel       TEXT NOT NULL,
+        state     TEXT NOT NULL,
+        size      INTEGER NOT NULL,
+        PRIMARY KEY (record_id, rel)
+    ) WITHOUT ROWID;
+    CREATE INDEX drawer_entries_state ON drawer_entries(record_id, state);
+    "#,
 ];
 
 /// Bring a connection up to the current schema.
@@ -165,6 +206,8 @@ mod tests {
             "ignored_apps",
             "ignored_categories",
             "quarantine_items",
+            "finding_entries",
+            "drawer_entries",
             "cleanup_history",
             "settings",
         ] {
@@ -202,5 +245,30 @@ mod tests {
             .unwrap();
         assert_eq!(findings, 0);
         assert_eq!(evidence, 0);
+    }
+
+    #[test]
+    fn a_v1_database_upgrades_without_losing_its_drawer() {
+        // A record written under the first schema must survive the second.
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
+        conn.execute_batch("PRAGMA user_version = 1").unwrap();
+        conn.execute_batch(
+            "INSERT INTO quarantine_items (id, original_path, stored_path, display_name,
+                category, size, quarantined_unix, expires_unix, status)
+             VALUES ('old', '/a', '/q/old/a', 'a', 'installers', 5, 1, 2, 'held');",
+        )
+        .unwrap();
+
+        apply(&mut conn).unwrap();
+
+        let (mode, count, attention): (String, i64, i64) = conn
+            .query_row(
+                "SELECT mode, item_count, attention FROM quarantine_items WHERE id='old'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((mode.as_str(), count, attention), ("whole", 1, 0));
     }
 }

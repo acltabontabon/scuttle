@@ -1,0 +1,395 @@
+/*
+ * Moving into the drawer.
+ *
+ * Nothing new is invented here: the track is the plate's own 3px gauge doing a
+ * different job, and the rest is paper, ink and the one honey accent the
+ * application already uses. Motion is decoration — the words carry the
+ * meaning — and stops entirely under reduced motion.
+ */
+
+/* ---- the track ------------------------------------------------------------ */
+.track {
+  position: relative;
+  height: 3px;
+  margin: var(--close) 0 var(--snug);
+  background: var(--rule);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.trackFill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform-origin: left center;
+  background: var(--honey);
+  /* Ease, not the overshooting settle curve: a progress line must never seem
+     to go past where it is. */
+  transition: transform var(--normal) var(--ease);
+}
+
+/* Work of unknown size: a short bar that travels, rather than a number that
+   would have to be made up. */
+.track[data-mode='indeterminate'] .trackFill {
+  width: 34%;
+  transform: none;
+  animation: travel 1.7s var(--ease) infinite;
+}
+
+/* Everything is dealt with; the records are being written. Held just short of
+   full, with a slow pulse, because it is not finished until it is recorded. */
+.track[data-mode='settling'] .trackFill {
+  animation: settle 1.6s ease-in-out infinite;
+}
+
+@keyframes travel {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+@keyframes settle {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* Without motion, unknown work is a still, half-strength bar; the label above
+   it says what is going on. */
+@media (prefers-reduced-motion: reduce) {
+  .track[data-mode='indeterminate'] .trackFill {
+    width: 100%;
+    opacity: 0.35;
+    animation: none;
+  }
+  .track[data-mode='settling'] .trackFill {
+    animation: none;
+  }
+  .trackFill {
+    transition: none;
+  }
+}
+:global([data-motion='still']) .track[data-mode='indeterminate'] .trackFill {
+  width: 100%;
+  opacity: 0.35;
+  animation: none;
+}
+:global([data-motion='still']) .track[data-mode='settling'] .trackFill {
+  animation: none;
+}
+:global([data-motion='still']) .trackFill {
+  transition: none;
+}
+
+.lineDetail {
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- what replaces the button --------------------------------------------- */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: var(--close);
+  width: 100%;
+  margin-top: var(--step);
+  padding: var(--snug) 0;
+  border-top: var(--hair) dashed var(--rule);
+  outline: none;
+}
+
+.carrier {
+  flex: none;
+  color: var(--ink-soft);
+  display: inline-flex;
+}
+
+.cancel {
+  font-family: var(--serif);
+  font-size: var(--type-body);
+  color: var(--ink-soft);
+  padding: 2px 0;
+  border-bottom: var(--hair) solid var(--ink-ghost);
+  transition:
+    color var(--quick) var(--ease),
+    border-color var(--quick) var(--ease);
+}
+
+.cancel:hover:not(:disabled) {
+  color: var(--ink);
+  border-bottom-color: var(--honey);
+}
+
+.cancel:disabled {
+  color: var(--ink-faint);
+  border-bottom-color: transparent;
+  cursor: default;
+}
+
+.controlNote {
+  font-family: var(--serif);
+  font-size: var(--type-body);
+  color: var(--ink-faint);
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- the header chip ------------------------------------------------------- */
+.indicator {
+  position: relative;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 260px;
+  font-size: var(--type-small);
+  color: var(--ink-soft);
+  letter-spacing: 0.01em;
+  padding: 3px 0;
+  border-bottom: var(--hair) solid transparent;
+  transition:
+    color var(--quick) var(--ease),
+    border-color var(--quick) var(--ease);
+}
+
+.chip:hover {
+  color: var(--ink);
+  border-bottom-color: var(--honey);
+}
+
+.chipText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ring {
+  flex: none;
+}
+
+.ringBed {
+  fill: none;
+  stroke: var(--rule);
+  stroke-width: 2;
+}
+
+.ringArc {
+  fill: none;
+  stroke: var(--honey);
+  stroke-width: 2;
+  stroke-linecap: round;
+  transition: stroke-dasharray var(--normal) var(--ease);
+}
+
+.ring[data-mode='indeterminate'] .ringArc {
+  transform-origin: 8px 8px;
+  animation: spin 1.15s linear infinite;
+}
+
+.ringDot {
+  fill: var(--honey);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(270deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ring[data-mode='indeterminate'] .ringArc {
+    animation: none;
+  }
+  .ringArc {
+    transition: none;
+  }
+}
+:global([data-motion='still']) .ring[data-mode='indeterminate'] .ringArc {
+  animation: none;
+}
+:global([data-motion='still']) .ringArc {
+  transition: none;
+}
+
+/* ---- the details panel ------------------------------------------------------ */
+.panel {
+  position: fixed;
+  top: 54px;
+  right: var(--step);
+  z-index: 35;
+  width: min(440px, calc(100vw - 2 * var(--step)));
+  max-height: min(64vh, 560px);
+  overflow-y: auto;
+  padding: var(--close) var(--step) var(--step);
+  background: var(--paper-raised);
+  color: var(--ink);
+  border: var(--hair) solid var(--rule);
+  border-radius: var(--round-soft);
+  box-shadow: var(--lift-held);
+  outline: none;
+  animation: panelIn var(--normal) var(--ease);
+}
+
+@keyframes panelIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    animation: none;
+  }
+}
+:global([data-motion='still']) .panel {
+  animation: none;
+}
+
+.panelHead {
+  font-family: var(--serif);
+  font-size: var(--type-read);
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+
+.panelSub {
+  margin-top: var(--tight);
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+}
+
+.counts {
+  display: flex;
+  gap: var(--step);
+  margin-top: var(--close);
+  font-variant-numeric: tabular-nums;
+}
+
+.counts dt {
+  font-size: var(--type-whisper);
+  color: var(--ink-faint);
+}
+
+.counts dd {
+  font-family: var(--serif);
+  font-size: var(--type-say);
+}
+
+.findings {
+  list-style: none;
+  margin-top: var(--close);
+  display: grid;
+  gap: var(--close);
+}
+
+.finding {
+  padding-top: var(--close);
+  border-top: var(--hair) solid var(--rule);
+}
+
+.findingName {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--close);
+  font-size: var(--type-body);
+}
+
+.findingCounts {
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+.issueBlock {
+  margin-top: var(--snug);
+}
+
+.issue {
+  margin-top: var(--tight);
+  font-size: var(--type-small);
+  color: var(--ink-soft);
+  text-wrap: pretty;
+}
+
+.advice {
+  font-size: var(--type-small);
+  color: var(--ink);
+  text-wrap: pretty;
+}
+
+/* The code and the phase: there for anyone who needs to look closer, and
+   quiet for everyone else. */
+.technical {
+  margin-top: var(--tight);
+  font-family: var(--mono);
+  font-size: var(--type-whisper);
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+
+.footnote {
+  margin-top: var(--close);
+  font-size: var(--type-whisper);
+  color: var(--ink-faint);
+  text-wrap: pretty;
+}
+
+.panelActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--tight) var(--close);
+  margin-top: var(--close);
+}
+
+.textButton {
+  font-size: var(--type-small);
+  color: var(--ink);
+  padding: 2px 0;
+  border-bottom: var(--hair) solid var(--honey);
+  transition: color var(--quick) var(--ease);
+}
+
+.textButton[data-quiet] {
+  color: var(--ink-faint);
+  border-bottom-color: var(--ink-ghost);
+}
+
+.textButton:hover:not(:disabled) {
+  color: var(--ink-soft);
+}
+
+.textButton:disabled {
+  color: var(--ink-faint);
+  border-bottom-color: transparent;
+  cursor: default;
+}
