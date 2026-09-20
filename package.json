@@ -18,7 +18,10 @@
     "app:build": "tauri build",
     "rust:test": "cargo test --manifest-path src-tauri/Cargo.toml",
     "rust:fmt": "cargo fmt --manifest-path src-tauri/Cargo.toml",
-    "rust:clippy": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings"
+    "rust:clippy": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
+    "version:set": "node scripts/version.mjs set",
+    "version:check": "node scripts/version.mjs check",
+    "check": "npm run version:check && npm run typecheck && npm run lint && npm test && npm run build && npm run rust:fmt -- --check && npm run rust:clippy && npm run rust:test"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",
@@ -27,7 +30,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
-    "@tauri-apps/cli": "^2.9.2",
+    "@tauri-apps/cli": "^2.11.5",
     "@types/node": "^26.6.2",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",

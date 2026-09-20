@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Your computer leaves stuff everywhere. Scuttle finds it."
 authors = ["Scuttle contributors"]
 license = "Apache-2.0"
-repository = "https://github.com/scuttle-app/scuttle"
+repository = "https://github.com/acltabontabon/scuttle"
 edition = "2021"
 rust-version = "1.82"
 
