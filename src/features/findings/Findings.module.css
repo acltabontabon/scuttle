@@ -400,8 +400,14 @@
   padding: var(--snug) var(--close);
   border-radius: var(--round);
   background: var(--honey-soft);
-  color: var(--honey-ink);
+  /*
+   * Ordinary ink, not honey ink. Honey on honey-soft is 3.99:1 in the light
+   * palette, which is below AA for text this size; the accent does its job as
+   * the fill and the border instead, where contrast rules do not apply.
+   */
+  color: var(--ink);
+  border-left: 3px solid var(--honey);
   font-size: var(--type-small);
   line-height: var(--leading-normal);
-  text-align: center;
+  text-align: left;
 }

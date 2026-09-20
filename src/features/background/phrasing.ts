@@ -41,6 +41,37 @@ export const NOTIFY_HINT =
   'It says how many and of what, never a filename or a path. Opening it takes you ' +
   'to the findings; nothing is touched.'
 
+/**
+ * Why a dependent setting cannot be turned on yet.
+ *
+ * Written out rather than assembled by lowercasing the parent's label — doing
+ * that turned "Keep Scuttle in the menu bar" into "keep scuttle in the menu
+ * bar", which mangles the app's own name.
+ */
+export function needsTray(platform: string): string {
+  return (
+    `Needs Scuttle to stay in the ${trayWord(platform)}, since a check can only ` +
+    'happen while it is still running.'
+  )
+}
+
+export const NEEDS_CHECKS =
+  'Needs background checks, since there would be nothing to tell you about.'
+
+/**
+ * When an expired drawer item actually goes.
+ *
+ * Retention itself does not depend on this setting — an item expires after
+ * exactly the days it was given either way. What changes is when the deletion
+ * happens, and saying "the next time Scuttle starts" to somebody whose Scuttle
+ * never stops would be untrue.
+ */
+export function expiryHint(backgroundMode: boolean): string {
+  return backgroundMode
+    ? 'Expired items are deleted shortly after that while Scuttle is running.'
+    : 'Expired items are deleted the next time Scuttle starts.'
+}
+
 export function launchAtLoginHint(platform: string): string {
   return platform === 'windows'
     ? 'Starts Scuttle in the background when you sign in, through the ordinary ' +

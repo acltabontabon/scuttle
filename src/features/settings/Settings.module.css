@@ -168,7 +168,10 @@
   padding: var(--snug) var(--close);
   border-radius: var(--round);
   background: var(--clay-soft);
-  color: var(--clay-ink);
+  /* See the note on `.caveat`: clay ink on clay-soft is 3.94:1 in the light
+     palette. The colour carries the meaning; the ink stays readable. */
+  color: var(--ink);
+  border-left: 3px solid var(--clay);
   font-size: var(--type-small);
   line-height: var(--leading-normal);
 }

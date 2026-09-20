@@ -6,7 +6,10 @@ import { bytes, shortPath } from '@/lib/format'
 import { platform } from '@/lib/platform'
 import {
   CHECKS_HINT,
+  expiryHint,
+  NEEDS_CHECKS,
   NOTIFY_HINT,
+  needsTray,
   keepInTrayHint,
   keepInTrayLabel,
   launchAtLoginHint,
@@ -175,7 +178,11 @@ export function Settings() {
                  * changing this never moves the deadline on anything already in
                  * the drawer, in either direction.
                  */
-                hint="Applies to items quarantined from now on. Anything already in the drawer keeps the date it was given. Expired items are deleted the next time Scuttle starts."
+                hint={
+                  'Applies to items quarantined from now on. Anything already in ' +
+                  'the drawer keeps the date it was given. ' +
+                  expiryHint(settings.background_mode)
+                }
                 options={[7, 14, 30].map((days) => ({ value: days, label: `${days} days` }))}
                 current={settings.quarantine_retention_days}
                 onPick={(value) => void patch({ quarantine_retention_days: value })}
@@ -464,7 +471,7 @@ function BackgroundGroup({
         hint={CHECKS_HINT}
         checked={settings.background_checks}
         disabled={!settings.background_mode}
-        disabledHint={`Needs ${keepInTrayLabel(os).toLowerCase()}, since a check can only happen while Scuttle is still running.`}
+        disabledHint={needsTray(os)}
         onChange={(value) => void patch({ background_checks: value })}
       />
 
@@ -491,7 +498,7 @@ function BackgroundGroup({
         hint={NOTIFY_HINT}
         checked={settings.background_notify}
         disabled={!settings.background_checks}
-        disabledHint="Needs background checks, since there would be nothing to tell you about."
+        disabledHint={NEEDS_CHECKS}
         onChange={(value) => void onNotify(value)}
       />
 

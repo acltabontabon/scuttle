@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { Unavailable, Waiting } from '@/components/Unavailable'
 
 import { useStore } from '@/app/store'
+import { expiryHint } from '@/features/background/phrasing'
 import { api } from '@/lib/ipc'
 import { bytes } from '@/lib/format'
 import { DrawerItem } from './DrawerItem'
@@ -76,9 +77,8 @@ export function Drawer() {
               "after {retention} days" would quietly become "eventually".
             */}
             <p className={styles.policy}>
-              {background?.mode
-                ? `Items expire after ${retention} days, and are deleted shortly after that while Scuttle is running.`
-                : `Items expire after ${retention} days and are deleted the next time Scuttle starts.`}
+              {`Items expire after ${retention} days. `}
+              {expiryHint(background?.mode ?? false)}
             </p>
           </>
         )}

@@ -5,12 +5,15 @@ import type { BackgroundStatus } from '@/lib/types'
 import {
   CANCELLED_CAVEAT,
   CHECKS_HINT,
+  expiryHint,
   GLANCE_CAVEAT,
   NOTIFY_HINT,
   keepInTrayHint,
   keepInTrayLabel,
   launchAtLoginHint,
   launchAtLoginTrouble,
+  NEEDS_CHECKS,
+  needsTray,
   pauseState,
   standing,
   trayWord,
@@ -52,6 +55,11 @@ const EVERYTHING = [
   launchAtLoginHint('windows'),
   GLANCE_CAVEAT,
   CANCELLED_CAVEAT,
+  expiryHint(true),
+  expiryHint(false),
+  needsTray('macos'),
+  needsTray('windows'),
+  NEEDS_CHECKS,
   trouble(status({ tray_alive: false }), 'macos') ?? '',
   trouble(status({ notify: true, notifications_permitted: false }), 'macos') ?? '',
   launchAtLoginTrouble(status({ launch_at_login_available: false })) ?? '',
@@ -113,6 +121,42 @@ describe('the words each platform uses for itself', () => {
       expect(keepInTrayHint(platform)).toMatch(/still quits/)
       expect(keepInTrayHint(platform)).toMatch(/logging out|shutting down/)
     }
+  })
+})
+
+describe('when an expired drawer item actually goes', () => {
+  it('tells someone whose Scuttle keeps running that it does not wait for a restart', () => {
+    // The old sentence — "the next time Scuttle starts" — stops being true
+    // the moment Scuttle stops quitting when you close the window.
+    expect(expiryHint(true)).not.toMatch(/starts/)
+    expect(expiryHint(true)).toMatch(/while Scuttle is running/)
+  })
+
+  it('is unchanged for everyone else', () => {
+    expect(expiryHint(false)).toBe('Expired items are deleted the next time Scuttle starts.')
+  })
+
+  it('never suggests retention itself changed', () => {
+    for (const on of [true, false]) {
+      expect(expiryHint(on)).not.toMatch(/sooner|longer|instead of \d/)
+    }
+  })
+})
+
+describe('why a dependent setting is not available yet', () => {
+  it("does not mangle Scuttle's own name", () => {
+    // This read "Needs keep scuttle in the menu bar" when the hint was built
+    // by lowercasing the parent toggle's label.
+    for (const platform of ['macos', 'windows']) {
+      expect(needsTray(platform)).toContain('Scuttle')
+      expect(needsTray(platform)).not.toContain('scuttle')
+    }
+  })
+
+  it('names the setting it is waiting on', () => {
+    expect(needsTray('macos')).toContain('menu bar')
+    expect(needsTray('windows')).toContain('system tray')
+    expect(NEEDS_CHECKS).toContain('background checks')
   })
 })
 

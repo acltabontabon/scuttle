@@ -69,6 +69,20 @@ describe.each(THEMES)('%s palette', (_name, index) => {
     }
   })
 
+  it('keeps text readable on the accent fills that carry it', () => {
+    // The tinted bands — the background-check caveat on Findings, the "the
+    // system said no" line in Settings — set type directly on an accent fill.
+    // Their own -ink siblings are not readable there: honey-ink on honey-soft
+    // is 3.99:1 in the light palette. Ordinary ink is, and the accent does its
+    // work as the fill and the border.
+    for (const fill of ['honey-soft', 'clay-soft']) {
+      expect(
+        contrast(tokens.ink!, tokens[fill]!),
+        `--ink on --${fill}`,
+      ).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
   it('draws hairlines that can actually be seen', () => {
     // Borders are not text, so AA does not apply — but invisible is not a
     // border. The dark theme once drew every separator at 1.09:1 because it
