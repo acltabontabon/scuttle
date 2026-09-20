@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/acltabontabon/scuttle/actions/workflows/ci.yml/badge.svg)](https://github.com/acltabontabon/scuttle/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![GitHub Release](https://img.shields.io/github/v/release/acltabontabon/scuttle)](https://github.com/acltabontabon/scuttle/releases)
+[![Latest release](https://img.shields.io/github/v/release/acltabontabon/scuttle?include_prereleases&label=release)](https://github.com/acltabontabon/scuttle/releases)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Windows-lightgrey)](#platform-support)
 
 **[scuttle on the web →](https://acltabontabon.com/scuttle/)**
