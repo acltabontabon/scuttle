@@ -1,0 +1,72 @@
+name: Deploy site
+
+# Publishes www/ to https://acltabontabon.com/scuttle/.
+#
+# The apex belongs to the acltabontabon.github.io repository, and GitHub
+# applies a user site's custom domain to every project site of the same
+# account — so this repository needs no CNAME file and no custom-domain
+# setting of its own, and the /scuttle/ prefix comes from the repository name.
+# Adding a CNAME here would try to claim the apex from the root site.
+#
+# Deliberately separate from ci.yml and release.yml: a comma in a paragraph
+# should not rebuild two DMGs and an installer, and a release should not wait
+# on a static site.
+#
+# One-off setup, on the repository: Settings -> Pages -> Source: GitHub Actions.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'www/**'
+      - 'docs/media/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+# Deliberately not triggered by release tags. The download section resolves
+# the latest release from the GitHub API when someone opens the page, so a new
+# release reaches the site without the site being rebuilt. (A `push` filtered
+# by both refs and paths requires every filter to match, so adding tags here
+# would in any case only fire for a tag that also changed www/.)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.8.2'
+          cache: npm
+          cache-dependency-path: www/package-lock.json
+
+      - run: npm ci
+        working-directory: www
+
+      # Pulls docs/media in, so the site and the README show the same
+      # recording rather than two copies that drift apart.
+      - run: npm run build
+        working-directory: www
+
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: www/dist
+      - id: deploy
+        uses: actions/deploy-pages@v5

@@ -1,0 +1,238 @@
+name: Build desktop
+
+# Builds the downloadable installers, checks that each one is actually
+# well-formed, and leaves them as workflow artifacts. It never publishes
+# anything and is never given a token that could.
+#
+# Two callers:
+#   release.yml  — on a version tag, then publishes what this produced
+#   ci.yml       — on main, to find out that packaging broke before a tag does
+#
+# It also runs on its own from the Actions tab, which is how you exercise the
+# whole packaging path without cutting a release.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit, branch or tag to build.
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit, branch or tag to build (defaults to this branch).
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '26.8.2'
+  RUST_TOOLCHAIN: '1.98.1'
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macos-latest is Apple Silicon. Apple ships both slices' SDKs on
+          # every Mac, so the Intel build is an ordinary supported cross
+          # compile from the same runner rather than a second machine — and
+          # the bundler, which runs natively, signs and packages either one.
+          - label: macOS (Apple Silicon)
+            os: macos-latest
+            target: aarch64-apple-darwin
+            bundles: dmg
+            # Apple Silicon starts at Big Sur, so the arm64 bundle says so
+            # instead of repeating the Intel build's 10.15.
+            config: --config src-tauri/tauri.apple-silicon.conf.json
+            slug: macos-apple-silicon
+          - label: macOS (Intel)
+            os: macos-latest
+            target: x86_64-apple-darwin
+            bundles: dmg
+            config: ''
+            slug: macos-intel
+          - label: Windows (x64)
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+            config: ''
+            slug: windows-x64
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri
+          key: package-${{ matrix.target }}
+
+      - run: npm ci
+
+      - name: Read the version being built
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run --silent version:check
+          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # No APPLE_* or TAURI_SIGNING_* variables are set anywhere in this
+      # workflow. macOS bundles are ad-hoc signed, because tauri.conf.json
+      # asks for `"signingIdentity": "-"`; ad-hoc signing needs no account,
+      # no certificate and no secret, and is what makes an Apple Silicon
+      # build launchable at all. It is not a verified publisher identity and
+      # it is not notarization. The Windows installer is unsigned.
+      - name: Build
+        shell: bash
+        run: npm run tauri build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} ${{ matrix.config }}
+
+      - name: Collect and name the download
+        id: collect
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ steps.version.outputs.version }}'
+          out="$RUNNER_TEMP/scuttle-artifacts"
+          mkdir -p "$out"
+          bundle="src-tauri/target/${{ matrix.target }}/release/bundle"
+
+          case '${{ matrix.bundles }}' in
+            dmg) found=$(find "$bundle/dmg" -name '*.dmg' -print -quit) ; name="Scuttle-${version}-${{ matrix.slug }}.dmg" ;;
+            nsis) found=$(find "$bundle/nsis" -name '*-setup.exe' -print -quit) ; name="Scuttle-${version}-${{ matrix.slug }}-setup.exe" ;;
+          esac
+
+          if [ -z "${found:-}" ]; then
+            echo "::error::No ${{ matrix.bundles }} bundle was produced under $bundle." >&2
+            find "$bundle" -maxdepth 2 -type f >&2 || true
+            exit 1
+          fi
+
+          cp "$found" "$out/$name"
+          # Checksums travel beside the file they describe, so a download can
+          # be verified without trusting the page it came from.
+          ( cd "$out" && shasum -a 256 "$name" > "$name.sha256" )
+          {
+            echo "name=$name"
+            echo "dir=$out"
+            echo "bundle=$bundle"
+          } >> "$GITHUB_OUTPUT"
+          ls -lh "$out"
+
+      # Compiling and packaging are not the same thing as packaging
+      # *correctly*. These read the bundle that is about to be published and
+      # check the claims it makes about itself.
+      - name: Inspect the macOS download
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ steps.version.outputs.version }}'
+          dmg='${{ steps.collect.outputs.dir }}/${{ steps.collect.outputs.name }}'
+
+          # Checked inside the disk image rather than in the build directory:
+          # asking `--bundles dmg` deletes the intermediate .app once it has
+          # been packaged, and the copy that ships is the one worth reading
+          # anyway.
+          hdiutil verify "$dmg"
+          mount=$(mktemp -d)
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount" > /dev/null
+          trap 'hdiutil detach "$mount" -quiet || true' EXIT
+
+          app=$(find "$mount" -maxdepth 1 -name '*.app' -print -quit)
+          [ -n "$app" ] || { echo '::error::The disk image contains no application.'; exit 1; }
+          plist="$app/Contents/Info.plist"
+
+          check () { # key, expected
+            actual=$(/usr/libexec/PlistBuddy -c "Print :$1" "$plist")
+            [ "$actual" = "$2" ] || { echo "::error::Info.plist $1 is '$actual', expected '$2'"; exit 1; }
+            printf '  %-30s %s\n' "$1" "$actual"
+          }
+          check CFBundleShortVersionString "$version"
+          check CFBundleIdentifier app.scuttle.desktop
+          check CFBundleExecutable scuttle
+          check CFBundleIconFile icon.icns
+          # Not asserted, only reported: the Intel and Apple Silicon builds
+          # honestly differ here, which is the point of the overlay config.
+          printf '  %-30s %s\n' LSMinimumSystemVersion \
+            "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$plist")"
+
+          test -f "$app/Contents/Resources/icon.icns" \
+            || { echo '::error::The application has no icon.'; exit 1; }
+
+          # The slice the binary actually contains, rather than the one we
+          # asked for. A mislabelled download is worse than a missing one.
+          file "$app/Contents/MacOS/scuttle"
+          expected='${{ matrix.target }}'
+          case "$expected" in
+            aarch64-*) want=arm64 ;;
+            x86_64-*)  want=x86_64 ;;
+          esac
+          file "$app/Contents/MacOS/scuttle" | grep -q "$want" \
+            || { echo "::error::This build is not $want."; exit 1; }
+
+          # An ad-hoc signature still has to verify. When it does not, macOS
+          # calls the application damaged rather than merely unidentified —
+          # and unlike the unidentified prompt, that one cannot be clicked
+          # past. This is the check that keeps an Apple Silicon download
+          # openable at all.
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dvv "$app" 2>&1 | grep -q 'Signature=adhoc' \
+            || { echo '::error::The application is not ad-hoc signed.'; exit 1; }
+
+          # Gatekeeper will reject this, and is expected to: ad-hoc signing is
+          # not a verified identity and the application is not notarized.
+          # Printed so the run says plainly which of the two it is.
+          spctl --assess --verbose=4 --type execute "$app" 2>&1 || true
+          echo 'Ad-hoc signed and internally consistent. Not Developer ID signed, not notarized.'
+
+      - name: Inspect the Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Join-Path '${{ steps.collect.outputs.dir }}' '${{ steps.collect.outputs.name }}'
+          $item = Get-Item $setup
+          Write-Host ("Installer: {0} ({1:N1} MB)" -f $item.Name, ($item.Length / 1MB))
+          # A bootstrapper-only installer is still only a few MB; anything
+          # under one is a bundler that produced a stub, not an installer.
+          if ($item.Length -lt 1MB) { throw 'The installer is implausibly small.' }
+
+          $exe = Get-ChildItem -Recurse -Filter 'scuttle.exe' `
+            -Path 'src-tauri/target/${{ matrix.target }}/release' | Select-Object -First 1
+          $info = $exe.VersionInfo
+          Write-Host "Binary version: $($info.FileVersion)  Product: $($info.ProductName)"
+          if (-not $info.FileVersion.StartsWith('${{ steps.version.outputs.version }}')) {
+            throw "scuttle.exe reports $($info.FileVersion), expected ${{ steps.version.outputs.version }}"
+          }
+          # WebView2 arrives through the download bootstrapper, which is a
+          # no-op on Windows 10 1803+ and 11 where the runtime ships with the
+          # OS. The installer carries the bootstrapper's invocation, not the
+          # runtime, which is why it stays small.
+          Write-Host 'Unsigned, by design: no code-signing certificate is used.'
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: scuttle-${{ matrix.slug }}
+          path: ${{ steps.collect.outputs.dir }}/*
+          if-no-files-found: error
+          retention-days: 14
