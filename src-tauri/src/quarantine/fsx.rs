@@ -873,9 +873,9 @@ mod win {
         if text.starts_with(r"\\?\") || !path.is_absolute() {
             return path.to_path_buf();
         }
-        if text.starts_with(r"\\") {
+        if let Some(rest) = text.strip_prefix(r"\\") {
             // UNC: \\server\share -> \\?\UNC\server\share
-            return PathBuf::from(format!(r"\\?\UNC\{}", &text[2..]));
+            return PathBuf::from(format!(r"\\?\UNC\{rest}"));
         }
         PathBuf::from(format!(r"\\?\{text}"))
     }
