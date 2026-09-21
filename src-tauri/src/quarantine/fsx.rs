@@ -1119,7 +1119,6 @@ mod tests {
         );
     }
 
-    #[test]
     #[cfg(windows)]
     #[test]
     fn a_verbatim_path_never_carries_a_forward_slash() {
