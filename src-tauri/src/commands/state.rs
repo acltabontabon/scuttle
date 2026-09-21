@@ -96,16 +96,6 @@ pub enum Priority {
     Background,
 }
 
-/// How long a user action waits for a background check to get out of the way.
-///
-/// A background check is metadata-only and tests its cancel flag on every
-/// 120 ms progress tick, so in practice this is tens of milliseconds. The cap
-/// exists so that a pathological case costs a brief pause rather than a frozen
-/// window — and if it expires, the ordinary "Scuttle is busy" refusal is what
-/// the user sees, exactly as before.
-const YIELD_TIMEOUT: Duration = Duration::from_millis(1500);
-const YIELD_POLL: Duration = Duration::from_millis(15);
-
 /// The things that change files, the Drawer, or the findings a selection was
 /// made from. Scuttle does one of them at a time.
 ///
@@ -357,16 +347,8 @@ impl AppState {
         kind: ScanKind,
         priority: Priority,
     ) -> Result<String> {
-        // A user starting a rummage while a background check is running should
-        // get their rummage, not a refusal. Asking the check to stop before
-        // taking the running slot is the same courtesy the gate does below.
-        if priority == Priority::User {
-            self.ask_background_scan_to_stop();
-            self.wait_for_background_scan_to_end();
-        }
-
         let mut running = self.lock_running();
-        if running.is_some() {
+        if running.is_some() && !self.displace_background_scan(&mut running, priority) {
             return Err(ScuttleError::ScanBusy);
         }
         // A scan replaces the findings a selection was made from, so it cannot
@@ -395,26 +377,43 @@ impl AppState {
             .is_some_and(|scan| scan.kind == ScanKind::Glance)
     }
 
-    /// Ask a running background check — and only a background check — to stop.
-    fn ask_background_scan_to_stop(&self) {
-        if let Some(scan) = self.lock_running().as_ref() {
-            if scan.kind == ScanKind::Glance {
-                scan.cancel.store(true, Ordering::Relaxed);
-            }
+    /// Turf out a running background check on a user's behalf.
+    ///
+    /// Returns whether the slot is now free. Only a check is ever displaced,
+    /// and only for a person: the courtesy is deliberately one-directional.
+    ///
+    /// It takes the slot rather than waiting for the check's worker to let go.
+    /// Waiting was the first attempt and it was wrong — the worker releases the
+    /// slot on its own schedule, so "a rummage is never refused because of a
+    /// background check" held only if the worker happened to be quick, which is
+    /// not a guarantee at all. The displaced worker discovers that the
+    /// registered scan is no longer its own and stands down without saving
+    /// anything; dropping its entry here releases the gate it was holding.
+    fn displace_background_scan(
+        &self,
+        running: &mut Option<RunningScan>,
+        priority: Priority,
+    ) -> bool {
+        let displaceable = priority == Priority::User
+            && running
+                .as_ref()
+                .is_some_and(|scan| scan.kind == ScanKind::Glance);
+        if !displaceable {
+            return false;
         }
+        if let Some(scan) = running.as_ref() {
+            scan.cancel.store(true, Ordering::Relaxed);
+        }
+        // Dropping it releases the operation gate the check held with it.
+        drop(running.take());
+        true
     }
 
-    /// Wait, briefly, for a cancelled background check to let go.
-    ///
-    /// Bounded because this runs on the thread handling a command: a pause of
-    /// a few milliseconds is invisible, and a check that somehow will not stop
-    /// must not freeze the window. If the wait runs out the caller carries on
-    /// and gets the ordinary "busy" refusal.
-    fn wait_for_background_scan_to_end(&self) {
-        let deadline = Instant::now() + YIELD_TIMEOUT;
-        while self.background_scan_running() && Instant::now() < deadline {
-            std::thread::sleep(YIELD_POLL);
-        }
+    /// Whether this scan is still the one the application is running.
+    fn still_registered(&self, scan_id: &str) -> bool {
+        self.lock_running()
+            .as_ref()
+            .is_some_and(|scan| scan.id == scan_id)
     }
 
     pub fn cancel_scan(&self) -> bool {
@@ -463,9 +462,11 @@ impl AppState {
         operation: Operation,
         priority: Priority,
     ) -> Result<OperationGuard> {
-        if priority == Priority::User && self.background_scan_running() {
-            self.ask_background_scan_to_stop();
-            self.wait_for_background_scan_to_end();
+        if priority == Priority::User {
+            let mut running = self.lock_running();
+            if running.is_some() {
+                self.displace_background_scan(&mut running, priority);
+            }
         }
         self.claim_gate(operation)
     }
@@ -650,6 +651,13 @@ impl AppState {
                 ScanKind::Glance => crate::detectors::glance_set(&options),
             };
             let outcome = scanning::run(scan_id, &ctx, detectors, observer);
+
+            // Displaced part-way? Then these findings belong to a scan nobody
+            // is waiting for, and saving them would overwrite the ones that
+            // took its place.
+            if !self.still_registered(scan_id) {
+                return Err(ScuttleError::ScanBusy);
+            }
 
             self.store().save_candidates(scan_id, &outcome.candidates)?;
             self.record_reviewed_sets(&outcome.candidates, &ctx);

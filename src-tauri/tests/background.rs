@@ -18,7 +18,7 @@ use scuttle_core::background;
 use scuttle_core::background::schedule::{
     self, Decision, Moment, Reason, BETWEEN_CHECKS, SETTLE_AFTER_LAUNCH,
 };
-use scuttle_core::commands::{AppState, Operation};
+use scuttle_core::commands::{AppState, Operation, Priority};
 use scuttle_core::model::Category;
 use scuttle_core::platform::PlatformService;
 use scuttle_core::storage::{BackgroundState, QuarantineStatus, ScanKind, Settings};
@@ -206,29 +206,21 @@ fn a_rummage_the_user_asked_for_is_never_refused_because_of_a_background_check()
     // running and being told Scuttle is busy with something you never asked
     // for and cannot see.
     //
-    // The check may well finish on its own before the rummage arrives — these
-    // fixtures are small. So the assertion is on the guarantee, not on the
-    // race: the rummage starts either way, and if the check was still going it
-    // stood down rather than finishing underneath it.
+    // Deterministic on purpose. An earlier version raced a real check on a
+    // worker thread and asserted it had been cancelled, which held on macOS
+    // and lost on Windows: between observing the check and starting the
+    // rummage, a check over a small fixture can simply finish. Registering
+    // the check without running it removes the clock from the test entirely,
+    // and the thing being proved — that a user's rummage is never refused
+    // because of one — is unchanged.
     let world = healthy_system();
     let state = state_for(&world);
     ready(&state, &world);
 
-    let checking = state.clone_handle();
-    let worker = std::thread::spawn(move || checking.run_glance(600));
-
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    let mut saw_it_running = false;
-    while std::time::Instant::now() < deadline {
-        if state.background_scan_running() {
-            saw_it_running = true;
-            break;
-        }
-        if worker.is_finished() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
+    let glance = state
+        .start_scan_as(&world.options, ScanKind::Glance, Priority::Background)
+        .expect("a check should be able to start");
+    assert!(state.background_scan_running());
 
     let started = state.start_scan(&world.options);
     assert!(
@@ -236,18 +228,43 @@ fn a_rummage_the_user_asked_for_is_never_refused_because_of_a_background_check()
         "a rummage must not be refused because of a background check: {:?}",
         started.err()
     );
+    assert_ne!(started.unwrap(), glance, "the rummage is its own scan");
+    assert!(
+        !state.background_scan_running(),
+        "the check should have given up the slot rather than sharing it"
+    );
+}
 
-    let outcome = worker.join().expect("the check thread should not panic");
-    // Losing the running slot outright — the `Err` case — is the same outcome
-    // by a shorter route, and is equally correct.
-    if saw_it_running {
-        if let Ok(summary) = outcome {
-            assert!(
-                summary.summary.cancelled,
-                "a check still running when a rummage started should have stood down"
-            );
-        }
-    }
+#[test]
+fn a_displaced_check_is_told_to_stop_rather_than_left_running() {
+    // The other half: the check does not merely lose the slot, it is asked to
+    // stand down, so its worker unwinds instead of carrying on over findings
+    // the rummage is about to replace.
+    let world = healthy_system();
+    let state = state_for(&world);
+    ready(&state, &world);
+
+    let glance = state
+        .start_scan_as(&world.options, ScanKind::Glance, Priority::Background)
+        .expect("a check should be able to start");
+
+    state.start_scan(&world.options).expect("rummage starts");
+
+    // The displaced check's worker now finds its scan is no longer the one
+    // registered, and gives up without touching the rummage.
+    let outcome = state.run_scan_with(
+        &glance,
+        world.options.clone(),
+        &scuttle_core::scanning::SilentObserver,
+    );
+    assert!(
+        outcome.is_err(),
+        "a check that lost its slot must not go on and save results"
+    );
+    assert!(
+        state.cancel_scan(),
+        "the rummage should still be there, untouched"
+    );
 }
 
 #[test]

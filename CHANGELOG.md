@@ -45,6 +45,9 @@ Nothing yet.
 - Nothing is ever overwritten by a move or a restore.
 - Moving, restoring, emptying the drawer and scanning no longer run over each
   other.
+- Starting a rummage while a background check was running could still be
+  refused as busy, if the check was slow to stand down. A rummage now displaces
+  it outright.
 - On Windows, long-path handling turned any path containing a forward slash
   into one the system could not open. Nothing shipped was affected — Scuttle
   builds its own paths a piece at a time — but every move failed under test,
