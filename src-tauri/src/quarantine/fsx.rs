@@ -868,11 +868,24 @@ mod win {
 
     /// `\\?\C:\...` form, so paths past `MAX_PATH` work and nothing is
     /// reinterpreted. Only absolute drive paths are rewritten.
-    fn verbatim(path: &Path) -> PathBuf {
-        let text = path.as_os_str().to_string_lossy();
-        if text.starts_with(r"\\?\") || !path.is_absolute() {
+    ///
+    /// Separators are normalised on the way in. An ordinary Win32 path may use
+    /// `/` — the API translates it — but a verbatim one reaches the object
+    /// manager almost as written, and `/` is left alone there. A component
+    /// like `.scuttle/quarantine` then becomes one name the kernel cannot
+    /// resolve, and every open, rename and delete through it fails.
+    ///
+    /// `Path::join("a/b")` produces exactly that shape on Windows, so this is
+    /// easy to hand in without noticing.
+    pub(super) fn verbatim(path: &Path) -> PathBuf {
+        if !path.is_absolute() {
             return path.to_path_buf();
         }
+        let text = path.as_os_str().to_string_lossy();
+        if text.starts_with(r"\\?\") {
+            return path.to_path_buf();
+        }
+        let text = text.replace('/', "\\");
         if let Some(rest) = text.strip_prefix(r"\\") {
             // UNC: \\server\share -> \\?\UNC\server\share
             return PathBuf::from(format!(r"\\?\UNC\{rest}"));
@@ -1104,6 +1117,42 @@ mod tests {
             !b.is_same_state(&c),
             "two different birth times are a difference"
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_verbatim_path_never_carries_a_forward_slash() {
+        // The failure this prevents: every move, rename and delete refusing on
+        // Windows because a path was built with `Path::join("a/b")`. An
+        // ordinary Win32 path tolerates `/`; a `\\?\` one does not, and the
+        // kernel sees a single component with a slash in its name.
+        let made = super::win::verbatim(std::path::Path::new(r"C:\Users\x\.scuttle/quarantine"));
+        let text = made.to_string_lossy();
+        assert!(!text.contains('/'), "{text}");
+        assert_eq!(text, r"\\?\C:\Users\x\.scuttle\quarantine");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_verbatim_path_is_left_alone_once_it_is_one() {
+        let already = std::path::Path::new(r"\\?\C:\Users\x");
+        assert_eq!(super::win::verbatim(already), already);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_unc_path_keeps_its_share_and_loses_its_slashes() {
+        let made = super::win::verbatim(std::path::Path::new(r"\\server\share\a/b"));
+        assert_eq!(made.to_string_lossy(), r"\\?\UNC\server\share\a\b");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_relative_path_is_not_made_verbatim() {
+        // A verbatim path must be absolute; prefixing a relative one would
+        // produce something the kernel cannot resolve either.
+        let rel = std::path::Path::new(r"a\b");
+        assert_eq!(super::win::verbatim(rel), rel);
     }
 
     #[test]
