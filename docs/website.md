@@ -22,7 +22,13 @@ framework and no router.
 - `www/src/styles.css` — the tokens are copied from the application's own
   `src/styles/tokens.css`, so the site and the product are recognisably the
   same object. If a colour changes there, change it here too.
-- `www/src/main.js` — the piles, the drawer, the demo player, the reveals
+- `www/src/main.js` — everything that moves: Scuttle walking the hero's floor
+  after your pointer (click it), the pinned rummage where loose files are
+  swept into piles, the review sheet you can tick, the drawer that slides out
+  as the page goes dark, the pretend menu bar with its burrow, the demo window
+  that straightens up, the closing heap, and the reveals. One
+  `requestAnimationFrame` loop drives all of it and only runs while something
+  is moving.
 - `www/src/downloads.js` — resolving the latest release
 - `www/scripts/media.mjs` — copies `docs/media/` into the build
 
@@ -46,8 +52,9 @@ asset URL is exercised at the path GitHub Pages will use.
 
 Worth looking at each time: both themes (the site follows
 `prefers-color-scheme`), a phone width, tabbing through with the keyboard, and
-the page with reduced motion on — where the piles are simply drawn, the
-sections are already in place, and the drawer arrives open instead of sliding.
+the page with reduced motion on — where Scuttle sits still, the pinned sections
+become ordinary sections, the rummage shows the real findings screen, and the
+drawer is simply open.
 
 ## Downloads
 
