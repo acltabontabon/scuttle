@@ -76,8 +76,18 @@ async function newestPrerelease() {
 
   const releases = await response.json();
   if (!Array.isArray(releases)) return null;
-  // The API returns them newest first.
-  return releases.find((release) => release && !release.draft && release.prerelease) ?? null;
+  // The API returns them newest first. `updater-channels` is a prerelease too,
+  // but it is where installed copies read their update manifests, not
+  // something to download: it has no installers and must never be offered.
+  return (
+    releases.find(
+      (release) =>
+        release &&
+        !release.draft &&
+        release.prerelease &&
+        release.tag_name !== 'updater-channels',
+    ) ?? null
+  );
 }
 
 function assetsFor(release) {

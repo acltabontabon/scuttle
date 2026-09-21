@@ -34,6 +34,18 @@
       "csp": "default-src 'self'; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "UNSET: paste the public key printed by `npm run tauri signer generate` here (see docs/updates.md)",
+      "endpoints": [
+        "https://github.com/acltabontabon/scuttle/releases/download/updater-channels/{{channel}}.json"
+      ],
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["dmg", "nsis"],

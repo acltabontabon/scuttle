@@ -4,6 +4,12 @@ name: Build desktop
 # well-formed, and leaves them as workflow artifacts. It never publishes
 # anything and is never given a token that could.
 #
+# With `updater: true` it also produces what the in-app updater downloads —
+# a `.app.tar.gz` per Mac architecture and a signature beside every update
+# artifact — signed with the updater key from the repository's secrets. That is
+# Tauri's own update signing. It is not Apple code signing and not Windows
+# Authenticode, and it neither replaces nor is replaced by either.
+#
 # Two callers:
 #   release.yml  — on a version tag, then publishes what this produced
 #   ci.yml       — on main, to find out that packaging broke before a tag does
@@ -18,12 +24,27 @@ on:
         description: Commit, branch or tag to build.
         required: true
         type: string
+      updater:
+        description: Also build and sign the update artifacts. Needs the updater key.
+        required: false
+        default: false
+        type: boolean
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: false
   workflow_dispatch:
     inputs:
       ref:
         description: Commit, branch or tag to build (defaults to this branch).
         required: false
         type: string
+      updater:
+        description: Also build and sign the update artifacts (needs the updater key and a real public key in tauri.conf.json).
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -88,6 +109,24 @@ jobs:
 
       - run: npm ci
 
+      # Update artifacts are signed with a private key that lives only in the
+      # repository's secrets. Its absence is a failure here, not a build that
+      # quietly comes out without them: a release nobody can update from is
+      # not a smaller release, it is a broken one. The public half has to be
+      # real too, or the application would ship unable to verify anything.
+      - name: The updater key is present
+        if: inputs.updater
+        shell: bash
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEY" ]; then
+            echo '::error::TAURI_SIGNING_PRIVATE_KEY is not set. See docs/updates.md.'
+            exit 1
+          fi
+          node scripts/update-manifest.mjs check-config
+
       - name: Read the version being built
         id: version
         shell: bash
@@ -96,15 +135,37 @@ jobs:
           npm run --silent version:check
           echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
-      # No APPLE_* or TAURI_SIGNING_* variables are set anywhere in this
-      # workflow. macOS bundles are ad-hoc signed, because tauri.conf.json
-      # asks for `"signingIdentity": "-"`; ad-hoc signing needs no account,
-      # no certificate and no secret, and is what makes an Apple Silicon
-      # build launchable at all. It is not a verified publisher identity and
-      # it is not notarization. The Windows installer is unsigned.
+      # No APPLE_* variables are set anywhere in this workflow. macOS bundles
+      # are ad-hoc signed, because tauri.conf.json asks for
+      # `"signingIdentity": "-"`; ad-hoc signing needs no account, no
+      # certificate and no secret, and is what makes an Apple Silicon build
+      # launchable at all. It is not a verified publisher identity and it is
+      # not notarization. The Windows installer is unsigned.
+      #
+      # The one secret is the updater key, and it is in the environment of this
+      # step only, and only when update artifacts are being built. It signs the
+      # update packages; it does not sign the application for the operating
+      # system. `--app-version` binds each signature to the version it was made
+      # for, which the application insists on, so a package cannot be paired
+      # with a different version's manifest.
       - name: Build
         shell: bash
-        run: npm run tauri build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} ${{ matrix.config }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.updater && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.updater && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          UPDATER: ${{ inputs.updater && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          bundles='${{ matrix.bundles }}'
+          extra=()
+          if [ "$UPDATER" = 'true' ]; then
+            extra+=(--config src-tauri/tauri.updater.conf.json)
+            # The updater replaces the application bundle, so on macOS it needs
+            # the .app.tar.gz, which comes with the `app` bundle. The disk
+            # image is still built and is still what people download.
+            case "$bundles" in dmg) bundles='app,dmg' ;; esac
+          fi
+          npm run tauri build -- --target ${{ matrix.target }} --bundles "$bundles" ${{ matrix.config }} ${extra[@]+"${extra[@]}"}
 
       - name: Collect and name the download
         id: collect
@@ -129,6 +190,35 @@ jobs:
 
           cp "$found" "$out/$name"
 
+          # What the in-app updater downloads, and the signature beside each.
+          # Windows: the installer itself is the update package, so it is the
+          # same file that was just copied and only its signature is new.
+          # macOS: the updater replaces the .app, so it takes the archive of it.
+          if [ '${{ inputs.updater }}' = 'true' ]; then
+            case '${{ matrix.bundles }}' in
+              dmg)
+                tarball=$(find "$bundle/macos" -name '*.app.tar.gz' -print -quit)
+                [ -n "${tarball:-}" ] && [ -s "$tarball.sig" ] || {
+                  echo "::error::No signed .app.tar.gz was produced under $bundle/macos." >&2
+                  find "$bundle" -maxdepth 2 -type f >&2 || true
+                  exit 1
+                }
+                update="Scuttle-${version}-${{ matrix.slug }}.app.tar.gz"
+                cp "$tarball" "$out/$update"
+                cp "$tarball.sig" "$out/$update.sig"
+                ;;
+              nsis)
+                [ -s "$found.sig" ] || {
+                  echo "::error::The installer was not signed for updates ($found.sig is missing)." >&2
+                  exit 1
+                }
+                update="$name"
+                cp "$found.sig" "$out/$name.sig"
+                ;;
+            esac
+            echo "update=$update" >> "$GITHUB_OUTPUT"
+          fi
+
           # Checksums travel beside the file they describe, so a download can
           # be verified without trusting the page it came from.
           #
@@ -137,12 +227,44 @@ jobs:
           # "hash  filename" line, so either satisfies the other's `-c`.
           sum () { if command -v sha256sum > /dev/null; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
           ( cd "$out" && sum "$name" > "$name.sha256" )
+          if [ -n "${update:-}" ] && [ "$update" != "$name" ]; then
+            ( cd "$out" && sum "$update" > "$update.sha256" )
+          fi
           {
             echo "name=$name"
             echo "dir=$out"
             echo "bundle=$bundle"
           } >> "$GITHUB_OUTPUT"
           ls -lh "$out"
+
+      # The signature is checked here, on the machine that made it, against the
+      # public key that is compiled into the application: the earliest point
+      # at which the wrong key, or a signature not bound to this version, can
+      # be caught. The publish job checks it again over the whole set.
+      - name: Check the update signature
+        if: inputs.updater
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/update-manifest.mjs check-artifact \
+            '${{ steps.collect.outputs.dir }}/${{ steps.collect.outputs.update }}' \
+            '${{ steps.version.outputs.version }}'
+
+      - name: Check the update archive holds this version of the application
+        if: inputs.updater && runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive='${{ steps.collect.outputs.dir }}/${{ steps.collect.outputs.update }}'
+          plist=$(mktemp)
+          # The application is the archive's only top-level entry.
+          app=$(tar -tzf "$archive" | sed -n 1p | cut -d/ -f1)
+          case "$app" in *.app) ;; *) echo "::error::The update archive does not contain an application ($app)."; exit 1 ;; esac
+          tar -xzOf "$archive" "$app/Contents/Info.plist" > "$plist"
+          actual=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")
+          [ "$actual" = '${{ steps.version.outputs.version }}' ] \
+            || { echo "::error::The update archive holds version $actual, expected ${{ steps.version.outputs.version }}."; exit 1; }
+          echo "  update archive: $app $actual"
 
       # Compiling and packaging are not the same thing as packaging
       # *correctly*. These read the bundle that is about to be published and

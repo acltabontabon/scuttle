@@ -30,6 +30,7 @@ import type {
   ScanSummary,
   Settings,
   SpaceOverview,
+  UpdateSnapshot,
 } from './types'
 
 export const EVENTS = {
@@ -39,6 +40,8 @@ export const EVENTS = {
   done: 'scuttle://done',
   move: 'scuttle://move',
   background: 'scuttle://background',
+  /** The whole state of updating, sent whole whenever any of it changes. */
+  update: 'scuttle://update',
   /** Something the tray asked the window to do. */
   intent: 'scuttle://intent',
 } as const
@@ -137,6 +140,25 @@ export const api = {
   requestNotificationPermission: () => invoke<boolean>('request_notification_permission'),
 
   clearPendingReview: () => invoke<void>('clear_pending_review'),
+
+  // ---- updates ---------------------------------------------------------
+  //
+  // Each of these returns the whole snapshot, and the same snapshot arrives as
+  // an event. Installing is refused with the `busy` code while anything is
+  // changing files; the reason is in the snapshot's `blocked` as well.
+  updateStatus: () => invoke<UpdateSnapshot>('update_status'),
+  /** `manual` is what makes a failed check worth showing. */
+  checkForUpdate: (manual: boolean) => invoke<UpdateSnapshot>('check_for_update', { manual }),
+  downloadUpdate: () => invoke<UpdateSnapshot>('download_update'),
+  installUpdate: () => invoke<UpdateSnapshot>('install_update'),
+  dismissUpdate: () => invoke<UpdateSnapshot>('dismiss_update'),
+}
+
+/** Subscribe to updating. */
+export async function watchUpdates(
+  onSnapshot: (snapshot: UpdateSnapshot) => void,
+): Promise<UnlistenFn> {
+  return listen<UpdateSnapshot>(EVENTS.update, ({ payload }) => onSnapshot(payload))
 }
 
 /** Subscribe to background-mode status. */

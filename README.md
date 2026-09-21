@@ -48,7 +48,7 @@ All three are on the [releases page](https://github.com/acltabontabon/scuttle/re
 each with a `.sha256` file beside it. Not sure which Mac you have? Apple menu →
 About This Mac; "Apple M1" or later means Apple silicon.
 
-The current build is **`v0.1.0-alpha.1`**, an alpha. It does what this page
+The current builds are alphas (the newest is on the releases page). It does what this page
 describes and its tests pass on macOS and Windows, but it has not been run on
 many machines yet — so give the drawer a look before you empty it.
 
@@ -212,17 +212,32 @@ Hiding the window is not free: the webview keeps its memory. See
 
 ## It stays on your machine
 
-There is no account, no sign-in and no server. Scuttle makes no network requests
-of its own: the only thing that ever goes over the network is the WebView2
-installer on the rare Windows machine that doesn't already have it, and that is
-Microsoft's, not Scuttle's. Findings, settings and drawer records live in one
+There is no account, no sign-in and no server. Scuttle's only network request
+is asking GitHub whether a newer version exists, and, when you say so,
+downloading it — described below. (The one other thing that ever goes over the
+network is the WebView2 installer on the rare Windows machine that doesn't
+already have it, and that is Microsoft's, not Scuttle's.) Findings, settings and drawer records live in one
 SQLite database in Scuttle's own directory on the machine that made them, and
 full paths are never written to logs.
 
-There is deliberately **no automatic updater**, so Scuttle never calls home to
-ask whether it is out of date. New versions come from
-[the releases page](https://github.com/acltabontabon/scuttle/releases) when you
-go and get them.
+### Updates
+
+Scuttle checks for a newer version shortly after it starts and about once a
+day, and says so quietly in the header. **It only looks.** Nothing is
+downloaded until you choose to, and it only restarts when you choose to; a move
+or restore in progress always finishes first, and *Update and restart* waits for
+it. Every update is verified with a signature before it is used. The check is
+one HTTPS request to GitHub, and *Automatically check for updates* in Settings
+turns it off; *Check for updates* still works when you ask. Alphas are offered
+alphas and, in time, the stable release they led up to; stable installs are
+never offered a prerelease. How it works, and how it is tested:
+[docs/updates.md](docs/updates.md).
+
+**If you installed a build from before updates existed** (`v0.1.0-alpha.1` or
+`-alpha.2`) it has no updater and cannot fetch one. Install the first release
+that includes updates by hand from
+[the releases page](https://github.com/acltabontabon/scuttle/releases) — once.
+From then on it can update itself.
 
 `scuttle --dry-run` in a terminal prints everything Scuttle would classify and
 what it would recommend, and changes nothing. It's the one place full paths are

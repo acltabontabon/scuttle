@@ -143,11 +143,11 @@ If that ever changes, you need a code-signing certificate — an EV certificate
 builds SmartScreen reputation immediately; a standard OV certificate
 accumulates it over time.
 
-```powershell
-$env:TAURI_SIGNING_PRIVATE_KEY="path\to\certificate.pfx"
-$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD="…"
-npm run app:build
-```
+Configure the certificate through Tauri's Windows signing settings
+(`bundle.windows.certificateThumbprint`, or `signCommand` for a cloud signer).
+Do **not** use `TAURI_SIGNING_PRIVATE_KEY` for it: that variable is the
+*updater* key, a different thing entirely (see [`updates.md`](updates.md)), and
+a `.pfx` in it would sign nothing the operating system trusts.
 
 ### Uninstall behaviour
 
@@ -186,13 +186,18 @@ binary is small, and a filesystem utility is I/O-bound rather than CPU-bound.
 
 ## Updates
 
-There is no auto-updater in this release, deliberately: shipping an update
-mechanism badly is worse than not shipping one.
+Scuttle updates itself through the official `tauri-plugin-updater`, driven from
+Rust. All of it is in [`updates.md`](updates.md); the parts that touch
+packaging are:
 
-The architecture leaves room for `tauri-plugin-updater`, which verifies a
-minisign signature before applying anything. When it is added:
-
-- Signature verification is mandatory, not a configurable option.
-- Nothing downloaded is executed before its signature is verified.
-- Update checks are a network request, so they will be disclosed and
-  switchable — today Scuttle makes none at all.
+- Signature verification is mandatory and is not configurable: the public key is
+  in `tauri.conf.json` and a package that does not verify against it is thrown
+  away, as is one whose signature is not bound to the announced version.
+- Nothing downloaded is run before its signature has been verified.
+- Update signing is **separate** from macOS code signing and Windows
+  Authenticode, and replaces neither. The ad-hoc macOS signature and the
+  unsigned Windows installer are exactly as described above.
+- Update checks are a network request. They are disclosed, and switchable in
+  Settings.
+- The macOS update package is `Scuttle.app.tar.gz`, so the macOS build asks for
+  the `app` bundle as well as the `dmg` when update artifacts are wanted.

@@ -374,6 +374,34 @@ resume where they stopped rather than snapping back.
 No architecture rewrite was undertaken to eliminate the webview, and none is
 proposed on this evidence.
 
+## Updating
+
+The full account, with setup and testing, is [`updates.md`](updates.md). What
+matters architecturally:
+
+- **The plugin stays behind a trait.** `updater::Backend` is the whole of what
+  Scuttle asks of `tauri-plugin-updater` (check, download-and-verify, install,
+  discard); `TauriBackend` is the only implementation that touches it. Everything
+  that decides anything — the state machine, the channel policy, the install
+  gate — is Tauri-free and tested against a mock backend and the real gate.
+- **Installing is a claim on the operation gate**, not a flag. `begin_install`
+  takes the same gate as a move, so the check for "is anything changing files?"
+  and the commitment to install are one step under one mutex; an operation and an
+  install can never both hold it. A background check is displaced exactly as it
+  is for any other user action; everything else makes the install wait. Lock
+  ordering is unchanged: `running` → `gate`.
+- **Order matters, because Windows may end the process inside `install()`.**
+  Claim the gate, stop the scheduler, checkpoint the database, publish the last
+  snapshot, and only then replace the application. A failed install hands
+  everything back (`InstallLease::abandon`).
+- **The webview has no updater permission.** It calls five commands and receives
+  a whole `Snapshot` from each and on `scuttle://update`, the same "snapshot plus
+  re-query on show" pattern as background status, so it holds no update state to
+  disagree with Rust.
+- **Timers.** One async task: a first check about 15 s after launch, then daily.
+  It is independent of the background-mode scheduler, which only exists when the
+  tray is enabled.
+
 ## Frontend state
 
 A single React context over `useState`. The Rust core is the source of truth

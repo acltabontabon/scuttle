@@ -5,6 +5,7 @@ import { App } from '@/app/App'
 import { StoreContext, type Store, type View } from '@/app/store'
 import type { Candidate, Findings, Settings } from '@/lib/types'
 import { isTerminal } from '@/features/move/progress'
+import { UpdateProvider } from '@/features/updates/UpdateProvider'
 import {
   BACKGROUND_STATUS,
   CANDIDATES,
@@ -15,6 +16,7 @@ import {
   MOVE_SCENES,
   SETTINGS,
   SPACE,
+  UPDATE_SCENES,
 } from './fixtures'
 
 import styles from './Preview.module.css'
@@ -320,7 +322,14 @@ export function Preview() {
 
       <div className={styles.window}>
         <StoreContext.Provider value={store}>
-          <App />
+          {/* Static: there is no core behind the workbench. `?update=ready` and
+              friends pick a scene from the fixtures. */}
+          <UpdateProvider
+            live={false}
+            initial={UPDATE_SCENES[new URLSearchParams(window.location.search).get('update') ?? ''] ?? null}
+          >
+            <App />
+          </UpdateProvider>
         </StoreContext.Provider>
       </div>
     </div>

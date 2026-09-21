@@ -5,8 +5,11 @@ Everything after the tag is automatic, and everything before it is a commit
 like any other. No workflow ever bumps a version or writes a commit — the tag
 is built exactly as it was pushed.
 
-There are **no signing credentials to arrange.** Releases are ad-hoc signed on
-macOS and unsigned on Windows, deliberately; see
+There is **one signing credential to arrange**, once: the updater key that lets
+installed copies of Scuttle verify an update. Setting it up, backing it up and
+what it is (and is not) are in [`updates.md`](updates.md); without it the
+release workflow refuses to start. Apart from that, releases are ad-hoc signed
+on macOS and unsigned on Windows, deliberately; see
 [`packaging.md`](packaging.md). Nothing here waits on an Apple Developer
 account or a Windows certificate.
 
@@ -118,19 +121,30 @@ git push origin v0.2.0
 
 ## What the tag sets off
 
-`.github/workflows/release.yml`, in four steps, each of which stops the release
+`.github/workflows/release.yml`, in five steps, each of which stops the release
 if it does not hold:
 
 1. **Validate** — the tag matches the version in all five files, the changelog
-   has a section for it, and the tag is not one that has already been
-   published.
+   has a section for it, the tag is not one that has already been published,
+   and the updater is configured (the signing secret exists and the public key
+   in `tauri.conf.json` is a real one).
 2. **Checks** — everything CI runs, on the tagged commit.
 3. **Build** — three installers, on native runners, each inspected where it was
    built: the `.dmg` is mounted and the application inside it is read back
    (version, identifier, icon, architecture, ad-hoc signature), and the Windows
-   installer's size and version resource are checked.
-4. **Publish** — a draft gathers the assets, and becomes a release only once
-   every expected file is present.
+   installer's size and version resource are checked. Alongside them, the
+   signed update packages: every signature is verified against the public key
+   in the application, bound to this version, and the macOS archive is opened
+   to confirm it holds this version of the application.
+4. **Publish** — the update manifest (`latest.json`) is built and checked
+   against the artifacts themselves, then a draft gathers the assets, and it
+   becomes a release only once every expected file is present.
+5. **Channels** — only after the release is public, and its files are fetched
+   back from the addresses installed copies use and verified again, the
+   `updater-channels` pointers are moved (`update-channels.yml`). Until then
+   nobody is offered the new version. If this step fails, the release stands;
+   rerun **Update channels** from the Actions tab. See
+   [`updates.md`](updates.md) for what the channels are.
 
 Expect, for version `X`:
 
@@ -139,7 +153,10 @@ Expect, for version `X`:
 | `Scuttle-X-macos-apple-silicon.dmg` | arm64, minimum macOS 11.0 |
 | `Scuttle-X-macos-intel.dmg` | x86_64, minimum macOS 10.15 |
 | `Scuttle-X-windows-x64-setup.exe` | NSIS, per-user, unsigned |
-| `*.sha256` beside each, and `SHA256SUMS.txt` | |
+| `Scuttle-X-macos-apple-silicon.app.tar.gz`, `Scuttle-X-macos-intel.app.tar.gz` | update packages for the in-app updater |
+| a `.sig` beside each update package, and beside the Windows installer | Tauri update signatures |
+| `latest.json` | this release's update manifest |
+| `*.sha256` beside each download, and `SHA256SUMS.txt` | |
 
 The two macOS builds both come off the Apple Silicon runner: Apple ships both
 slices' SDKs on every Mac, so the Intel build is an ordinary supported cross
@@ -148,8 +165,13 @@ Linux platform layer is a stub that knows nothing about a Linux system.
 
 ## Before announcing it
 
-The pipeline proves the installers are well-formed. It does not prove they
-install. Download the `.dmg` from the release page — the real download, not a
+The pipeline proves the installers are well-formed and that the update packages
+verify. It does not prove they install, or that an installed copy can update
+itself: that is the end-to-end test in [`updates.md`](updates.md), which is done
+by hand, with two signed builds, on each OS, before the first release that
+offers updates and whenever the updater or the packaging changes.
+
+For the installers: Download the `.dmg` from the release page — the real download, not a
 local build — open it, drag Scuttle to Applications, and click through the
 Gatekeeper prompt the way the README describes. If macOS says **damaged**
 rather than unverified, stop: that is a packaging defect or a corrupted
@@ -190,10 +212,15 @@ not something to retry past.
 
 ## Credentials
 
-The release workflow uses the automatic `GITHUB_TOKEN` and nothing else. No
-secrets need to be configured for a release, and none are required for
-packaging — that is the whole point of the distribution mode described in
-[`packaging.md`](packaging.md).
+The release workflow uses the automatic `GITHUB_TOKEN`, and **two repository
+secrets** for the updater: `TAURI_SIGNING_PRIVATE_KEY` and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. They sign update packages; they are not an
+Apple or Windows code-signing credential, and packaging the installers still
+needs neither of those — that part of the distribution mode described in
+[`packaging.md`](packaging.md) is unchanged. Generating, backing up and
+installing the key is in [`updates.md`](updates.md#setting-it-up-once). Only the
+build step can read the key, and only for a release (or a hand-run *Build
+desktop* with `updater` ticked); ordinary CI never sees it.
 
 Scuttle publishes no Docker image, and there is no Docker Hub account to set
 up. [`docker.md`](docker.md) says why.

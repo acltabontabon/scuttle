@@ -50,9 +50,25 @@ These hold across releases, and breaking one is a vulnerability:
    removal requires a separate, explicit request, or the retention window
    closing.
 4. Restore never overwrites.
-5. Scuttle makes no network requests.
+5. Scuttle's only network request is the update check (and the download an
+   update is chosen for), to GitHub Releases over HTTPS. It sends nothing about
+   the machine's files, and it can be turned off.
+6. Nothing downloaded is run unless its signature verifies against the key
+   compiled into the application, and installing never starts while a file
+   operation is running.
 
 ## Updates
 
-Scuttle has no auto-updater yet. When one is added it will verify signatures
-before executing anything downloaded; see `docs/packaging.md`.
+Scuttle checks for updates on its own (switchable), downloads only when asked,
+and restarts only when asked. Every update is verified with a minisign
+signature — the public key is in the application, the private key only in CI
+secrets — and the signature must be bound to the version the manifest
+announces, so a tampered manifest cannot pair a new version number with an
+older signed file. See [`docs/updates.md`](docs/updates.md) for the design and
+for what is and is not protected.
+
+Updates are not code-signed in the operating-system sense: macOS builds are
+ad-hoc signed and not notarized, the Windows installer is unsigned, and the
+update signature is a separate thing that replaces neither. A report that the
+update key could be misused, or that an update could be installed without its
+signature verifying, is a vulnerability.

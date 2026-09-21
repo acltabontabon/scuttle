@@ -395,6 +395,57 @@ export interface Settings {
   /** A mirror. The truth is whatever the operating system reports. */
   launch_at_login: boolean
   background_intro_seen: boolean
+
+  /**
+   * Ask GitHub, shortly after starting and about once a day, whether a newer
+   * Scuttle exists. Only ever a look: nothing downloads until the person says.
+   */
+  auto_check_updates: boolean
+}
+
+// ---------------------------------------------------------------------------
+// Updates
+// ---------------------------------------------------------------------------
+
+export interface UpdateInfo {
+  version: string
+  /** The release notes as written in the changelog, if the release had any. */
+  notes: string | null
+  date_unix: number | null
+}
+
+/**
+ * Where updating stands. A failure is not one of these: it is `error` on the
+ * snapshot, beside whichever state the updater fell back to, so a failed
+ * download leaves the update available and one click from being tried again.
+ */
+export type UpdatePhase =
+  | { phase: 'idle' }
+  | { phase: 'checking' }
+  | { phase: 'up_to_date'; checked_unix: number }
+  | { phase: 'available'; info: UpdateInfo }
+  /** `total` is null when the server did not say how big the download is. */
+  | { phase: 'downloading'; info: UpdateInfo; received: number; total: number | null }
+  | { phase: 'ready'; info: UpdateInfo }
+  | { phase: 'installing'; info: UpdateInfo }
+  | { phase: 'unavailable'; reason: string }
+
+export interface UpdateFailure {
+  stage: 'check' | 'download' | 'install'
+  message: string
+  /** Whether a person asked for the check that failed. Background ones stay quiet. */
+  manual: boolean
+}
+
+export interface UpdateSnapshot {
+  current_version: string
+  channel: 'stable' | 'alpha'
+  state: UpdatePhase
+  /** The notice for this version was dismissed during this run. */
+  dismissed: boolean
+  /** Why installing was just refused, in words for a person. */
+  blocked: string | null
+  error: UpdateFailure | null
 }
 
 /**

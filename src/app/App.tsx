@@ -8,6 +8,7 @@ import { Drawer } from '@/features/quarantine/Drawer'
 import { Rummage } from '@/features/rummage/Rummage'
 import { Settings } from '@/features/settings/Settings'
 import { Space } from '@/features/space/Space'
+import { UpdateChip } from '@/features/updates/UpdateChip'
 import { platform } from '@/lib/platform'
 import { Mark } from '@/visuals/Mark'
 import { useStore, type View } from './store'
@@ -150,6 +151,8 @@ export function App() {
         <div className={styles.barRight}>
           {/* Work in progress, and work that left something to look at, wherever you are. */}
           <MoveIndicator />
+          {/* Only when there is something about updating worth knowing. */}
+          <UpdateChip />
           {sections.length > 0 && (
           <nav className={styles.nav} aria-label="Sections">
             {sections.map(({ view: target, label }) => (

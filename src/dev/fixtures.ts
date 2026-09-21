@@ -23,6 +23,9 @@ import type {
   QuarantineView,
   Settings,
   SpaceOverview,
+  UpdateInfo,
+  UpdatePhase,
+  UpdateSnapshot,
 } from '@/lib/types'
 
 const DAY = 86400
@@ -394,6 +397,7 @@ export const SETTINGS: Settings = {
   background_notify: false,
   launch_at_login: false,
   background_intro_seen: false,
+  auto_check_updates: true,
 }
 
 export const BACKGROUND_STATUS: BackgroundStatus = {
@@ -581,3 +585,51 @@ export const MOVE_SCENES: { id: string; label: string; snapshot: MoveSnapshot | 
     }),
   },
 ]
+
+// ---- updating ----------------------------------------------------------------
+//
+// Reachable in the workbench as `/preview.html?update=<name>`, because none of
+// these can be produced on demand from a real build without a real release.
+
+const UPDATE_INFO: UpdateInfo = {
+  version: '0.1.0-alpha.3',
+  notes:
+    '### Added\n- Scuttle can now update itself, when asked.\n\n### Fixed\n- A move that was waiting on a slow disk no longer looks stuck.',
+  date_unix: 1_790_000_000,
+}
+
+function updateScene(state: UpdatePhase, over: Partial<UpdateSnapshot> = {}): UpdateSnapshot {
+  return {
+    current_version: '0.1.0-alpha.2',
+    channel: 'alpha',
+    state,
+    dismissed: false,
+    blocked: null,
+    error: null,
+    ...over,
+  }
+}
+
+export const UPDATE_SCENES: Record<string, UpdateSnapshot> = {
+  available: updateScene({ phase: 'available', info: UPDATE_INFO }),
+  dismissed: updateScene({ phase: 'available', info: UPDATE_INFO }, { dismissed: true }),
+  downloading: updateScene({ phase: 'downloading', info: UPDATE_INFO, received: 7_300_000, total: 21_000_000 }),
+  'downloading-unknown': updateScene({ phase: 'downloading', info: UPDATE_INFO, received: 7_300_000, total: null }),
+  ready: updateScene({ phase: 'ready', info: UPDATE_INFO }),
+  blocked: updateScene(
+    { phase: 'ready', info: UPDATE_INFO },
+    { blocked: 'Scuttle can’t restart while it’s moving files into the Drawer. Try again once that finishes.' },
+  ),
+  installing: updateScene({ phase: 'installing', info: UPDATE_INFO }),
+  failed: updateScene(
+    { phase: 'available', info: UPDATE_INFO },
+    {
+      error: {
+        stage: 'download',
+        message: 'The download stopped partway. Nothing was installed, and it can be tried again.',
+        manual: true,
+      },
+    },
+  ),
+  current: updateScene({ phase: 'up_to_date', checked_unix: 1_790_000_000 }),
+}

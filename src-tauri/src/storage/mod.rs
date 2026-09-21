@@ -63,6 +63,13 @@ pub struct Settings {
     /// Whether the one-off "Scuttle stays in the menu bar now" note has been
     /// shown. Explaining it once is the point.
     pub background_intro_seen: bool,
+
+    // ---- updates -------------------------------------------------------
+    /// Look for a newer Scuttle on its own, shortly after starting and then
+    /// about once a day. Looking is all it does: nothing is downloaded until
+    /// the person says so, and nothing is installed without a restart they
+    /// agreed to.
+    pub auto_check_updates: bool,
 }
 
 impl Default for Settings {
@@ -80,6 +87,7 @@ impl Default for Settings {
             background_notify: false,
             launch_at_login: false,
             background_intro_seen: false,
+            auto_check_updates: true,
         }
     }
 }
@@ -728,6 +736,17 @@ impl Store {
             .unwrap_or_default())
     }
 
+    /// Fold the write-ahead log into the database file.
+    ///
+    /// Nothing depends on this for correctness — committed writes are already
+    /// durable in the log — but before Scuttle is replaced by a newer version
+    /// it leaves the database as one whole file for that version to open.
+    pub fn checkpoint(&self) -> Result<()> {
+        let conn = self.lock();
+        conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        Ok(())
+    }
+
     pub fn save_settings(&self, settings: &Settings) -> Result<()> {
         let conn = self.lock();
         conn.execute(
@@ -1195,6 +1214,55 @@ mod tests {
         let read = store.settings().unwrap();
         assert_eq!(read.quarantine_retention_days, 30);
         assert!(read.include_developer_debris);
+    }
+
+    #[test]
+    fn update_checks_are_on_by_default_including_for_settings_saved_before_they_existed() {
+        assert!(Settings::default().auto_check_updates);
+
+        // What an alpha.2 install has in its database: no such key.
+        let store = Store::in_memory().unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('settings', ?1)",
+                params![r#"{"appearance":"dark","background_mode":true}"#],
+            )
+            .unwrap();
+        }
+        let loaded = store.settings().unwrap();
+        assert!(loaded.auto_check_updates);
+        assert_eq!(loaded.appearance, "dark", "what was saved is kept");
+
+        // And turning it off is remembered.
+        store
+            .save_settings(&Settings {
+                auto_check_updates: false,
+                ..loaded
+            })
+            .unwrap();
+        assert!(!store.settings().unwrap().auto_check_updates);
+    }
+
+    #[test]
+    fn a_checkpoint_before_an_update_leaves_the_data_intact() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scuttle.db");
+        {
+            let store = Store::open(&path).unwrap();
+            store
+                .save_settings(&Settings {
+                    appearance: "light".into(),
+                    ..Default::default()
+                })
+                .unwrap();
+            store.checkpoint().unwrap();
+            // A memory database has no log to fold and must not mind being asked.
+            Store::in_memory().unwrap().checkpoint().unwrap();
+        }
+        // The next version opens the same file and finds everything.
+        let reopened = Store::open(&path).unwrap();
+        assert_eq!(reopened.settings().unwrap().appearance, "light");
     }
 
     #[test]

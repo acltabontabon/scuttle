@@ -17,6 +17,7 @@ pub mod scanning;
 pub mod space;
 pub mod storage;
 pub mod tray;
+pub mod updater;
 pub mod window;
 
 pub use error::{Result, ScuttleError};
@@ -47,6 +48,11 @@ pub fn run() {
             window::reveal(app);
         }))
         .plugin(tauri_plugin_notification::init())
+        // Driven from Rust only. The webview has no updater permission in its
+        // capability, so it cannot check, download or install on its own; it
+        // asks the commands in `commands::updates`, which go through the same
+        // operation gate as everything else that changes files.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             // A per-user login item. No installer, no service, no elevation.
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -57,6 +63,12 @@ pub fn run() {
         .setup(move |app| {
             commands::init(app)?;
             start_window(app, &launch);
+            // After the window: checking for updates must never be the reason
+            // Scuttle takes longer to appear. It returns at once and looks
+            // later, on the async runtime.
+            if let Some(state) = app.try_state::<commands::AppState>() {
+                updater::start(app.handle(), state.inner());
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -75,13 +87,22 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("Scuttle could not start")
         .run(|app, event| {
-            // Nothing here ever calls `prevent_exit`. ⌘Q, the tray's Quit, a
-            // logout and a shutdown all arrive through this, and all of them
-            // mean it. What this does is make sure Scuttle's own background
-            // work stops with it, rather than a scan outliving the decision
-            // to quit.
-            if let tauri::RunEvent::ExitRequested { .. } = event {
+            // Nothing here calls `prevent_exit` except while an update is being
+            // installed. ⌘Q, the tray's Quit, a logout and a shutdown all
+            // arrive through this, and all of them mean it. What this does is
+            // make sure Scuttle's own background work stops with it, rather
+            // than a scan outliving the decision to quit.
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
                 if let Some(state) = app.try_state::<commands::AppState>() {
+                    // The one exception to "nothing here prevents an exit": an
+                    // install has committed and is replacing the application.
+                    // A quit that arrived now would stop it halfway. The install
+                    // ends this process itself, or fails and lets go of this —
+                    // and its own restart arrives here too, which must pass.
+                    if updater::defers_exit(state.installing(), code) {
+                        api.prevent_exit();
+                        return;
+                    }
                     state.begin_quitting();
                     state.stop_scheduler();
                     state.cancel_scan();

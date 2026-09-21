@@ -28,6 +28,12 @@ tauri-plugin-autostart = "2.5"
 # Ordinary notification permission, asked for only when notifications are
 # turned on, and never required for anything else to work.
 tauri-plugin-notification = "2.4"
+# The official updater. Scuttle drives it from Rust only: the webview is given
+# no updater permission, so the install gate stays on this side of the IPC.
+tauri-plugin-updater = "2.12"
+semver = "1"
+# Timers for the update check only; the runtime itself is Tauri's.
+tokio = { version = "1", default-features = false, features = ["time", "sync"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

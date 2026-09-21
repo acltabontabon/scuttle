@@ -8,7 +8,50 @@ major version is 0, a minor bump may change behaviour.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Scuttle can update itself, when you ask it to.** It checks shortly after
+  starting and about once a day (*Automatically check for updates* in Settings
+  turns that off; *Check for updates* still works), and says so with a small,
+  dismissible notice in the header. Nothing downloads until you choose to, with
+  a gauge that does not pretend to know a size it does not; nothing restarts
+  until you choose *Update and restart*, and it says plainly that this closes
+  Scuttle and opens the new version. Release notes and the installed and
+  available versions are shown.
+- **An update never interrupts a move, restore, delete or rummage.** Installing
+  goes through the same operation gate as every file operation: if one is
+  running, the install is refused with a sentence naming it, the update stays
+  ready, and nothing restarts by itself when the work ends. Once installing has
+  begun nothing that changes files can start. Only a background check stands
+  aside.
+- Updates are verified with a signature whose public key is compiled into
+  Scuttle, and which must be bound to the version being offered. A package that
+  does not verify is thrown away and nothing is installed.
+- Alpha builds are offered alphas and the stable release they led up to; stable
+  builds are never offered a prerelease, and nobody is ever offered an older
+  version. Versions are compared by semantic-version precedence.
+- The release workflow now builds signed update packages and an update manifest,
+  refuses to publish unless the whole platform matrix is present and every
+  signature verifies against its file, and only then points installed copies at
+  the new release. See `docs/updates.md`.
+
+### Changed
+
+- Scuttle now makes one kind of network request — asking GitHub whether a newer
+  version exists — where it previously made none. `docs/privacy.md` and
+  `SECURITY.md` say so.
+
+### Known limitations
+
+- Builds from before this release (`0.1.0-alpha.1`, `0.1.0-alpha.2`) have no
+  updater. Install the first release with updates by hand, once.
+- There is no automatic rollback of a failed or unwanted update. A failed
+  install leaves Scuttle running on the old version; a bad release is fixed by
+  publishing a newer one.
+- macOS builds are still ad-hoc signed, so the system may treat an updated copy
+  as a new application for privacy permissions granted to the old one.
+- A downloaded update is held in memory only, so it is downloaded again after a
+  restart.
 
 ## [0.1.0-alpha.2] - 2026-09-21
 

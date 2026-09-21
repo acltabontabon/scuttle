@@ -1,0 +1,193 @@
+name: Update channels
+
+# Decides which release installed copies of Scuttle are offered.
+#
+# Installed copies do not look at the releases page. They read one small file
+# for their channel, from a rolling release that holds nothing else:
+#
+#   https://github.com/acltabontabon/scuttle/releases/download/updater-channels/stable.json
+#   https://github.com/acltabontabon/scuttle/releases/download/updater-channels/alpha.json
+#
+# (A prerelease is never "latest" on GitHub, so GitHub's own latest address
+# cannot serve alpha users, and every release so far is an alpha.)
+#
+#   stable.json  the newest stable release. Stable installs read this.
+#   alpha.json   the newest release of any kind. Alpha installs read this, so
+#                an alpha moves on to the stable release it led up to.
+#
+# What this does, in this order, and stops at the first thing that is wrong:
+#
+#   1. downloads the release's own manifest and every artifact it names, from
+#      the public addresses installed copies will use;
+#   2. checks every signature against that exact download and the key that is
+#      compiled into the application;
+#   3. only then replaces the pointers — and only with something newer than
+#      what they already say, unless forced.
+#
+# Two callers: release.yml, straight after a release is published, and the
+# Actions tab, for running step 3 again after a failure, or — with `force` —
+# for pointing a channel back at an older release when a newer one was bad.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The release tag, such as v0.2.0.
+        required: true
+        type: string
+      force:
+        description: Replace the pointers even with an older release.
+        required: false
+        default: false
+        type: boolean
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release tag, such as v0.2.0.
+        required: true
+        type: string
+      force:
+        description: Replace the pointers even with an older release (withdrawing a bad one).
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two runs moving the same pointers at once could leave them in either order.
+  group: update-channels
+  cancel-in-progress: false
+
+env:
+  CHANNELS_TAG: updater-channels
+
+jobs:
+  point:
+    name: Move the pointers
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The scripts and the public key of the release being pointed at, not
+          # of whatever main is now.
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.8.2'
+
+      - name: The release is published, and says what it is
+        id: release
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::$TAG is not a release tag."; exit 1 ;;
+          esac
+          state=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft \
+                    --jq 'if .isDraft then "draft" else "published" end')
+          [ "$state" = published ] || { echo "::error::$TAG is not published."; exit 1; }
+          case "$TAG" in *-*) prerelease=true ;; *) prerelease=false ;; esac
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      # The public addresses, not the workflow's own copies: what matters is
+      # that what an installed copy will fetch is there and is right.
+      - name: Fetch what installed copies will fetch, and check it
+        env:
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p fetched
+          curl -fsSL --retry 5 --retry-delay 3 \
+            -o fetched/latest.json \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/latest.json"
+          node -e '
+            const m = JSON.parse(require("fs").readFileSync("fetched/latest.json", "utf8"));
+            for (const p of Object.values(m.platforms)) console.log(p.url);
+          ' | while read -r url; do
+            echo "  $url"
+            curl -fsSL --retry 5 --retry-delay 3 -o "fetched/$(basename "$url")" "$url"
+          done
+          node scripts/update-manifest.mjs verify fetched/latest.json "$VERSION" --artifacts fetched
+
+      - name: Decide which pointers move
+        id: decide
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          PRERELEASE: ${{ steps.release.outputs.prerelease }}
+          FORCE: ${{ inputs.force }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p existing out
+          # What the pointers say now. A channels release that does not exist
+          # yet, or a pointer that is not there, simply means nothing to beat.
+          gh release download "$CHANNELS_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'stable.json' --pattern 'alpha.json' --dir existing 2>/dev/null || true
+          args=()
+          [ "$FORCE" = 'true' ] && args+=(--force)
+          node scripts/update-manifest.mjs channels "$VERSION" \
+            --prerelease "$PRERELEASE" --manifest fetched/latest.json \
+            --existing existing --out out ${args[@]+"${args[@]}"} > out/moving.txt
+          if [ -s out/moving.txt ]; then
+            echo 'Moving:'; sed 's/^/  /' out/moving.txt
+          else
+            echo 'Nothing to move: every channel already points at this release or a newer one.'
+          fi
+          echo "any=$([ -s out/moving.txt ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      # One rolling release that holds only the pointers. Never latest, and a
+      # prerelease so that it can never be taken for the newest Scuttle.
+      - name: Make sure the channels release exists
+        if: steps.decide.outputs.any == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$CHANNELS_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$CHANNELS_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title 'Update channels' \
+              --notes 'Not a download. Installed copies of Scuttle read stable.json or alpha.json from here to learn whether a newer version exists. The releases people install from are the others.' \
+              --prerelease --latest=false
+          fi
+
+      - name: Move the pointers
+        if: steps.decide.outputs.any == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          files=()
+          while read -r name; do [ -n "$name" ] && files+=("out/$name"); done < out/moving.txt
+          gh release upload "$CHANNELS_TAG" --repo "$GITHUB_REPOSITORY" --clobber "${files[@]}"
+
+      # Read back through the address installed copies use. GitHub's edge can
+      # lag a moment, so it retries before deciding anything is wrong.
+      - name: Read them back
+        if: steps.decide.outputs.any == 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          while read -r name; do
+            [ -n "$name" ] || continue
+            url="https://github.com/$GITHUB_REPOSITORY/releases/download/$CHANNELS_TAG/$name"
+            ok=false
+            for _ in 1 2 3 4 5 6; do
+              got=$(curl -fsSL "$url" | node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0, "utf8")).version)' 2>/dev/null || true)
+              if [ "$got" = "$VERSION" ]; then ok=true; break; fi
+              sleep 10
+            done
+            "$ok" || { echo "::error::$url says '${got:-nothing}', expected $VERSION."; exit 1; }
+            echo "  $name -> $VERSION"
+          done < out/moving.txt

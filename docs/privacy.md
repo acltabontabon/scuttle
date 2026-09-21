@@ -5,9 +5,22 @@ does with that.
 
 ## The short version
 
-Nothing leaves the machine. Scuttle makes no network requests of any kind:
-no accounts, no cloud analysis, no telemetry, no crash reporting, no update
-check. The dependency tree contains no HTTP client.
+Nothing about you or your files leaves the machine. No accounts, no cloud
+analysis, no telemetry, no crash reporting.
+
+Scuttle makes **one kind of network request**: it asks GitHub whether a newer
+version exists. That request is a plain HTTPS `GET` for a small file at
+`github.com/acltabontabon/scuttle/releases/…`, made shortly after Scuttle starts
+and about once a day while it stays running. It carries no identifier and nothing
+about your files; like any web request it reveals your IP address to GitHub and
+the standard `User-Agent` of the update library. Nothing is downloaded until you
+choose to, and downloading fetches a release file from the same place. You can
+turn the checks off in Settings → About (*Automatically check for updates*);
+*Check for updates* then still works when you ask.
+
+This is the reason the dependency tree now contains an HTTP client: it is there
+for updates and for nothing else, and every update it fetches is verified
+against a signature before it is used.
 
 ## What Scuttle looks at
 

@@ -65,6 +65,10 @@ struct Inner {
     /// True from the moment an explicit quit begins, so the close handler
     /// stops hiding the window and lets it go.
     quitting: AtomicBool,
+    /// True while an update install holds the gate. Read by the exit handler,
+    /// which must not let a quit tear the application apart halfway through
+    /// replacing it.
+    installing: AtomicBool,
     /// The background scheduler, while one is running. Only the control block
     /// is held here — the thread keeps its own handle on the state, and
     /// storing a second one the other way would be a cycle.
@@ -116,10 +120,14 @@ pub enum Operation {
     /// Keeping or ignoring a finding: quick, but it changes what a selection
     /// was made from.
     Decide,
+    /// An update is being installed. Held from the moment installing is
+    /// committed until the process is replaced or the install fails, so that
+    /// nothing which changes files can start underneath it.
+    Update,
 }
 
 impl Operation {
-    fn doing(&self) -> &'static str {
+    pub(crate) fn doing(&self) -> &'static str {
         match self {
             Operation::Scan => "looking around",
             Operation::Move => "moving files into the Drawer",
@@ -129,6 +137,7 @@ impl Operation {
             Operation::Refresh => "reviewing findings again",
             Operation::Sweep => "tidying the Drawer",
             Operation::Decide => "updating the findings",
+            Operation::Update => "getting ready to update",
         }
     }
 }
@@ -151,6 +160,43 @@ impl Drop for OperationGuard {
         if gate.as_ref().is_some_and(|hold| hold.id == self.id) {
             *gate = None;
         }
+    }
+}
+
+/// The right to replace the running application, held from the moment an
+/// install is committed. A failed install calls [`InstallLease::abandon`],
+/// which gives the gate back and restarts what was stopped; a process that is
+/// about to be replaced never does, and takes the lease with it.
+pub struct InstallLease {
+    state: AppState,
+    guard: Option<OperationGuard>,
+}
+
+impl Drop for InstallLease {
+    fn drop(&mut self) {
+        // A lease that is dropped for any reason — an install that failed, a
+        // worker that unwound — must not leave the application believing it is
+        // in the middle of one. Only if it still holds the gate, though: once
+        // `release` has given the gate up, somebody else may already hold it
+        // and have set the flag for themselves.
+        if self.guard.is_some() {
+            self.state.inner.installing.store(false, Ordering::SeqCst);
+        }
+    }
+}
+
+impl InstallLease {
+    /// The install did not happen and the process is staying. Give the gate
+    /// back and restart the background work that was stopped for it.
+    pub fn abandon(mut self, app: &tauri::AppHandle) {
+        self.release();
+        self.state.sync_scheduler(app);
+    }
+
+    /// As [`InstallLease::abandon`], for callers with no window to restore.
+    pub fn release(&mut self) {
+        self.state.inner.installing.store(false, Ordering::SeqCst);
+        drop(self.guard.take());
     }
 }
 
@@ -184,6 +230,7 @@ impl AppState {
                 tray_alive: AtomicBool::new(false),
                 startup_done: AtomicBool::new(false),
                 quitting: AtomicBool::new(false),
+                installing: AtomicBool::new(false),
                 scheduler: Mutex::new(None),
                 launched_unix: super::now_unix(),
             }),
@@ -478,12 +525,22 @@ impl AppState {
     /// while already holding that lock. Going through the yielding path from
     /// there would deadlock on a lock the same thread owns.
     fn claim_gate(&self, operation: Operation) -> Result<OperationGuard> {
+        self.try_claim(operation).map_err(|holder| {
+            ScuttleError::Busy(format!(
+                "Scuttle is busy {}. Try again when that finishes.",
+                holder.doing()
+            ))
+        })
+    }
+
+    /// The claim itself, saying *who* is in the way rather than how to phrase
+    /// it. The one place the gate is taken, so every caller — a move, a
+    /// restore, an install — is serialised by the same mutex and none can slip
+    /// between another's check and its claim.
+    fn try_claim(&self, operation: Operation) -> std::result::Result<OperationGuard, Operation> {
         let mut gate = self.lock_gate();
         if let Some(hold) = gate.as_ref() {
-            return Err(ScuttleError::Busy(format!(
-                "Scuttle is busy {}. Try again when that finishes.",
-                hold.operation.doing()
-            )));
+            return Err(hold.operation);
         }
         let id = self.next_gate_id();
         *gate = Some(GateHold { id, operation });
@@ -491,6 +548,51 @@ impl AppState {
             state: self.clone(),
             id,
         })
+    }
+
+    /// Commit to installing an update, or be told what is in the way.
+    ///
+    /// Claiming the operation gate *is* the commitment. There is no separate
+    /// "is Scuttle idle?" question to ask first, because a question answered
+    /// before the claim can be out of date by the time the claim is made: the
+    /// answer and the claim are one step under one lock. Once this returns
+    /// `Ok`, every command that would change a file is refused as busy, and it
+    /// stays that way until the lease is dropped.
+    ///
+    /// Only a background check is ever asked to stand down for it, exactly as
+    /// for any other thing a person asks for. Anything else — a move, a
+    /// restore, a rummage the person is waiting on — is left to finish, and the
+    /// install is the one refused.
+    ///
+    /// On success the background scheduler is stopped and the database is
+    /// checkpointed, so what is on disk when the process is replaced is
+    /// complete. If the install then fails, [`InstallLease::abandon`] puts all
+    /// of it back.
+    pub fn begin_install(&self) -> std::result::Result<InstallLease, Operation> {
+        {
+            let mut running = self.lock_running();
+            if running.is_some() {
+                self.displace_background_scan(&mut running, Priority::User);
+            }
+        }
+        let guard = self.try_claim(Operation::Update)?;
+        self.inner.installing.store(true, Ordering::SeqCst);
+        self.stop_scheduler();
+        // Everything committed is already in the database; this folds the
+        // write-ahead log into it so the file alone is whole. A failure here
+        // is not a reason to refuse: the log is just as durable.
+        if let Err(error) = self.store().checkpoint() {
+            tracing::warn!("could not checkpoint before installing: {error}");
+        }
+        Ok(InstallLease {
+            state: self.clone(),
+            guard: Some(guard),
+        })
+    }
+
+    /// Whether an install has been committed and not yet abandoned.
+    pub fn installing(&self) -> bool {
+        self.inner.installing.load(Ordering::SeqCst)
     }
 
     /// What holds the gate, if anything.

@@ -3,14 +3,20 @@ name: Release
 # One tag, one release, in four steps that each refuse to go on if the one
 # before it did not hold:
 #
-#   validate  the tag, the version and the changelog agree
+#   validate  the tag, the version and the changelog agree, and the updater
+#             is configured
 #   checks    everything CI runs, on the tagged commit
-#   build     three installers, each inspected where it was built
-#   publish   a draft gathers the assets; it becomes a release only once
-#             every expected file is present
+#   build     three installers and their signed update packages, each
+#             inspected where it was built
+#   publish   a draft gathers the assets and the update manifest; it becomes a
+#             release only once every expected file is present and every
+#             signature has been checked against its file
+#   channels  only then are installed copies pointed at it (update-channels.yml)
 #
 # The release is written last and all at once, so a half-finished run can
 # never sit at the top of the releases page looking like the current version.
+# The channel pointers move after that, so nobody is offered an update whose
+# files are not yet public.
 #
 # Nothing here bumps a version or writes a commit. The tag is built exactly
 # as it was pushed; if something is wrong with it, the fix is a new tag.
@@ -44,6 +50,21 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '26.8.2'
+
+      # Stopping here costs nothing; stopping after three builds costs half an
+      # hour. The public key has to be a real one and the private key has to
+      # exist, or the build below cannot produce a release anyone can update
+      # from. Neither value is printed.
+      - name: The updater is configured
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEY" ]; then
+            echo '::error::TAURI_SIGNING_PRIVATE_KEY is not set as a repository secret. See docs/updates.md.'
+            exit 1
+          fi
+          node scripts/update-manifest.mjs check-config
 
       - name: Tag, version and changelog agree
         id: check
@@ -96,6 +117,10 @@ jobs:
     uses: ./.github/workflows/build-desktop.yml
     with:
       ref: ${{ github.ref_name }}
+      updater: true
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
   publish:
     name: Publish
@@ -126,10 +151,15 @@ jobs:
           set -euo pipefail
           cd downloads
           missing=0
+          # What people download, and what the in-app updater downloads. Each
+          # update artifact travels with its signature: a release with an
+          # artifact and no signature is a release the updater must not offer.
           for name in \
             "Scuttle-$VERSION-macos-apple-silicon.dmg" \
             "Scuttle-$VERSION-macos-intel.dmg" \
-            "Scuttle-$VERSION-windows-x64-setup.exe"
+            "Scuttle-$VERSION-windows-x64-setup.exe" \
+            "Scuttle-$VERSION-macos-apple-silicon.app.tar.gz" \
+            "Scuttle-$VERSION-macos-intel.app.tar.gz"
           do
             for file in "$name" "$name.sha256"; do
               if [ -s "$file" ]; then
@@ -139,6 +169,18 @@ jobs:
                 missing=1
               fi
             done
+          done
+          for file in \
+            "Scuttle-$VERSION-macos-apple-silicon.app.tar.gz.sig" \
+            "Scuttle-$VERSION-macos-intel.app.tar.gz.sig" \
+            "Scuttle-$VERSION-windows-x64-setup.exe.sig"
+          do
+            if [ -s "$file" ]; then
+              printf '  ok   %s\n' "$file"
+            else
+              printf '  MISSING %s\n' "$file"
+              missing=1
+            fi
           done
           [ "$missing" -eq 0 ] || {
             echo '::error::A requested download is missing. Nothing will be published.'
@@ -152,6 +194,21 @@ jobs:
           # Re-checked here against the files that are about to be uploaded,
           # so a corrupted artifact transfer cannot reach the release.
           sha256sum -c SHA256SUMS.txt
+
+      # The update manifest is built from the signatures that came out of the
+      # builds and then checked against the artifacts themselves: the whole
+      # matrix present, every address the one this release will have, every
+      # signature made with the key that is compiled into the application,
+      # bound to this version, and valid for the exact bytes about to be
+      # uploaded. Nothing is created on GitHub until this passes.
+      - name: Build and check the update manifest
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          node scripts/update-manifest.mjs build "$VERSION" downloads > downloads/latest.json
+          node scripts/update-manifest.mjs verify downloads/latest.json "$VERSION" --artifacts downloads
+          cat downloads/latest.json
 
       - name: Write the release notes
         env:
@@ -183,7 +240,7 @@ jobs:
           # on it. Only ever a draft's assets: validate refuses a tag that is
           # already published.
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
-            downloads/Scuttle-* downloads/SHA256SUMS.txt
+            downloads/Scuttle-* downloads/latest.json downloads/SHA256SUMS.txt
 
       - name: Publish
         env:
@@ -202,3 +259,16 @@ jobs:
               --draft=false --prerelease=false --latest
           fi
           echo "Released: $(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url --jq .url)"
+
+  # The release is public and its files are reachable. Only now is anybody
+  # pointed at it. If this fails the release stands and nobody is offered the
+  # update yet; rerun it from the Actions tab (Update channels), which needs no
+  # rebuild.
+  channels:
+    name: Point installed copies at it
+    needs: [validate, publish]
+    permissions:
+      contents: write
+    uses: ./.github/workflows/update-channels.yml
+    with:
+      tag: ${{ github.ref_name }}

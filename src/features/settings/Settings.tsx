@@ -25,6 +25,12 @@ import type {
   Settings as SettingsShape,
 } from '@/lib/types'
 import { Unavailable } from '@/components/Unavailable'
+import { AUTO_CHECK_HINT, AUTO_CHECK_LABEL, installedLine, LATER } from '@/features/updates/phrasing'
+import { ReleaseNotes } from '@/features/updates/ReleaseNotes'
+import { UpdateTrack } from '@/features/updates/UpdateChip'
+import { useUpdates } from '@/features/updates/UpdateProvider'
+import { describe as describeUpdate } from '@/features/updates/view'
+import updateStyles from '@/features/updates/Updates.module.css'
 import { DryRun } from './DryRun'
 import { Ignored } from './Ignored'
 
@@ -260,10 +266,15 @@ export function Settings() {
                     </div>
                     <p className={styles.rowHint}>
                       Everything stays on this machine. No account, no cloud, no
-                      telemetry.
+                      telemetry. The one thing Scuttle ever asks the network is
+                      whether a newer version exists.
                     </p>
                   </div>
                 </div>
+                <UpdateRows
+                  autoCheck={settings.auto_check_updates}
+                  onAutoCheck={(value) => void patch({ auto_check_updates: value })}
+                />
                 <div className={styles.row}>
                   <div className={styles.rowText}>
                     <div className={styles.rowLabel}>Drawer folder</div>
@@ -553,5 +564,83 @@ function Toggle({
         <span className={styles.knob} />
       </button>
     </div>
+  )
+}
+
+/**
+ * Updating, in Settings: the switch, the state in a line, and — only when
+ * there is one — the update itself, its notes and what to do about it.
+ *
+ * Everything decided here is decided by `describe`, the same function that
+ * drives the header chip, so the two can never disagree about what is going on.
+ */
+function UpdateRows({
+  autoCheck,
+  onAutoCheck,
+}: {
+  autoCheck: boolean
+  onAutoCheck: (value: boolean) => void
+}) {
+  const { snapshot, act, dismiss } = useUpdates()
+  const d = snapshot ? describeUpdate(snapshot) : null
+
+  return (
+    <>
+      <Toggle
+        label={AUTO_CHECK_LABEL}
+        hint={AUTO_CHECK_HINT}
+        checked={autoCheck}
+        onChange={onAutoCheck}
+      />
+      {snapshot && d && (
+        <>
+          <div className={styles.row}>
+            <div className={styles.rowText}>
+              <div className={styles.rowLabel} role="status">
+                {d.headline}
+              </div>
+              <p className={styles.rowHint}>
+                {[installedLine(snapshot.current_version, snapshot.channel) + ' is installed.', d.detail]
+                  .filter(Boolean)
+                  .join(' ')}
+              </p>
+            </div>
+            {d.action && (
+              <button
+                className={styles.link}
+                disabled={d.working}
+                onClick={() => void act(d.action!.kind)}
+              >
+                {d.action.label}
+              </button>
+            )}
+          </div>
+          {(d.info || d.track || d.notice || d.blocked || d.failure) && (
+            <div className={updateStyles.settingsExtra}>
+              {d.track && <UpdateTrack track={d.track} label={d.headline} />}
+              {d.info && d.stage !== 'installing' && <ReleaseNotes info={d.info} />}
+              {d.notice && <p className={updateStyles.notice}>{d.notice}</p>}
+              {d.blocked && (
+                <p className={updateStyles.blocked} role="status">
+                  {d.blocked}
+                </p>
+              )}
+              {d.failure && (
+                <p className={updateStyles.failure} role="alert">
+                  {d.failure}
+                </p>
+              )}
+              {(d.stage === 'available' || d.stage === 'ready') && !snapshot.dismissed && (
+                <div className={updateStyles.settingsActions}>
+                  <button className={styles.link} onClick={() => void dismiss()}>
+                    {LATER}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </>
   )
 }

@@ -13,13 +13,14 @@
 mod dry_run;
 mod moves;
 mod state;
+mod updates;
 
 pub use dry_run::{DryRunReport, DryRunRow};
 pub use moves::{
     FindingResult, FindingStatus, MovePhase, MoveReport, MoveRequest, MoveSink, MoveSnapshot,
     Refusal, Unit,
 };
-pub use state::{AppState, Operation, OperationGuard, Priority};
+pub use state::{AppState, InstallLease, Operation, OperationGuard, Priority};
 
 use std::path::PathBuf;
 
@@ -42,6 +43,8 @@ pub mod events {
     pub const MOVE: &str = "scuttle://move";
     /// Where background mode stands. Only sent when something changes it.
     pub const BACKGROUND: &str = "scuttle://background";
+    /// The whole state of updating, sent whole whenever any of it changes.
+    pub const UPDATE: &str = "scuttle://update";
 }
 
 // ---------------------------------------------------------------------------
@@ -829,6 +832,13 @@ pub fn save_settings(
     let previous = state.store().settings()?;
     state.store().save_settings(&settings)?;
 
+    // Turning update checks on checks now rather than at the next daily wake.
+    if !previous.auto_check_updates && settings.auto_check_updates {
+        if let Some(switch) = app.try_state::<std::sync::Arc<crate::updater::AutoCheckSwitch>>() {
+            switch.wake.notify_one();
+        }
+    }
+
     // The scheduler's existence follows the setting rather than recording
     // what was true at launch.
     if previous.background_mode != settings.background_mode {
@@ -1165,6 +1175,11 @@ pub fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static
         set_launch_at_login,
         request_notification_permission,
         clear_pending_review,
+        updates::update_status,
+        updates::check_for_update,
+        updates::download_update,
+        updates::install_update,
+        updates::dismiss_update,
     ]
 }
 

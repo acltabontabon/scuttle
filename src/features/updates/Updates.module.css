@@ -1,0 +1,372 @@
+/*
+ * Updating.
+ *
+ * Nothing here is new. The chip is the move indicator's chip, the gauge is the
+ * plate's 3px track, and the panel is paper, ink and the one honey accent the
+ * application already has. Motion is decoration — the words carry the meaning
+ * — and stops entirely under reduced motion.
+ */
+
+/* ---- the header chip ------------------------------------------------------- */
+.indicator {
+  position: relative;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 280px;
+  font-size: var(--type-small);
+  color: var(--ink-soft);
+  letter-spacing: 0.01em;
+  padding: 3px 0;
+  border-bottom: var(--hair) solid transparent;
+  transition:
+    color var(--quick) var(--ease),
+    border-color var(--quick) var(--ease);
+}
+
+.chip:hover {
+  color: var(--ink);
+  border-bottom-color: var(--honey);
+}
+
+.chip[data-tone='warn'] {
+  color: var(--clay-ink);
+}
+
+.chip[data-tone='warn']:hover {
+  border-bottom-color: var(--clay);
+}
+
+.chipText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ring {
+  flex: none;
+}
+
+.ringBed {
+  fill: none;
+  stroke: var(--rule);
+  stroke-width: 2;
+}
+
+.ringArc {
+  fill: none;
+  stroke: var(--honey);
+  stroke-width: 2;
+  stroke-linecap: round;
+  transition: stroke-dasharray var(--normal) var(--ease);
+}
+
+.chip[data-tone='warn'] .ringDot {
+  fill: var(--clay);
+}
+
+.ring[data-mode='indeterminate'] .ringArc {
+  transform-origin: 8px 8px;
+  animation: spin 1.15s linear infinite;
+}
+
+.ringDot {
+  fill: var(--honey);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(270deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ring[data-mode='indeterminate'] .ringArc {
+    animation: none;
+  }
+  .ringArc {
+    transition: none;
+  }
+}
+:global([data-motion='still']) .ring[data-mode='indeterminate'] .ringArc {
+  animation: none;
+}
+:global([data-motion='still']) .ringArc {
+  transition: none;
+}
+
+/* ---- the panel ------------------------------------------------------------- */
+.panel {
+  position: fixed;
+  top: 54px;
+  right: var(--step);
+  z-index: 35;
+  width: min(400px, calc(100vw - 2 * var(--step)));
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  padding: var(--close) var(--step) var(--step);
+  background: var(--paper-raised);
+  color: var(--ink);
+  border: var(--hair) solid var(--rule);
+  border-radius: var(--round-soft);
+  box-shadow: var(--lift-held);
+  outline: none;
+  animation: panelIn var(--normal) var(--ease);
+}
+
+@keyframes panelIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    animation: none;
+  }
+}
+:global([data-motion='still']) .panel {
+  animation: none;
+}
+
+.headline {
+  font-family: var(--serif);
+  font-size: var(--type-read);
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+
+.sub {
+  margin-top: var(--tight);
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+}
+
+.detail {
+  margin-top: var(--snug);
+  font-size: var(--type-small);
+  color: var(--ink-soft);
+  text-wrap: pretty;
+}
+
+.notice {
+  margin-top: var(--close);
+  font-size: var(--type-small);
+  color: var(--ink-soft);
+  text-wrap: pretty;
+}
+
+.blocked {
+  margin-top: var(--close);
+  padding-left: var(--close);
+  border-left: 2px solid var(--honey);
+  font-size: var(--type-small);
+  color: var(--ink);
+  text-wrap: pretty;
+}
+
+.failure {
+  margin-top: var(--close);
+  padding-left: var(--close);
+  border-left: 2px solid var(--clay);
+  font-size: var(--type-small);
+  color: var(--clay-ink);
+  text-wrap: pretty;
+}
+
+.actions {
+  display: flex;
+  align-items: baseline;
+  gap: var(--step);
+  margin-top: var(--step);
+}
+
+.primary {
+  font-family: var(--serif);
+  font-size: var(--type-body);
+  color: var(--paper);
+  background: var(--ink);
+  padding: 6px var(--close);
+  border-radius: var(--round-soft);
+  transition:
+    transform var(--quick) var(--ease),
+    opacity var(--quick) var(--ease);
+}
+
+.primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.later {
+  font-family: var(--serif);
+  font-size: var(--type-body);
+  color: var(--ink-soft);
+  padding: 2px 0;
+  border-bottom: var(--hair) solid var(--ink-ghost);
+  transition:
+    color var(--quick) var(--ease),
+    border-color var(--quick) var(--ease);
+}
+
+.later:hover {
+  color: var(--ink);
+  border-bottom-color: var(--honey);
+}
+
+/* ---- release notes --------------------------------------------------------- */
+.notes {
+  margin-top: var(--close);
+  padding: var(--snug) var(--close);
+  max-height: 180px;
+  overflow-y: auto;
+  background: var(--paper-deep);
+  border-radius: var(--round);
+  font-size: var(--type-small);
+  line-height: 1.5;
+  outline: none;
+}
+
+.notes:focus-visible {
+  outline: 2px solid var(--honey);
+  outline-offset: 2px;
+}
+
+.notesDate {
+  color: var(--ink-faint);
+  font-size: var(--type-whisper);
+  margin-bottom: var(--tight);
+}
+
+.notesHeading {
+  margin-top: var(--snug);
+  font-family: var(--serif);
+  font-size: var(--type-small);
+  font-weight: normal;
+  color: var(--ink-soft);
+}
+
+.notesHeading:first-child {
+  margin-top: 0;
+}
+
+.notesItem {
+  position: relative;
+  padding-left: var(--close);
+  color: var(--ink);
+  text-wrap: pretty;
+}
+
+.notesItem::before {
+  content: '·';
+  position: absolute;
+  left: 2px;
+  color: var(--ink-faint);
+}
+
+.notesText {
+  color: var(--ink-soft);
+  text-wrap: pretty;
+}
+
+.notesEmpty {
+  margin-top: var(--snug);
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+}
+
+/* ---- the track ------------------------------------------------------------- */
+.track {
+  position: relative;
+  height: 3px;
+  margin: var(--close) 0 var(--snug);
+  background: var(--rule);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.trackFill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform-origin: left center;
+  background: var(--honey);
+  /* Ease, not the overshooting settle curve: a progress line must never seem
+     to go past where it is. */
+  transition: transform var(--normal) var(--ease);
+}
+
+/* Work of unknown size: a short bar that travels, rather than a number that
+   would have to be made up. */
+.track[data-mode='indeterminate'] .trackFill {
+  width: 34%;
+  transform: none;
+  animation: travel 1.7s var(--ease) infinite;
+}
+
+@keyframes travel {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track[data-mode='indeterminate'] .trackFill {
+    width: 100%;
+    opacity: 0.35;
+    animation: none;
+  }
+  .trackFill {
+    transition: none;
+  }
+}
+:global([data-motion='still']) .track[data-mode='indeterminate'] .trackFill {
+  width: 100%;
+  opacity: 0.35;
+  animation: none;
+}
+:global([data-motion='still']) .trackFill {
+  transition: none;
+}
+
+/* ---- in Settings ----------------------------------------------------------- */
+.settingsExtra {
+  margin: calc(-1 * var(--snug)) 0 var(--close);
+  max-width: 34em;
+}
+
+.settingsExtra .notice,
+.settingsExtra .blocked,
+.settingsExtra .failure {
+  margin-top: var(--snug);
+}
+
+.settingsExtra .track {
+  margin-top: var(--snug);
+}
+
+.settingsActions {
+  display: flex;
+  align-items: baseline;
+  gap: var(--step);
+  margin-top: var(--snug);
+}
