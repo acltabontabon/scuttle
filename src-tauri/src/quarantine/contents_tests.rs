@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use super::contents::Reconciled;
 use super::fsx;
+use super::fsx::Source as _;
 use super::transfer::testing::{eacces, exdev, in_use, Script};
 use super::transfer::{Ctl, FailureKind, Faults, Step};
 use super::*;
@@ -329,8 +330,44 @@ fn a_reviewed_set_without_creation_times_still_moves_its_files() {
         .unwrap();
 
     let outcome = w.run(false).unwrap();
-    assert_eq!(outcome.tally.moved, 2);
     assert!(outcome.issues.is_empty(), "{:?}", outcome.issues);
+    assert_eq!(outcome.tally.moved, 2);
+}
+
+/// TEMPORARY — prints what Windows actually sees, so the contents-move
+/// failures can be diagnosed from a CI log rather than guessed at.
+#[test]
+fn diagnose_what_the_move_sees() {
+    let w = world(&[("a.bin", "aaaa")]);
+    let path = w.root.join("a.bin");
+
+    let recorded = fsx::identity_of(&path).unwrap();
+    println!("RECORDED  {recorded:?}");
+
+    // Exactly what the move loop re-reads, through the pinned folder.
+    let pin = fsx::PinnedDir::open(&w.root).unwrap();
+    let observed = pin.file("a.bin").identity().unwrap();
+    println!("OBSERVED  {observed:?}");
+    println!("SAME_STATE {}", observed.is_same_state(&recorded));
+
+    // The real run, on this untouched world.
+    match &w.run(false) {
+        Ok(o) => println!("OUTCOME moved={} issues={:?}", o.tally.moved, o.issues),
+        Err(e) => println!("OUTCOME err={e:?}"),
+    }
+
+    // A rename through a checked handle, on a world of its own so the run
+    // above is not looking at a file this already moved.
+    let w2 = world(&[("a.bin", "aaaa")]);
+    let recorded2 = fsx::identity_of(&w2.root.join("a.bin")).unwrap();
+    let pin2 = fsx::PinnedDir::open(&w2.root).unwrap();
+    let dest = w2.home.join("moved-a.bin");
+    println!(
+        "RENAME_VERIFIED {:?}",
+        pin2.file("a.bin").rename_verified(&dest, &recorded2)
+    );
+    println!("DEST_EXISTS {}", dest.exists());
+    // Never fails: this test exists to print, not to judge.
 }
 
 #[test]
