@@ -936,6 +936,34 @@ pub fn dry_run(state: State<'_, AppState>, request: RummageRequest) -> Result<Dr
     state.dry_run(request)
 }
 
+/// Where things stand, for the burrow. Reads only.
+#[tauri::command]
+pub fn burrow_status(state: State<'_, AppState>) -> Result<crate::burrow::BurrowStatus> {
+    crate::burrow::status(&state)
+}
+
+/// Something chosen in the burrow. Each one puts the burrow away and hands
+/// over to the main window; none of them moves a file.
+#[tauri::command]
+pub fn burrow_act(app: tauri::AppHandle, action: String) -> Result<()> {
+    crate::burrow::hide(&app);
+    match action.as_str() {
+        "open" => crate::window::reveal(&app),
+        "drawer" | "rummage" | "settings" => {
+            crate::window::reveal(&app);
+            crate::window::ask_frontend_to(&app, &action);
+        }
+        "quit" => crate::window::quit(&app),
+        "close" => {}
+        other => {
+            return Err(ScuttleError::Refused(format!(
+                "The burrow does not know how to {other}."
+            )))
+        }
+    }
+    Ok(())
+}
+
 /// A one-line description of the machine, for the about panel and bug reports.
 #[tauri::command]
 pub fn about(state: State<'_, AppState>) -> serde_json::Value {
@@ -1229,6 +1257,8 @@ pub fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static
         history,
         dry_run,
         about,
+        burrow_status,
+        burrow_act,
         format_bytes,
         background_status,
         pause_background,

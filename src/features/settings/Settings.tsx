@@ -176,7 +176,7 @@ export function Settings() {
             <section className={styles.group}>
               <h3 className={styles.groupTitle}>The drawer</h3>
               <Choice
-                label="Keep items in the drawer for"
+                label="Let rebuildable things go after"
                 /*
                  * The scope here is the part worth getting right. `expires_unix`
                  * is stamped on each record when it is quarantined, and the
@@ -185,8 +185,9 @@ export function Settings() {
                  * the drawer, in either direction.
                  */
                 hint={
-                  'Applies to items quarantined from now on. Anything already in ' +
-                  'the drawer keeps the date it was given. ' +
+                  'Only caches, build output and installers that can be downloaded again ever ' +
+                  'expire. Your own files, application data and anything you moved past a ' +
+                  'caution stay until you remove them. Applies to items moved from now on. ' +
                   expiryHint(settings.background_mode)
                 }
                 options={[7, 14, 30].map((days) => ({ value: days, label: `${days} days` }))}
@@ -222,6 +223,13 @@ export function Settings() {
                 hint="Stops Scuttle's animations — the mascot, the settling piles, everything decorative. Your system's reduced-motion setting is always respected, whether this is on or not."
                 checked={settings.reduced_motion === true}
                 onChange={(value) => void patch({ reduced_motion: value ? true : null })}
+              />
+
+              <Toggle
+                label="Quiet Scuttle"
+                hint="Plain wording and no little reactions, in the window and the tray. Warnings and recovery messages are always plain either way."
+                checked={settings.personality === 'quiet'}
+                onChange={(value) => void patch({ personality: value ? 'quiet' : 'full' })}
               />
             </section>
 

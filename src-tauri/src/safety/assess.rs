@@ -262,7 +262,8 @@ pub fn assess(candidate: &CleanupCandidate, now_unix: i64) -> Assessment {
     if unsure && impact != Impact::Regenerable {
         cautions.push(Caution {
             kind: CautionKind::Uncertain,
-            detail: "The evidence is thin or points both ways.".to_string(),
+            detail: "Scuttle is unsure what this is: the evidence is thin or points both ways."
+                .to_string(),
         });
     }
     cautions.sort_by_key(|c| c.kind);

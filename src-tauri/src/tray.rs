@@ -1,8 +1,9 @@
 //! The menu bar icon on macOS, the notification area icon on Windows.
 //!
-//! Small on purpose. It offers the two things someone would open Scuttle to
-//! do, says where it has got to, and gets out of the way. It never animates,
-//! never wears a badge and never counts problems at anybody.
+//! Small on purpose. A left click opens Scuttle's burrow (see
+//! [`crate::burrow`]); a right click opens the plain native menu, which is the
+//! dependable fallback and offers the same ways in. The icon itself never
+//! animates, never wears a badge and never counts problems at anybody.
 //!
 //! If any of this fails to build, the application says so and carries on with
 //! its ordinary close-quits-the-app behaviour. The one outcome that must never
@@ -20,6 +21,7 @@ pub const TRAY_ID: &str = "scuttle";
 mod ids {
     pub const OPEN: &str = "open";
     pub const RUMMAGE: &str = "rummage";
+    pub const DRAWER: &str = "drawer";
     pub const STATUS: &str = "status";
     pub const PAUSE: &str = "pause";
     pub const SETTINGS: &str = "settings";
@@ -52,10 +54,9 @@ fn build<R: Runtime>(app: &AppHandle<R>) -> std::result::Result<(), Box<dyn std:
         .icon_as_template(cfg!(target_os = "macos"))
         .tooltip("Scuttle")
         .menu(&menu)
-        // The menu is the whole interface. Showing it on a left click as well
-        // would make the icon behave differently from every other one beside
-        // it on macOS.
-        .show_menu_on_left_click(true)
+        // Left opens the burrow; the menu stays one right click away, the
+        // way tray icons that open a popover behave on both systems.
+        .show_menu_on_left_click(false)
         .on_menu_event(on_menu)
         .on_tray_icon_event(on_icon)
         .build(app)?;
@@ -111,6 +112,7 @@ fn windows_taskbar_is_light() -> bool {
 fn menu<R: Runtime>(app: &AppHandle<R>, status: &str, offer_pause: bool) -> tauri::Result<Menu<R>> {
     let open = MenuItem::with_id(app, ids::OPEN, "Open Scuttle", true, None::<&str>)?;
     let rummage = MenuItem::with_id(app, ids::RUMMAGE, "Rummage now", true, None::<&str>)?;
+    let drawer = MenuItem::with_id(app, ids::DRAWER, "Open the Drawer", true, None::<&str>)?;
     // Not clickable: it is a sentence, not a control.
     let status_item = MenuItem::with_id(app, ids::STATUS, status, false, None::<&str>)?;
     let settings = MenuItem::with_id(app, ids::SETTINGS, "Settings", true, None::<&str>)?;
@@ -119,6 +121,7 @@ fn menu<R: Runtime>(app: &AppHandle<R>, status: &str, offer_pause: bool) -> taur
     let menu = Menu::new(app)?;
     menu.append(&open)?;
     menu.append(&rummage)?;
+    menu.append(&drawer)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&status_item)?;
 
@@ -220,6 +223,10 @@ fn on_menu<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
             crate::window::reveal(app);
             crate::window::ask_frontend_to(app, "settings");
         }
+        ids::DRAWER => {
+            crate::window::reveal(app);
+            crate::window::ask_frontend_to(app, "drawer");
+        }
         ids::PAUSE => {
             toggle_pause(app);
             refresh(app);
@@ -251,16 +258,15 @@ fn toggle_pause<R: Runtime>(app: &AppHandle<R>) {
 }
 
 fn on_icon<R: Runtime>(tray: &tauri::tray::TrayIcon<R>, event: TrayIconEvent) {
-    // On Windows the icon itself is the obvious thing to click; on macOS the
-    // menu already opens on a left click and this never fires for one.
+    // A left click opens (or puts away) the burrow beside the icon. Nothing
+    // else happens on a click: opening it starts no scan and moves nothing.
     if let TrayIconEvent::Click {
         button: MouseButton::Left,
         button_state: MouseButtonState::Up,
+        rect,
         ..
     } = event
     {
-        if cfg!(target_os = "windows") {
-            crate::window::reveal(tray.app_handle());
-        }
+        crate::burrow::toggle(tray.app_handle(), rect);
     }
 }

@@ -19,6 +19,14 @@ export default defineConfig({
     target: process.env.TAURI_ENV_PLATFORM === 'windows' ? 'chrome110' : 'safari15',
     minify: !process.env.TAURI_ENV_DEBUG ? 'esbuild' : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+    // Two pages: the main window, and the tray's burrow. The design workbench
+    // (`preview.html`) is left out on purpose; it never ships.
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        burrow: fileURLToPath(new URL('./burrow.html', import.meta.url)),
+      },
+    },
   },
   test: {
     globals: true,

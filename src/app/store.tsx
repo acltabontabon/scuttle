@@ -18,8 +18,10 @@ import {
   type BackgroundStatus,
   type Candidate,
   type Category,
+  type CautionKind,
   type Findings,
   type KeepChoice,
+  type MovePlan,
   type MoveRequest,
   type MoveSnapshot,
   type Phase,
@@ -158,8 +160,20 @@ export interface Store {
   setMoveDetailsOpen: (open: boolean) => void
 
   /**
-   * All of these start a move and return once it has *started*. What happens
-   * next is reported through `move`.
+   * The move being reviewed, before anything moves. Every way of starting a
+   * move opens this first: the exact paths, file or folder, why, what needs
+   * acknowledging and what will be refused. `plan` is null while it loads.
+   */
+  review: { request: MoveRequest; plan: MovePlan | null } | null
+  /** Go ahead with the reviewed move, with these cautions accepted. */
+  confirmReview: (acknowledged: CautionKind[]) => Promise<void>
+  closeReview: () => void
+  /** Scuttle is finishing a file operation before it quits. */
+  quitting: boolean
+
+  /**
+   * All of these open a review of the move; nothing moves until the review
+   * is confirmed. What happens after that is reported through `move`.
    */
   quarantine: (candidate: Candidate, memberIndex?: number) => Promise<void>
   quarantineGroup: (candidate: Candidate, keep: KeepChoice) => Promise<void>
@@ -217,6 +231,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [moveSnapshot, setMoveSnapshot] = useState<MoveSnapshot | null>(null)
   const [movePending, setMovePending] = useState(false)
   const [moveDetailsOpen, setMoveDetailsOpen] = useState(false)
+  const [review, setReview] = useState<Store['review']>(null)
+  const [quitting, setQuitting] = useState(false)
+  // The cautions accepted for the last move, so a retry of what did not move
+  // asks for nothing it has not already been told.
+  const lastAcknowledged = useRef<CautionKind[]>([])
 
   const noteId = useRef(0)
   const noteTimer = useRef<number | null>(null)
@@ -552,6 +571,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     watchIntents((intent) => {
       if (stopped) return
       if (intent === 'settings') go({ name: 'settings' })
+      if (intent === 'drawer') go({ name: 'drawer' })
+      if (intent === 'quitting') setQuitting(true)
       if (intent === 'rummage') {
         go({ name: 'home' })
         void rummage()
@@ -662,7 +683,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const ids = describeReport(report).retryIds
     if (ids.length === 0) return
     setMoveDetailsOpen(false)
-    await startMove({ kind: 'selection', ids, retry: true })
+    await startMove({
+      kind: 'selection',
+      ids,
+      retry: true,
+      acknowledged: lastAcknowledged.current,
+    })
   }, [startMove])
 
   const reviewAgain = useCallback(
@@ -679,41 +705,80 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [refreshFindings, say],
   )
 
+  /**
+   * Open the review of a move. The core works out what it would do — reading
+   * only — and the sheet shows it; nothing moves until `confirmReview`.
+   */
+  const reviewMove = useCallback(
+    async (request: MoveRequest) => {
+      if (moveRef.current !== null && !isTerminal(moveRef.current.phase)) {
+        say('Scuttle is still moving something. One thing at a time.', { tone: 'warn' })
+        return
+      }
+      setReview({ request, plan: null })
+      try {
+        const plan = await api.previewMove(request)
+        setReview((current) => (current?.request === request ? { request, plan } : current))
+      } catch (error) {
+        setReview(null)
+        say(readError(error), { tone: 'warn' })
+      }
+    },
+    [say],
+  )
+
+  const confirmReview = useCallback<Store['confirmReview']>(
+    async (acknowledged) => {
+      const current = review
+      if (!current?.plan) return
+      setReview(null)
+      lastAcknowledged.current = acknowledged
+      const request = current.request
+      // A sweep carries no acknowledgements: it only ever takes what needs none.
+      const withAck: MoveRequest =
+        request.kind === 'confident' ? request : { ...request, acknowledged }
+      await startMove(withAck)
+    },
+    [review, startMove],
+  )
+
+  const closeReview = useCallback(() => setReview(null), [])
+
   const quarantine = useCallback<Store['quarantine']>(
     async (candidate, memberIndex) => {
-      await startMove(
+      await reviewMove(
         memberIndex === undefined
-          ? { kind: 'selection', ids: [candidate.id] }
+          ? { kind: 'single', id: candidate.id }
           : { kind: 'member', id: candidate.id, member_index: memberIndex },
       )
     },
-    [startMove],
+    [reviewMove],
   )
 
   const quarantineGroup = useCallback<Store['quarantineGroup']>(
     async (candidate, keepWhich) => {
-      await startMove({ kind: 'group', id: candidate.id, keep: keepWhich })
+      await reviewMove({ kind: 'group', id: candidate.id, keep: keepWhich })
     },
-    [startMove],
+    [reviewMove],
   )
 
   const quarantineConfident = useCallback<Store['quarantineConfident']>(
     async (category) => {
-      await startMove({ kind: 'confident', category })
+      await reviewMove({ kind: 'confident', category })
     },
-    [startMove],
+    [reviewMove],
   )
 
   const quarantineAllConfident = useCallback<Store['quarantineAllConfident']>(async () => {
-    await startMove({ kind: 'confident' })
-  }, [startMove])
+    await reviewMove({ kind: 'confident' })
+  }, [reviewMove])
 
   const quarantineMany = useCallback<Store['quarantineMany']>(
     async (ids) => {
       if (ids.length === 0) return
-      await startMove({ kind: 'selection', ids })
+      await reviewMove({ kind: 'selection', ids })
     },
-    [startMove],
+    [reviewMove],
   )
 
   const emptyDrawer = useCallback<Store['emptyDrawer']>(async () => {
@@ -832,6 +897,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       reviewAgain,
       moveDetailsOpen,
       setMoveDetailsOpen,
+      review,
+      confirmReview,
+      closeReview,
+      quitting,
       quarantine,
       quarantineGroup,
       quarantineConfident,
@@ -849,7 +918,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshDrawer, space, refreshSpace, settings, updateSettings, background,
       refreshBackground, pauseBackground, setLaunchAtLogin, note, say,
       dismissNote, move, moving, cancelMove, dismissMove, retryMove, reviewAgain,
-      moveDetailsOpen, quarantine, quarantineGroup, quarantineConfident,
+      moveDetailsOpen, review, confirmReview, closeReview, quitting, quarantine, quarantineGroup, quarantineConfident,
       quarantineAllConfident, quarantineMany, emptyDrawer, keep, ignore, restore,
       removePermanently, reveal,
     ],

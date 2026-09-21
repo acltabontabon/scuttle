@@ -4,6 +4,7 @@
 //! safety, quarantine and persistence. The webview asks; this crate decides.
 
 pub mod background;
+pub mod burrow;
 pub mod cli;
 pub mod commands;
 pub mod detectors;
@@ -74,6 +75,14 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let app = window.app_handle();
+                // The burrow is only ever put away, never closed: it is built
+                // once and reused, and closing it must not be read as closing
+                // Scuttle.
+                if window.label() == burrow::BURROW {
+                    api.prevent_close();
+                    burrow::hide(app);
+                    return;
+                }
                 if window::should_conceal(app) {
                     // Hidden, not closed: the same window comes back, and
                     // because it still exists the application is never asked

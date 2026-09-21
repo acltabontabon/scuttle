@@ -1,8 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Scuttle's window talks to the Rust core over IPC and nothing else. The notification permission is here so the window can ask the system for it at the moment the user turns notifications on; sending them is done from Rust.",
-  "windows": ["main"],
+  "description": "Scuttle's windows \u2014 the main one and the tray burrow \u2014 talk to the Rust core over IPC and nothing else. The notification permission is here so the window can ask the system for it at the moment the user turns notifications on; sending them is done from Rust.",
+  "windows": [
+    "main",
+    "burrow"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",

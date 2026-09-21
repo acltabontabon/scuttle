@@ -62,6 +62,7 @@
 
 /* A window-shaped frame, so proportions are judged the way they will ship. */
 .window {
+  position: relative;
   display: grid;
   place-items: center;
   padding: 24px;

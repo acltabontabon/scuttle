@@ -93,9 +93,15 @@ export function DrawerItem({ item, index, onRestore, onDelete }: DrawerItemProps
         >
           from {showPath ? item.original_path : shortPath(item.original_path)}
         </button>
-        <span className={styles.cardExpiry} data-state={expiryState(left)}>
-          {expiryLabel(left)}
-        </span>
+        {item.keep === false ? (
+          <span className={styles.cardExpiry} data-state={expiryState(left)}>
+            {expiryLabel(left)}
+          </span>
+        ) : (
+          <span className={styles.cardExpiry} data-state="fine">
+            kept until you remove it
+          </span>
+        )}
       </span>
 
       <span className={styles.cardActions}>

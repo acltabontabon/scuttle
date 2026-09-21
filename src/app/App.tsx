@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react'
 
 import { Detail } from '@/features/detail/Detail'
 import { MoveIndicator } from '@/features/move/MoveIndicator'
+import { Review } from '@/features/move/Review'
 import { Findings } from '@/features/findings/Findings'
 import { PileView } from '@/features/findings/PileView'
 import { Drawer } from '@/features/quarantine/Drawer'
@@ -176,6 +177,16 @@ export function App() {
       <main className={styles.stage}>{stage}</main>
 
       <Detail />
+      <Review />
+
+      {store.quitting && (
+        <div className={styles.note} data-tone="plain" role="status">
+          <span className={styles.noteText}>
+            Finishing safely before quitting. Scuttle stops at the next file, settles the Drawer,
+            and then closes. Anything that already moved can be put back next time.
+          </span>
+        </div>
+      )}
 
       {note && (
         <div className={styles.note} data-tone={note.tone} role="status" key={note.id}>

@@ -55,6 +55,38 @@ export interface StateFingerprint {
   child_count: number | null
 }
 
+/** What moving something could disrupt. Separate from how sure Scuttle is. */
+export type Impact =
+  | 'regenerable'
+  | 'redownloadable'
+  | 'personal_file'
+  | 'application_data'
+  | 'application_install'
+
+/** Which requests may move it. Decided by the core, re-checked at the gate. */
+export type Eligibility = 'suggested' | 'by_choice' | 'explicit_only' | 'blocked'
+
+export type CautionKind =
+  | 'recently_changed'
+  | 'may_be_your_work'
+  | 'in_use'
+  | 'application_data'
+  | 'breaks_application'
+  | 'uncertain'
+
+export interface Caution {
+  kind: CautionKind
+  detail: string
+}
+
+/** Confidence, impact and eligibility, kept apart. */
+export interface Assessment {
+  impact: Impact
+  eligibility: Eligibility
+  cautions: Caution[]
+  blocked: string | null
+}
+
 export interface Candidate {
   id: string
   detector: string
@@ -81,6 +113,7 @@ export interface Candidate {
   created_unix: number | null
   group: GroupMember[]
   fingerprint: StateFingerprint
+  assessment: Assessment
 }
 
 export interface Pile {
@@ -173,6 +206,12 @@ export interface QuarantineRecord {
   item_count?: number
   /** An interrupted move left something Scuttle would not settle on its own. */
   attention?: boolean
+  /**
+   * Stays until a person removes it: never expires on its own. True for
+   * anything that cannot simply be rebuilt or downloaded again, and for
+   * anything moved past a caution.
+   */
+  keep?: boolean
 }
 
 export interface QuarantineView {
@@ -331,11 +370,58 @@ export interface MoveSnapshot {
   report: MoveReport | null
 }
 
+/**
+ * What to move. `acknowledged` lists the cautions a person accepted for the
+ * whole request, once each; the core refuses anything with a caution not in
+ * it. A `single` request is one finding chosen on its own — the only kind that
+ * can move an application folder.
+ */
 export type MoveRequest =
-  | { kind: 'selection'; ids: string[]; retry?: boolean }
+  | { kind: 'selection'; ids: string[]; retry?: boolean; acknowledged?: CautionKind[] }
+  | { kind: 'single'; id: string; acknowledged?: CautionKind[] }
   | { kind: 'confident'; category?: Category | null }
-  | { kind: 'group'; id: string; keep: KeepChoice }
-  | { kind: 'member'; id: string; member_index: number }
+  | { kind: 'group'; id: string; keep: KeepChoice; acknowledged?: CautionKind[] }
+  | { kind: 'member'; id: string; member_index: number; acknowledged?: CautionKind[] }
+
+export type PlannedStatus = 'ready' | 'refused' | 'included'
+export type PlannedShape = 'file' | 'folder' | 'files_inside'
+
+/** One finding, as a reviewed move would treat it. */
+export interface PlannedItem {
+  finding_id: string
+  display_name: string
+  /** The exact path that moves. Never a parent or a neighbour. */
+  path: string
+  shape: PlannedShape
+  size: number
+  /** Files and folders a folder takes with it; null for a file. */
+  contains: number | null
+  confidence: Confidence
+  reasons: { summary: string; negative: boolean }[]
+  remark: string | null
+  impact: Impact
+  eligibility: Eligibility
+  cautions: Caution[]
+  status: PlannedStatus
+  note: string | null
+  kept_until_removed: boolean
+}
+
+export interface CautionGroup {
+  kind: CautionKind
+  headline: string
+  count: number
+}
+
+/** What a move would do, before anything moves. */
+export interface MovePlan {
+  items: PlannedItem[]
+  cautions: CautionGroup[]
+  ready: number
+  ready_bytes: number
+  drawer: string
+  retention_days: number
+}
 
 export interface SpaceArea {
   label: string
@@ -401,6 +487,12 @@ export interface Settings {
    * Scuttle exists. Only ever a look: nothing downloads until the person says.
    */
   auto_check_updates: boolean
+
+  /**
+   * How chatty Scuttle is. `quiet` keeps every message plain and skips the
+   * little reactions; nothing about safety or recovery changes.
+   */
+  personality: 'full' | 'quiet'
 }
 
 // ---------------------------------------------------------------------------
@@ -531,6 +623,7 @@ export interface ScuttleError {
     | 'not_found'
     | 'stale'
     | 'refused'
+    | 'needs_acknowledgement'
     | 'scan_busy'
     | 'busy'
     | 'transfer'

@@ -67,7 +67,8 @@ export function Drawer() {
               is app launch, so nothing is deleted at a particular hour.
             */}
             <p className={styles.line}>
-              These files still take up disk space. Put them back before they expire.
+              These files still take up disk space until you remove them. Put anything back
+              whenever you like.
             </p>
             {/*
               Retention has not changed: an item still expires after exactly
@@ -77,8 +78,9 @@ export function Drawer() {
               "after {retention} days" would quietly become "eventually".
             */}
             <p className={styles.policy}>
-              {`Items expire after ${retention} days. `}
-              {expiryHint(background?.mode ?? false)}
+              {`Only things that can be rebuilt or downloaded again expire, after ${retention} days. `}
+              {drawer.items.some((i) => i.keep === false) && expiryHint(background?.mode ?? false)}
+              {' Your own files, application data, and anything moved past a caution stay until you remove them.'}
             </p>
           </>
         )}

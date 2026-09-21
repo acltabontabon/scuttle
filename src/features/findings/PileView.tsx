@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '@/app/store'
 import { MoveControls, MoveLine, MoveTrack } from '@/features/move/MoveStatus'
 import { bytes, bytesParts } from '@/lib/format'
-import type { Candidate, Category } from '@/lib/types'
+import { CAUTION_LABEL, IMPACT_WORDS } from '@/features/move/reviewing'
+import type { Candidate, Category, Eligibility, Risk } from '@/lib/types'
 import { CATEGORY_BLURB, RISK_WORD } from '@/visuals/CategoryMeta'
 import { Glyph } from '@/visuals/Glyph'
 import { Scuttle } from '@/visuals/Scuttle'
@@ -48,7 +49,7 @@ export function PileView({
     preselect === 'suggested' && pile
       ? new Set(
           pile.items
-            .filter((item) => item.recommended_action === 'quarantine')
+            .filter((item) => item.assessment?.eligibility === 'suggested')
             .map((item) => item.id),
         )
       : new Set(),
@@ -86,7 +87,9 @@ export function PileView({
    * ones the safety gate will refuse anyway — offering the tick would be
    * offering something that cannot happen.
    */
-  const selectable = useMemo(() => shown.filter((item) => item.risk !== 'protected'), [shown])
+  // Protected things never; application folders not in a batch either — they
+  // are moved, if at all, one at a time from their own detail sheet.
+  const selectable = useMemo(() => shown.filter((item) => batchable(item)), [shown])
 
   if (!pile) {
     return (
@@ -106,7 +109,7 @@ export function PileView({
   const chosen = selectable.filter((item) => picked.has(item.id))
   const chosenBytes = chosen.reduce((total, item) => total + item.size, 0)
   const allPicked = selectable.length > 0 && chosen.length === selectable.length
-  const suggested = selectable.filter((item) => item.recommended_action === 'quarantine')
+  const suggested = selectable.filter((item) => item.assessment?.eligibility === 'suggested')
   const tally = bytesParts(chosenBytes)
   const share = pile.bytes > 0 ? Math.min(1, chosenBytes / pile.bytes) : 0
 
@@ -249,7 +252,8 @@ export function PileView({
         */}
         <ul className={styles.items}>
           {shown.map((item) => {
-            const locked = item.risk === 'protected'
+            const locked = !batchable(item)
+            const application = item.assessment?.eligibility === 'explicit_only'
             const on = picked.has(item.id)
             return (
               <li key={item.id} className={styles.row} data-picked={on || undefined}>
@@ -261,11 +265,19 @@ export function PileView({
                   onChange={() => undefined}
                   onClick={(event) => click(item.id, event.shiftKey)}
                   aria-label={
-                    locked
-                      ? `${item.display_name} — protected, Scuttle will not move it`
-                      : `Select ${item.display_name}, ${bytes(item.size)}`
+                    application
+                      ? `${item.display_name} — part of an application; open it to decide`
+                      : locked
+                        ? `${item.display_name} — protected, Scuttle will not move it`
+                        : `Select ${item.display_name}, ${bytes(item.size)}`
                   }
-                  title={locked ? 'Protected. Scuttle will not move this.' : undefined}
+                  title={
+                    application
+                      ? 'Part of an application. Never moved in a batch; open it to decide.'
+                      : locked
+                        ? 'Protected. Scuttle will not move this.'
+                        : undefined
+                  }
                 />
                 <button className={styles.item} onClick={() => openDetail(item)}>
                   <span className={styles.itemGlyph}>
@@ -322,21 +334,46 @@ function firstLine(remark: string): string {
   return remark.split('\n\n')[0] ?? remark
 }
 
+/** Whether an item may be part of a hand-picked batch. */
+function batchable(item: Candidate): boolean {
+  const eligibility = item.assessment?.eligibility ?? 'by_choice'
+  return item.risk !== 'protected' && eligibility !== 'blocked' && eligibility !== 'explicit_only'
+}
+
+/** Coloured by what a move would take, in words as well as colour. */
+const DOT: Record<Eligibility, Risk> = {
+  suggested: 'low',
+  by_choice: 'moderate',
+  explicit_only: 'high',
+  blocked: 'protected',
+}
+
 /**
- * Risk and group size, in words as well as colour.
+ * What it is, what moving it could disrupt, and the first thing worth
+ * knowing — in words as well as colour.
  *
  * Confidence is deliberately *not* here: it belongs next to the evidence that
  * produced it, and a bare "High" floating in a list invites people to read it
  * as "safe", which is a different thing entirely.
  */
 function Verdict({ candidate }: { candidate: Candidate }) {
+  const assessment = candidate.assessment
+  const first = assessment?.cautions[0]
   return (
     <>
       {candidate.group.length > 1 && (
         <span>{candidate.group.length} copies, keeping one ·</span>
       )}
-      <span className={styles.riskDot} data-risk={candidate.risk} aria-hidden="true" />
-      <span>{RISK_WORD[candidate.risk].toLowerCase()} risk</span>
+      <span
+        className={styles.riskDot}
+        data-risk={assessment ? DOT[assessment.eligibility] : candidate.risk}
+        aria-hidden="true"
+      />
+      <span>
+        {candidate.target_kind === 'directory' ? 'folder · ' : ''}
+        {assessment ? IMPACT_WORDS[assessment.impact].toLowerCase() : `${RISK_WORD[candidate.risk].toLowerCase()} risk`}
+        {first ? ` · ${CAUTION_LABEL[first.kind].toLowerCase()}` : ''}
+      </span>
     </>
   )
 }

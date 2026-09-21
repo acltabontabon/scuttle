@@ -70,6 +70,19 @@ pub struct Settings {
     /// the person says so, and nothing is installed without a restart they
     /// agreed to.
     pub auto_check_updates: bool,
+
+    /// How chatty Scuttle is: `full`, or `quiet` for plain wording and no
+    /// little reactions. Nothing about safety or recovery depends on it.
+    pub personality: Personality,
+}
+
+/// See [`Settings::personality`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Personality {
+    #[default]
+    Full,
+    Quiet,
 }
 
 impl Default for Settings {
@@ -88,6 +101,7 @@ impl Default for Settings {
             launch_at_login: false,
             background_intro_seen: false,
             auto_check_updates: true,
+            personality: Personality::Full,
         }
     }
 }

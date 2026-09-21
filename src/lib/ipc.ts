@@ -18,6 +18,7 @@ import type {
   Findings,
   HistoryEntry,
   IgnoredEntry,
+  MovePlan,
   MoveRequest,
   MoveSnapshot,
   Phase,
@@ -75,6 +76,11 @@ export const api = {
    * checks every one against the live filesystem.
    */
   startMove: (request: MoveRequest) => invoke<{ job_id: number }>('start_move', { request }),
+  /**
+   * What a move would do — exact paths, file or folder, why, what needs
+   * acknowledging and what will be refused. Reads only; moves nothing.
+   */
+  previewMove: (request: MoveRequest) => invoke<MovePlan>('preview_move', { request }),
   cancelMove: () => invoke<boolean>('cancel_move'),
   /** The running move's snapshot, or the last finished one's until dismissed. */
   moveStatus: () => invoke<MoveSnapshot | null>('move_status'),
@@ -169,11 +175,17 @@ export async function watchBackground(
 }
 
 /** Things the tray menu asks the window to do. */
-export type Intent = 'rummage' | 'settings'
+export type Intent = 'rummage' | 'settings' | 'drawer' | 'quitting'
 
 export async function watchIntents(onIntent: (intent: Intent) => void): Promise<UnlistenFn> {
   return listen<string>(EVENTS.intent, ({ payload }) => {
-    if (payload === 'rummage' || payload === 'settings') onIntent(payload)
+    if (
+      payload === 'rummage' ||
+      payload === 'settings' ||
+      payload === 'drawer' ||
+      payload === 'quitting'
+    )
+      onIntent(payload)
   })
 }
 

@@ -271,6 +271,18 @@
   border-bottom-color: var(--clay);
 }
 
+/* ---- cautions: things to know, not prohibitions --------------------------- */
+.cautionList {
+  margin: 0 0 var(--gap);
+  padding: var(--close) var(--step) var(--close) calc(var(--step) + 1em);
+  border-left: 2px solid var(--honey);
+  background: var(--honey-soft);
+  border-radius: 0 var(--round) var(--round) 0;
+  font-size: var(--type-small);
+  line-height: var(--leading-normal);
+  color: var(--ink);
+}
+
 /* ---- safety notice ------------------------------------------------------- */
 .notice {
   padding: var(--close) var(--step);

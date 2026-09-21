@@ -5,15 +5,19 @@ import { App } from '@/app/App'
 import { StoreContext, type Store, type View } from '@/app/store'
 import type { Candidate, Findings, Settings } from '@/lib/types'
 import { isTerminal } from '@/features/move/progress'
+import { BurrowView } from '@/features/burrow/Burrow'
+import { burrowLine } from '@/features/burrow/phrasing'
 import { UpdateProvider } from '@/features/updates/UpdateProvider'
 import {
   BACKGROUND_STATUS,
+  BURROW_SCENES,
   CANDIDATES,
   DRAWER,
   EMPTY_FINDINGS,
   FINDINGS,
   GLANCE_FINDINGS,
   MOVE_SCENES,
+  REVIEW_SCENES,
   SETTINGS,
   SPACE,
   UPDATE_SCENES,
@@ -68,6 +72,10 @@ export function Preview() {
   const [streamed, setStreamed] = useState<number | null>(null)
   const streamStart = useRef(0)
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const [reviewId, setReviewId] = useState<string | null>(null)
+  const [burrowId, setBurrowId] = useState<string | null>(null)
+  const reviewPlan = REVIEW_SCENES.find((r) => r.id === reviewId)?.plan ?? null
+  const burrowScene = BURROW_SCENES.find((b) => b.id === burrowId) ?? null
 
   const scene = SCENES.find((s) => s.id === sceneId)!
   const detail = detailId ? (CANDIDATES.find((c) => c.id === detailId) ?? null) : null
@@ -205,6 +213,12 @@ export function Preview() {
       reviewAgain: noop,
       moveDetailsOpen: detailsOpen,
       setMoveDetailsOpen: setDetailsOpen,
+      review: reviewPlan
+        ? { request: { kind: 'selection', ids: [] }, plan: reviewPlan }
+        : null,
+      confirmReview: async () => setReviewId(null),
+      closeReview: () => setReviewId(null),
+      quitting: false,
       quarantine: noop,
       quarantineGroup: noop,
       quarantineConfident: noop,
@@ -217,7 +231,7 @@ export function Preview() {
       removePermanently: ok,
       reveal: noop,
     }
-  }, [scene, detail, theme, moveScene, detailsOpen])
+  }, [scene, detail, theme, moveScene, detailsOpen, reviewPlan])
 
   return (
     <div className={styles.workbench}>
@@ -246,6 +260,30 @@ export function Preview() {
             onClick={() => setDetailId(detailId === d.id ? null : d.id)}
           >
             {d.label}
+          </button>
+        ))}
+
+        <p className={styles.railTitle}>Before a move</p>
+        {REVIEW_SCENES.map((r) => (
+          <button
+            key={r.id}
+            className={styles.railItem}
+            aria-current={r.id === reviewId}
+            onClick={() => setReviewId(reviewId === r.id ? null : r.id)}
+          >
+            {r.label}
+          </button>
+        ))}
+
+        <p className={styles.railTitle}>The tray</p>
+        {BURROW_SCENES.map((b) => (
+          <button
+            key={b.id}
+            className={styles.railItem}
+            aria-current={b.id === burrowId}
+            onClick={() => setBurrowId(burrowId === b.id ? null : b.id)}
+          >
+            {b.label}
           </button>
         ))}
 
@@ -331,6 +369,30 @@ export function Preview() {
             <App />
           </UpdateProvider>
         </StoreContext.Provider>
+        {burrowScene && (
+          <div
+            data-testid="burrow-frame"
+            style={{
+              position: 'absolute',
+              top: 12,
+              right: 12,
+              width: 300,
+              height: 372,
+              zIndex: 90,
+              borderRadius: 10,
+              overflow: 'hidden',
+              boxShadow: '0 12px 40px rgba(0,0,0,0.28)',
+            }}
+          >
+            <BurrowView
+              key={burrowScene.id}
+              status={burrowScene.status}
+              line={burrowLine(burrowScene.status, burrowScene.roll)}
+              reacting={false}
+              onAct={() => setBurrowId(null)}
+            />
+          </div>
+        )}
       </div>
     </div>
   )

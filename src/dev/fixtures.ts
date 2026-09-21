@@ -11,6 +11,7 @@
  * workbench stays honest about what the core actually produces.
  */
 
+import type { BurrowStatus } from '@/features/burrow/phrasing'
 import type {
   BackgroundStatus,
   Candidate,
@@ -18,8 +19,10 @@ import type {
   Findings,
   FindingResult,
   IssueGroup,
+  MovePlan,
   MoveReport,
   MoveSnapshot,
+  PlannedItem,
   QuarantineView,
   Settings,
   SpaceOverview,
@@ -60,6 +63,14 @@ function candidate(partial: Partial<Candidate> & Pick<Candidate, 'id' | 'display
     created_unix: now - 800 * DAY,
     group: [],
     fingerprint: { size: 0, modified_unix: null, is_dir: true, child_count: 4 },
+    assessment: {
+      impact: 'application_data',
+      eligibility: 'by_choice',
+      cautions: [
+        { kind: 'application_data', detail: 'Data an application keeps for itself.' },
+      ],
+      blocked: null,
+    },
     ...partial,
   }
 }
@@ -398,6 +409,7 @@ export const SETTINGS: Settings = {
   launch_at_login: false,
   background_intro_seen: false,
   auto_check_updates: true,
+  personality: 'full',
 }
 
 export const BACKGROUND_STATUS: BackgroundStatus = {
@@ -633,3 +645,183 @@ export const UPDATE_SCENES: Record<string, UpdateSnapshot> = {
   ),
   current: updateScene({ phase: 'up_to_date', checked_unix: 1_790_000_000 }),
 }
+
+// ---- reviewing a move ------------------------------------------------------
+
+
+function planned(partial: Partial<PlannedItem> & Pick<PlannedItem, 'finding_id' | 'display_name' | 'path'>): PlannedItem {
+  return {
+    shape: 'file',
+    size: 120 * 1024 ** 2,
+    contains: null,
+    confidence: 'high',
+    reasons: [],
+    remark: null,
+    impact: 'personal_file',
+    eligibility: 'by_choice',
+    cautions: [],
+    status: 'ready',
+    note: null,
+    kept_until_removed: true,
+    ...partial,
+  }
+}
+
+export const REVIEW_SCENES: { id: string; label: string; plan: MovePlan }[] = [
+  {
+    id: 'batch',
+    label: 'Review: a batch with cautions',
+    plan: {
+      items: [
+        planned({
+          finding_id: 'r1',
+          display_name: 'DiscordSetup.exe',
+          path: 'C:\\Users\\rummager\\Downloads\\DiscordSetup.exe',
+          size: 94 * 1024 ** 2,
+          impact: 'redownloadable',
+          kept_until_removed: false,
+          reasons: [
+            { summary: 'A .exe installer package', negative: false },
+            { summary: 'Discord is already installed', negative: false },
+            { summary: 'Untouched for 140 days', negative: false },
+          ],
+        }),
+        planned({
+          finding_id: 'r2',
+          display_name: 'thesis-draft-final-FINAL.pdf',
+          path: '/Users/rummager/Downloads/thesis-draft-final-FINAL.pdf',
+          size: 18 * 1024 ** 2,
+          reasons: [
+            { summary: '18.0 MB on disk', negative: false },
+            { summary: 'Touched 2 days ago', negative: true },
+          ],
+          cautions: [{ kind: 'recently_changed', detail: 'Changed 2 days ago.' }],
+        }),
+        planned({
+          finding_id: 'r3',
+          display_name: 'old-renders',
+          path: '/Users/rummager/Movies/old-renders',
+          shape: 'folder',
+          contains: 214,
+          size: 6.2 * 1024 ** 3,
+          confidence: 'low',
+          reasons: [{ summary: '6.20 GB on disk', negative: false }],
+          cautions: [{ kind: 'uncertain', detail: 'Scuttle is unsure what this is: the evidence is thin or points both ways.' }],
+        }),
+        planned({
+          finding_id: 'r4',
+          display_name: 'take-3.mov',
+          path: '/Users/rummager/Movies/old-renders/take-3.mov',
+          status: 'included',
+          note: 'Inside old-renders, which moves as a whole.',
+        }),
+        planned({
+          finding_id: 'r5',
+          display_name: '.ssh backup',
+          path: '/Users/rummager/Downloads/backup',
+          shape: 'folder',
+          status: 'refused',
+          eligibility: 'blocked',
+          note: 'This folder contains something protected (SSH keys). Moving the folder would move that too, so Scuttle will not.',
+        }),
+      ],
+      cautions: [
+        { kind: 'recently_changed', headline: 'Some of this changed recently. You may still be using it.', count: 1 },
+        { kind: 'uncertain', headline: 'Scuttle is not sure what some of this is.', count: 1 },
+      ],
+      ready: 3,
+      ready_bytes: 6.5 * 1024 ** 3,
+      drawer: '/Users/rummager/Library/Application Support/Scuttle/Quarantine',
+      retention_days: 14,
+    },
+  },
+  {
+    id: 'app',
+    label: 'Review: an application folder',
+    plan: {
+      items: [
+        planned({
+          finding_id: 'a1',
+          display_name: 'Discord',
+          path: 'C:\\Users\\rummager\\AppData\\Local\\Discord',
+          shape: 'folder',
+          contains: 1184,
+          size: 412 * 1024 ** 2,
+          impact: 'application_install',
+          eligibility: 'explicit_only',
+          reasons: [
+            { summary: 'Part of Discord — an application with its own updater. Moving it would likely stop Discord working', negative: true },
+          ],
+          cautions: [{ kind: 'breaks_application', detail: 'Part of Discord (an application with its own updater).' }],
+        }),
+      ],
+      cautions: [
+        {
+          kind: 'breaks_application',
+          headline: 'This is part of an application. Moving it will probably stop that application working until you put it back.',
+          count: 1,
+        },
+      ],
+      ready: 1,
+      ready_bytes: 412 * 1024 ** 2,
+      drawer: 'C:\\Users\\rummager\\AppData\\Local\\Scuttle\\Quarantine',
+      retention_days: 14,
+    },
+  },
+  {
+    id: 'refused',
+    label: 'Review: nothing can move',
+    plan: {
+      items: [
+        planned({
+          finding_id: 'x1',
+          display_name: 'Discord.exe',
+          path: 'C:\\Users\\rummager\\AppData\\Local\\Discord\\app-1.0.9001\\Discord.exe',
+          status: 'refused',
+          impact: 'application_install',
+          eligibility: 'explicit_only',
+          note: 'This is part of an application. Scuttle only moves an application folder when you open it and choose it on its own, never as part of a batch.',
+        }),
+      ],
+      cautions: [],
+      ready: 0,
+      ready_bytes: 0,
+      drawer: '/drawer',
+      retention_days: 14,
+    },
+  },
+]
+
+const burrowBase: BurrowStatus = {
+  now_unix: now,
+  has_looked: true,
+  last_look_unix: now - 3 * DAY,
+  found: 23,
+  suggested: 4,
+  drawer_items: 0,
+  drawer_bytes: 0,
+  needs_attention: 0,
+  busy: null,
+  personality: 'full',
+  reduced_motion: null,
+  appearance: 'system',
+}
+
+export const BURROW_SCENES: { id: string; label: string; status: BurrowStatus; roll: number }[] = [
+  { id: 'found', label: 'Burrow: found things', status: burrowBase, roll: 0.05 },
+  {
+    id: 'drawer',
+    label: 'Burrow: drawer in use',
+    status: { ...burrowBase, found: 0, suggested: 0, drawer_items: 6, drawer_bytes: 3.1 * 1024 ** 3 },
+    roll: 0.3,
+  },
+  {
+    id: 'busy',
+    label: 'Burrow: moving',
+    status: { ...burrowBase, busy: 'moving files into the Drawer' },
+    roll: 0.1,
+  },
+  { id: 'new', label: 'Burrow: first time', status: { ...burrowBase, has_looked: false, last_look_unix: null, found: 0, suggested: 0 }, roll: 0.9 },
+  { id: 'quiet', label: 'Burrow: quiet', status: { ...burrowBase, personality: 'quiet' }, roll: 0.05 },
+  { id: 'attention', label: 'Burrow: needs a look', status: { ...burrowBase, needs_attention: 1, drawer_items: 2, drawer_bytes: 1024 ** 3 }, roll: 0.05 },
+]

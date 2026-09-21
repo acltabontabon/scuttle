@@ -1,0 +1,134 @@
+.burrow {
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--step);
+  padding: var(--step);
+  background: var(--paper-raised);
+  color: var(--ink);
+  overflow: hidden;
+  user-select: none;
+}
+
+.head {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  align-items: center;
+  gap: var(--close);
+}
+
+.creature {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 60px;
+  overflow: hidden;
+  color: var(--ink);
+}
+
+/* One peek up out of the burrow, then still. Never repeats on its own. */
+.creature[data-reacting] {
+  animation: peek 0.7s var(--settle) 1;
+}
+
+@keyframes peek {
+  0% {
+    transform: translateY(70%);
+  }
+  60% {
+    transform: translateY(-6%);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+/* The mascot's resting loops stay off in the burrow: a tray popover is not a
+   place for a creature that breathes forever. */
+.holdStill,
+.holdStill * {
+  animation: none !important;
+}
+
+.line {
+  font-family: var(--serif);
+  font-size: var(--type-read);
+  line-height: var(--leading-normal);
+  color: var(--ink);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px var(--close);
+  margin: 0;
+  padding: var(--close) 0;
+  border-top: var(--hair) solid var(--rule);
+  border-bottom: var(--hair) solid var(--rule);
+  font-size: var(--type-small);
+}
+
+.facts dt {
+  color: var(--ink-faint);
+}
+
+.facts dd {
+  margin: 0;
+  color: var(--ink);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--snug);
+  margin-top: auto;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--snug);
+}
+
+.actions button {
+  padding: 8px var(--close);
+  font-size: var(--type-small);
+  border: var(--hair) solid var(--rule);
+  border-radius: var(--round);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.actions button:hover:not(:disabled) {
+  border-color: var(--ink-ghost);
+}
+
+.actions button:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.actions .primary {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+  font-size: var(--type-body);
+}
+
+:root[data-motion='still'] .creature[data-reacting] {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .creature[data-reacting] {
+    animation: none;
+  }
+}

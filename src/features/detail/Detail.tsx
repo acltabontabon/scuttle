@@ -80,8 +80,12 @@ export function Detail() {
   if (!detail) return null
 
   const menuOpen = menuOpenFor === detail.id
-  const actionable =
-    detail.risk !== 'protected' && detail.recommended_action !== 'inspect_only'
+  const eligibility = detail.assessment?.eligibility ?? 'by_choice'
+  // Anything not blocked can be chosen from here. An application folder can
+  // too — this is the one place a single item is chosen on its own — but it
+  // says what it is, and the review that follows says it again.
+  const actionable = eligibility !== 'blocked' && detail.risk !== 'protected'
+  const application = eligibility === 'explicit_only'
   const positive = detail.evidence.filter((e) => !e.negative)
   const negative = detail.evidence.filter((e) => e.negative)
 
@@ -141,10 +145,23 @@ export function Detail() {
           */}
           {!actionable && (
             <p className={styles.notice}>
-              {detail.risk === 'protected'
-                ? 'This is in a location Scuttle will not touch. It is shown here so you know it exists.'
-                : 'This may contain files you made. Scuttle will not recommend removing it, and will not do so automatically.'}
+              {detail.assessment?.blocked ??
+                'This is in a location Scuttle will not touch. It is shown here so you know it exists.'}
             </p>
+          )}
+          {application && (
+            <p className={styles.notice}>
+              This is part of an installed application, not something left over. Scuttle will
+              never suggest moving it or include it in a batch. If you move it anyway, the
+              application will probably stop working until you put it back.
+            </p>
+          )}
+          {actionable && !application && (detail.assessment?.cautions.length ?? 0) > 0 && (
+            <ul className={styles.cautionList}>
+              {detail.assessment.cautions.map((caution) => (
+                <li key={caution.kind}>{caution.detail}</li>
+              ))}
+            </ul>
           )}
 
           <section className={styles.section}>
@@ -271,16 +288,18 @@ export function Detail() {
           </div>
 
           <button
-            className={`${styles.action} ${styles.primary}`}
+            className={`${styles.action} ${application ? '' : styles.primary}`}
             disabled={!actionable}
             onClick={() => void quarantine(detail)}
             title={
-              actionable
-                ? 'Moves it into the drawer. Nothing is deleted.'
-                : 'Scuttle will not act on this one.'
+              !actionable
+                ? 'Scuttle will not act on this one.'
+                : application
+                  ? 'Review moving this application folder. Nothing moves until you confirm.'
+                  : 'Review what would move. Nothing moves until you confirm.'
             }
           >
-            Put in the drawer
+            {application ? 'Move this application folder…' : 'Put in the drawer…'}
           </button>
         </footer>
       </aside>
@@ -297,8 +316,11 @@ export function Detail() {
  */
 function Members({ candidate }: { candidate: Candidate }) {
   const { quarantine, quarantineGroup } = useStore()
+  // Copies are a person's own files: theirs to choose among, with any caution
+  // shown in the review. Only application files are held back from this.
+  const eligibility = candidate.assessment?.eligibility ?? 'by_choice'
   const actionable =
-    candidate.risk !== 'protected' && candidate.recommended_action !== 'inspect_only'
+    candidate.risk !== 'protected' && eligibility !== 'blocked' && eligibility !== 'explicit_only'
 
   return (
     <section className={styles.section}>

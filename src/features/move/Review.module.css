@@ -1,0 +1,241 @@
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--hollow) 55%, transparent);
+  animation: fade var(--normal) var(--ease);
+}
+
+.sheet {
+  position: fixed;
+  z-index: 41;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(620px, 92vw);
+  max-height: min(760px, 88vh);
+  display: flex;
+  flex-direction: column;
+  background: var(--paper-raised);
+  border: var(--hair) solid var(--rule);
+  border-radius: var(--round);
+  box-shadow: var(--lift-sheet);
+  animation: fade var(--normal) var(--ease);
+}
+
+.head {
+  padding: var(--gap) var(--gap) var(--step);
+  border-bottom: var(--hair) solid var(--rule);
+}
+
+.title {
+  font-family: var(--serif);
+  font-size: var(--type-say);
+  line-height: var(--leading-tight);
+}
+
+.summary {
+  margin-top: var(--snug);
+  font-size: var(--type-body);
+  color: var(--ink-soft);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--step) var(--gap);
+}
+
+.loading {
+  color: var(--ink-soft);
+  font-size: var(--type-body);
+}
+
+.sectionTitle {
+  font-size: var(--type-whisper);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: var(--close);
+}
+
+.items {
+  list-style: none;
+  margin: 0 0 var(--gap);
+  padding: 0;
+}
+
+.item {
+  padding: var(--close) 0;
+  border-bottom: var(--hair) solid var(--rule);
+}
+
+.item[data-status='refused'],
+.item[data-status='included'] {
+  opacity: 0.8;
+}
+
+.itemHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--close);
+}
+
+.itemName {
+  font-size: var(--type-body);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.itemSize {
+  flex: none;
+  font-size: var(--type-small);
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.path {
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: var(--type-whisper);
+  line-height: var(--leading-normal);
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.shape {
+  margin-top: 2px;
+  font-size: var(--type-small);
+  color: var(--ink-faint);
+}
+
+.note {
+  margin-top: var(--snug);
+  font-size: var(--type-small);
+  color: var(--ink);
+  line-height: var(--leading-normal);
+}
+
+.reasons {
+  list-style: none;
+  margin: var(--snug) 0 0;
+  padding: 0;
+  font-size: var(--type-small);
+  color: var(--ink-soft);
+  line-height: var(--leading-normal);
+}
+
+.reasons li span {
+  font-family: var(--mono);
+  color: var(--moss-ink);
+}
+
+.reasons li[data-negative='true'] span {
+  color: var(--clay-ink);
+}
+
+.itemCautions {
+  margin-top: var(--snug);
+  font-size: var(--type-small);
+  color: var(--honey-ink);
+  line-height: var(--leading-normal);
+}
+
+.cautions {
+  margin: 0 0 var(--gap);
+  padding: var(--close) var(--step);
+  border: 0;
+  border-left: 2px solid var(--honey);
+  background: var(--honey-soft);
+  border-radius: 0 var(--round) var(--round) 0;
+}
+
+.cautions legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+}
+
+.caution {
+  clear: both;
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: var(--snug);
+  align-items: start;
+  padding: var(--snug) 0;
+  font-size: var(--type-small);
+  line-height: var(--leading-normal);
+  cursor: pointer;
+}
+
+.caution input {
+  margin-top: 3px;
+}
+
+.cautionHead {
+  color: var(--ink);
+}
+
+.cautionCount,
+.cautionAccept {
+  color: var(--ink-soft);
+}
+
+.where {
+  margin-bottom: var(--step);
+}
+
+.restore {
+  margin-top: var(--snug);
+  font-size: var(--type-small);
+  color: var(--ink-soft);
+  line-height: var(--leading-normal);
+}
+
+.actions {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--close);
+  padding: var(--step) var(--gap);
+  border-top: var(--hair) solid var(--rule);
+  background: var(--paper);
+  border-radius: 0 0 var(--round) var(--round);
+}
+
+.action {
+  padding: 9px var(--step);
+  font-size: var(--type-body);
+  border-radius: var(--round);
+  border: var(--hair) solid var(--rule);
+  background: var(--paper-raised);
+  color: var(--ink);
+}
+
+.action:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.primary {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+
+.primary[data-application='true'] {
+  background: var(--clay-ink);
+  border-color: var(--clay-ink);
+}
+
+.primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+:root[data-motion='still'] .scrim,
+:root[data-motion='still'] .sheet {
+  animation: none;
+}
