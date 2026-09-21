@@ -131,14 +131,15 @@ applied again by the state machine on whatever the plugin returns, and has the
 same rules in `scripts/update-manifest.mjs` for deciding what the release
 workflow may publish.
 
-While every release is an alpha this means: alpha users receive alphas, and
-when `0.1.0` ships alpha users receive it and stable users, of whom there are
-none yet, receive it as their first update.
+With `0.1.0` as the first stable release this means: stable installs receive
+stable releases only, and any alpha install that has an updater receives
+`0.1.0` and later stable releases (and any newer prerelease). The two alphas
+before `0.1.0` have no updater at all; see below.
 
 ## Where the manifests live
 
-`releases/latest/download/…` on GitHub ignores prereleases, and every Scuttle
-release so far is a prerelease, so it cannot serve alpha users. Instead there
+`releases/latest/download/…` on GitHub ignores prereleases, so it cannot serve
+alpha users. Instead there
 is one rolling GitHub release, `updater-channels`, that holds nothing but two
 small files, and the application reads whichever is its own:
 
@@ -520,7 +521,7 @@ Reported honestly, because the difference matters.
 
 Builds released before this feature contain no updater. Nothing can update
 them from the inside. **Everyone on `v0.1.0-alpha.1` and `v0.1.0-alpha.2`
-needs to install the first release that includes updates by hand, once**, from
+needs to install `0.1.0` by hand, once**, from
 the releases page. After that they update themselves. The release notes say so.
 
 ## Remaining distribution requirements

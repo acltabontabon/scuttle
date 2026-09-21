@@ -102,6 +102,17 @@ folder are genuine duplicates and a useless thing to report: removing either
 breaks the thing that put them there. Detectors about the user's own files
 should skip `ctx.is_application_managed(path)`.
 
+**An application is not a leftover.** Before offering anything that could be
+part of a program — an executable, a folder under app data, anything large —
+ask `ctx.installation_of(path, is_dir)`. An updater beside versioned folders,
+a program beside its libraries, a `.app` bundle: these are applications,
+whatever a registry says and whether or not they are running. The safety net
+tags them regardless and they can never be suggested, but a detector that
+emits them at all is wrong. The installers detector once did, and moved
+Discord's own program: see "Applications are recognised by their shape" in
+`docs/safety.md`. `NoProcessUsingIt` is shown but weighs nothing, for the
+same reason.
+
 **Do not reclassify something another detector explains.** A path with a cache
 rule is a cache, even when that rule is switched off for this scan. Turning off
 developer debris once made the Go build cache reappear as a *ghost* —

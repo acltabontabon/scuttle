@@ -8,7 +8,106 @@ major version is 0, a minor bump may change behaviour.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-21
+
+The first stable release. It exists because of a Windows test that went
+wrong: Scuttle offered something that looked like a finished Discord installer,
+and moving it broke Discord. Most of this release is making sure nothing like
+that can happen again, and that when you *do* choose to move something, you
+see exactly what will move and can always get it back.
+
+### Fixed
+
+- **Scuttle no longer mistakes an installed application for its installer.**
+  The installer check accepted any `.exe` over 512 KB anywhere it looked —
+  including inside `%LOCALAPPDATA%`. For an application that installs itself
+  per user, like Discord, its own `app-1.0.x\Discord.exe` and its `Update.exe`
+  were rated as confident, low-risk installers ("Discord is already
+  installed"), which put them in *Move everything confident*. Moving them broke
+  the application. Installers are now only looked for outside the folders
+  applications keep for themselves, never inside anything shaped like an
+  installation, and a bare `.exe` has to be named like an installer before it
+  is considered at all.
+- **Applications are recognised by their shape, not by a registry.** A folder
+  with an updater beside versioned `app-*` folders, an Electron
+  `resources/app.asar`, a program beside its libraries, its own uninstaller, or
+  a macOS `.app` bundle is an application — whether or not uninstall records
+  exist, and whether or not it is running right now. Nothing inside one, and no
+  folder that contains one, is ever suggested or included in a batch.
+- A leftover-application finding no longer counts "nothing is using it" as
+  evidence, and says "Scuttle found no installed application called …" rather
+  than claiming the application is gone.
+- Two findings could be given the same id when one replaced another for the
+  same path, so an action could name a different finding from the one shown.
+- On Windows, `C:\Users`, `C:\Windows` and other folders directly on a drive
+  were not treated as structural. They are now, as is the root of a mounted
+  drive on macOS.
+- A folder that *contains* something protected (SSH keys, a password vault,
+  Scuttle's own Drawer) can no longer be moved — moving it would move that too.
+- Folders to look in are now checked: a drive root, a system folder or a
+  protected place is refused rather than becoming the area Scuttle may act in.
+
+### Changed
+
+- **Confidence, impact and permission are separate.** Scuttle used to fold
+  everything into one "risk" rating, which both let an application through and
+  stopped people moving their own files. Now every finding says how sure
+  Scuttle is about what it is, what moving it could disrupt (nothing, a
+  download, your file, an application's data, an application), and which ways
+  of asking may move it.
+- **Your own files are yours to move.** Downloads, screenshots, archives,
+  documents and recently edited files can be moved after a short, specific
+  caution — "changed 2 days ago", "Scuttle is unsure what this is" — accepted
+  once for the whole move, not file by file. Nothing claims a file is unused or
+  junk.
+- **Applications and their data are never swept.** They are never suggested,
+  never in a select-all or a group action, and an application folder can only
+  be moved by opening it and choosing it on its own, with a plain warning that
+  it will probably stop working until it is put back.
+- **Every move is reviewed first.** Before anything moves you see the exact
+  path of each item, whether it is one file or a whole folder (and how much is
+  in it), why Scuttle noticed it, what will be refused and why, where it goes,
+  and how putting it back works.
+- The safety gate in the core recomputes all of this from the stored evidence
+  and the live filesystem for every item, immediately before it moves. The
+  interface cannot unlock anything by what it sends.
+- **The Drawer keeps what cannot be rebuilt.** Only caches, build output and
+  re-downloadable installers expire after the retention period. Your own
+  files, application data and anything moved past a caution stay until you
+  remove them. Everything already in the Drawer from an alpha is kept this way
+  too, except caches.
+- Emptying the Drawer leaves alone anything flagged after an interruption.
+
 ### Added
+
+- **Scuttle's burrow.** A left click on the tray icon opens a small window
+  beside it with where things stand, one short line from Scuttle, and buttons
+  to open Scuttle, view the Drawer, rummage, open Settings or quit. Scuttle
+  peeks up once when it opens. Right click still opens the plain menu, which
+  now also has *Open the Drawer*. Opening either never starts anything.
+- *Quiet Scuttle* in Settings: plain wording and no little reactions.
+  Warnings and recovery messages are always plain regardless.
+- Quitting while files are moving now stops at the next safe point, says so,
+  and quits once the Drawer is settled. Quitting again does not wait.
+- `scuttle --drawer-report` lists everything the Drawer holds or has held —
+  where it came from, whether the held copy is still on disk — from a
+  read-only view of the database. Useful for answering "what happened to…?".
+
+### Security and recovery
+
+- Restoring re-checks the way back: if a folder on the path has been replaced
+  by a link or junction, or has become protected, the item stays safely in the
+  Drawer instead.
+- Restoring checks the held copy against the fingerprint taken when it went in,
+  and refuses — flagging it — if it no longer matches.
+- Every copy across drives is now verified by re-reading and hashing it,
+  whatever its size (previously only up to 128 MB), before the original is
+  removed. A stop during verification leaves the original untouched.
+- A damaged Drawer record can no longer point a restore outside its folder.
+
+### Also in this release
+
+#### Added
 
 - **Scuttle can update itself, when you ask it to.** It checks shortly after
   starting and about once a day (*Automatically check for updates* in Settings
@@ -35,16 +134,16 @@ major version is 0, a minor bump may change behaviour.
   signature verifies against its file, and only then points installed copies at
   the new release. See `docs/updates.md`.
 
-### Changed
+#### Changed
 
 - Scuttle now makes one kind of network request — asking GitHub whether a newer
   version exists — where it previously made none. `docs/privacy.md` and
   `SECURITY.md` say so.
 
-### Known limitations
+#### Known limitations
 
 - Builds from before this release (`0.1.0-alpha.1`, `0.1.0-alpha.2`) have no
-  updater. Install the first release with updates by hand, once.
+  updater. Install 0.1.0 by hand, once.
 - There is no automatic rollback of a failed or unwanted update. A failed
   install leaves Scuttle running on the old version; a bad release is fixed by
   publishing a newer one.
@@ -52,6 +151,12 @@ major version is 0, a minor bump may change behaviour.
   as a new application for privacy permissions granted to the old one.
 - A downloaded update is held in memory only, so it is downloaded again after a
   restart.
+- The Windows tray icon follows the taskbar's light or dark setting as it was
+  at launch; it does not change until Scuttle restarts.
+- Folders on a different drive from the Drawer cannot be moved; single files
+  can, with a verified copy. Moving the files inside a folder one by one is
+  the workaround.
+
 
 ## [0.1.0-alpha.2] - 2026-09-21
 
@@ -186,6 +291,7 @@ be undone.
   because it also holds logins, cookies and history. Firefox, which keeps its
   cache somewhere else, is covered.
 
-[Unreleased]: https://github.com/acltabontabon/scuttle/compare/v0.1.0-alpha.2...HEAD
+[Unreleased]: https://github.com/acltabontabon/scuttle/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/acltabontabon/scuttle/compare/v0.1.0-alpha.2...v0.1.0
 [0.1.0-alpha.2]: https://github.com/acltabontabon/scuttle/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/acltabontabon/scuttle/releases/tag/v0.1.0-alpha.1

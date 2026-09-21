@@ -48,9 +48,10 @@ All three are on the [releases page](https://github.com/acltabontabon/scuttle/re
 each with a `.sha256` file beside it. Not sure which Mac you have? Apple menu →
 About This Mac; "Apple M1" or later means Apple silicon.
 
-The current builds are alphas (the newest is on the releases page). It does what this page
-describes and its tests pass on macOS and Windows, but it has not been run on
-many machines yet — so give the drawer a look before you empty it.
+0.1.0 is the first stable release. It does what this page describes and its
+tests pass on macOS and Windows. It is still young software that has not met
+many machines, so the drawer is there for a reason: look in it before you empty
+it.
 
 ### Installing
 
@@ -134,16 +135,29 @@ Scuttle's own data directory and writes down where it came from, both in its
 database and in a plain manifest beside the item. The file is out of your way
 but still on the disk.
 
+**Before anything moves, you see what will move.** Every move — one item, a
+batch you ticked, a group of copies, Scuttle's own suggestions — opens a review
+first: the exact path of each thing, whether it is one file or a whole folder
+and how much is in it, why Scuttle noticed it, anything it is unsure of, and
+what it will refuse. Anything worth knowing ("changed 2 days ago", "Scuttle is
+unsure what this is") is said once for the whole move and accepted with one
+tick, not file by file.
+
 **Putting it back** returns it to exactly where it was. If the folder it lived
 in has since been deleted, Scuttle recreates it. If something else has since
-taken its name, Scuttle restores it alongside rather than over the top, and
-tells you it did.
+taken its name, Scuttle restores it alongside, as "name (restored)", rather
+than over the top, and tells you it did. It checks the way back first: if a
+folder on the path has become a link to somewhere else, or somewhere protected,
+the item stays in the drawer. It also checks the held copy is still exactly what
+went in.
 
 **Emptying the drawer** is the only thing that frees space, and the only thing
 that destroys data. Items do not go to the Trash or the Recycle Bin, which is
-what the confirmation says before you confirm it. Anything you leave in the
-drawer expires after a window you choose (7, 14 or 30 days) and is removed the
-next time Scuttle starts.
+what the confirmation says before you confirm it. Only things that can be
+rebuilt or downloaded again — caches, build output, installers — expire on
+their own, after a window you choose (7, 14 or 30 days). Your own files, an
+application's data, and anything you moved past a caution stay until you remove
+them.
 
 ## What it won't do
 
@@ -155,6 +169,12 @@ next time Scuttle starts.
 - It won't go near your keys, your password vault, your browser profiles, your
   mail, your repositories or your cloud-sync folders. Those directories aren't
   just excluded from results — they're never walked at all.
+- It won't treat an installed application as a leftover. Anything shaped like
+  an application — an updater beside versioned folders, a program beside its
+  libraries, a `.app` bundle — is never suggested and never swept, whatever a
+  registry says or whether it is running. You can still move an application's
+  folder yourself, one at a time, with a plain warning that it will probably
+  stop working. Scuttle does not uninstall or relocate applications.
 - It won't show you a health score, a fake urgency counter, or a percentage
   with three decimal places.
 - It won't sit in your menu bar unless you ask it to, and it won't scan behind
@@ -162,11 +182,14 @@ next time Scuttle starts.
 
 ## Two ideas that do most of the work
 
-**Confidence and risk are different things.** Scuttle can be *completely
-certain* that a 40 GB archive hasn't been touched in two years and still have
-no business suggesting you delete it. Confidence is about classification; risk
-is about what it costs if Scuttle is wrong. A finding is only ever proposed for
-cleanup when confidence is high *and* being wrong would be cheap.
+**Confidence, impact and permission are different things.** Scuttle can be
+*completely certain* that a 40 GB archive hasn't been touched in two years and
+still have no business suggesting you move it. Confidence is how sure it is
+about what something is; impact is what moving it could disrupt; permission is
+which ways of asking may move it. Scuttle only *suggests* things that are
+rebuildable or re-downloadable, that it is confident about, and that need no
+caution. Your own files are always yours to move, with the caution said once.
+Applications never go in a sweep or a batch.
 
 **A finding is a request, not an authorisation.** The interface can ask to
 quarantine something, but the Rust core re-derives every decision against the
@@ -181,10 +204,18 @@ action, Scuttle refuses and asks you to rummage again.
 does nothing at all when you are not looking at it.
 
 If you turn it on, closing the window hides it behind a menu bar icon (system
-tray on Windows) instead of quitting. The icon's menu opens Scuttle, starts a
-rummage, says when it last looked, and quits. ⌘Q, logging out and shutting
-down all still quit properly — Scuttle never holds up a shutdown, and quitting
-it stops its background work. No helper, no service, no daemon.
+tray on Windows) instead of quitting. Clicking the icon opens Scuttle's
+burrow: where things stand, one short line from Scuttle, and buttons to open
+Scuttle, view the drawer, rummage, open Settings or quit. A right click opens a
+plain menu with the same choices. Opening either starts nothing. *Quiet
+Scuttle* in Settings keeps the wording plain and the creature still, and it is
+still whenever your system asks for reduced motion.
+
+⌘Q, logging out and shutting down all still quit properly, and quitting stops
+Scuttle's background work. The one thing that makes quitting wait is files in
+the middle of moving: Scuttle stops at the next safe point, says so, and quits
+once the drawer is settled. Quit again and it goes at once; the next start
+settles anything left in flight. No helper, no service, no daemon.
 
 A second setting, also off by default, lets it check occasionally on its own —
 at most once a day, and only when the machine looks able to spare it: on mains
@@ -228,16 +259,18 @@ downloaded until you choose to, and it only restarts when you choose to; a move
 or restore in progress always finishes first, and *Update and restart* waits for
 it. Every update is verified with a signature before it is used. The check is
 one HTTPS request to GitHub, and *Automatically check for updates* in Settings
-turns it off; *Check for updates* still works when you ask. Alphas are offered
-alphas and, in time, the stable release they led up to; stable installs are
+turns it off; *Check for updates* still works when you ask. Stable installs are
 never offered a prerelease. How it works, and how it is tested:
 [docs/updates.md](docs/updates.md).
 
 **If you installed a build from before updates existed** (`v0.1.0-alpha.1` or
-`-alpha.2`) it has no updater and cannot fetch one. Install the first release
-that includes updates by hand from
+`-alpha.2`) it has no updater and cannot fetch one. Install 0.1.0 by hand from
 [the releases page](https://github.com/acltabontabon/scuttle/releases) — once.
 From then on it can update itself.
+
+`scuttle --drawer-report` prints everything the drawer holds or has held —
+where each item came from, whether its held copy is still on disk — from a
+read-only view of the database.
 
 `scuttle --dry-run` in a terminal prints everything Scuttle would classify and
 what it would recommend, and changes nothing. It's the one place full paths are
@@ -256,8 +289,10 @@ one.
 Scuttle asks for no special permissions. On macOS that means folders needing
 Full Disk Access are skipped rather than requested, and counted as places that
 could not be read. On Windows, a drawer on a different drive from the thing
-being held turns the move into a copy, which needs room for both copies while it
-runs — most likely to come up with a Steam library on a second disk.
+being held turns the move into a copy, verified by reading it back before the
+original is removed, which needs room for both copies while it runs. Whole
+folders on another drive are not moved at all; move the files inside instead.
+The Windows tray icon picks its light or dark version when Scuttle starts.
 
 ## Development
 
