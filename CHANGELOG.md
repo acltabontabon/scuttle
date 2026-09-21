@@ -45,6 +45,10 @@ Nothing yet.
 - Nothing is ever overwritten by a move or a restore.
 - Moving, restoring, emptying the drawer and scanning no longer run over each
   other.
+- On Windows, long-path handling turned any path containing a forward slash
+  into one the system could not open. Nothing shipped was affected — Scuttle
+  builds its own paths a piece at a time — but every move failed under test,
+  which is how it was found.
 
 ### Known limitations
 
