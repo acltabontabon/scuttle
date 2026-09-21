@@ -1323,6 +1323,7 @@ mod tests {
     use crate::safety::ProtectedPaths;
     use std::path::Path;
 
+    #[cfg(unix)]
     #[test]
     fn a_scan_root_must_be_somewhere_scuttle_can_look_after() {
         let protected = ProtectedPaths::for_home("/home/tester");
@@ -1332,5 +1333,18 @@ mod tests {
         assert!(check_scan_root(Path::new("/home/tester/.ssh"), &protected).is_err());
         assert!(check_scan_root(Path::new("/home/tester"), &protected).is_ok());
         assert!(check_scan_root(Path::new("/home/tester/Downloads"), &protected).is_ok());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_scan_root_must_be_somewhere_scuttle_can_look_after_on_windows() {
+        let protected = ProtectedPaths::for_home(r"C:\Users\tester");
+        assert!(check_scan_root(Path::new(r"C:\"), &protected).is_err());
+        assert!(check_scan_root(Path::new(r"C:\Users"), &protected).is_err());
+        assert!(check_scan_root(Path::new(r"D:\Games"), &protected).is_err());
+        assert!(check_scan_root(Path::new(r"Users\tester"), &protected).is_err());
+        assert!(check_scan_root(Path::new(r"C:\Users\tester\.ssh"), &protected).is_err());
+        assert!(check_scan_root(Path::new(r"C:\Users\tester"), &protected).is_ok());
+        assert!(check_scan_root(Path::new(r"C:\Users\tester\Downloads"), &protected).is_ok());
     }
 }
