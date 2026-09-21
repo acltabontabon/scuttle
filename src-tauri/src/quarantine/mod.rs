@@ -58,6 +58,9 @@ pub struct Quarantine {
     root: PathBuf,
     store: Arc<Store>,
     retention_days: u32,
+    /// Checked before anything is restored: a place that has become
+    /// protected since the item left is not somewhere to put it back.
+    protected: Option<crate::safety::ProtectedPaths>,
 }
 
 /// Where a restored item actually ended up.
@@ -102,7 +105,55 @@ impl Quarantine {
             root,
             store,
             retention_days,
+            protected: None,
         }
+    }
+
+    /// Refuse restores into anything this table protects.
+    pub fn with_protected(mut self, protected: crate::safety::ProtectedPaths) -> Quarantine {
+        self.protected = Some(protected);
+        self
+    }
+
+    /// May something be put back at `destination`?
+    ///
+    /// The original location is re-checked, not trusted: since the item left,
+    /// a folder on the way there may have been replaced by a link or junction
+    /// pointing somewhere else entirely, or the place may have become one
+    /// Scuttle protects. Either way Scuttle declines, and the item stays safely
+    /// in the Drawer.
+    pub(crate) fn check_destination(&self, destination: &Path) -> Result<()> {
+        let destination = safety::paths::normalize(destination);
+        if !destination.is_absolute() {
+            return Err(ScuttleError::Refused(
+                "That record does not say where it came from in a way Scuttle can trust.".into(),
+            ));
+        }
+        if safety::paths::is_within(&destination, &self.root) {
+            return Err(ScuttleError::Refused(
+                "That record points back into the Drawer itself.".into(),
+            ));
+        }
+        let home = dirs::home_dir();
+        let base = safety::paths::link_check_base(&destination, home.as_deref());
+        if let Some(link) = safety::paths::first_link_below(&destination, &base) {
+            return Err(ScuttleError::Refused(format!(
+                "The way back to where this came from now passes through a link ({}). Scuttle \
+                 will not follow it; the item is still safe in the Drawer.",
+                link.display()
+            )));
+        }
+        if let Some(rule) = self
+            .protected
+            .as_ref()
+            .and_then(|p| p.rule_for(&destination))
+        {
+            return Err(ScuttleError::Refused(format!(
+                "Where this came from is now protected ({}). It is still safe in the Drawer.",
+                rule.name
+            )));
+        }
+        Ok(())
     }
 
     pub fn root(&self) -> &Path {
@@ -195,6 +246,7 @@ impl Quarantine {
             mode: crate::storage::RecordMode::Whole,
             item_count: 1,
             attention: false,
+            keep: keeps(&target.assessment),
         };
         write_manifest(&cell, &record, "moving");
         if let Err(err) = self.store.insert_quarantine(&record) {
@@ -273,6 +325,29 @@ impl Quarantine {
                 remaining: done.remaining,
                 failed: done.issues.into_groups(),
             });
+        }
+
+        self.check_destination(&record.original_path)?;
+
+        // The Drawer promises to give back what it was given. When it kept a
+        // fingerprint of the contents, it checks them before handing anything
+        // back; a copy that no longer matches stays where it is, flagged.
+        if let Some(expected) = &record.content_hash {
+            if record.stored_path.is_file() {
+                match hash_file(&record.stored_path) {
+                    Ok(actual) if &actual == expected => {}
+                    Ok(_) => {
+                        let _ = self.store.set_attention(id, true);
+                        return Err(ScuttleError::Refused(
+                            "The copy in the Drawer is not the same as what went in, so Scuttle \
+                             has not put it back. It is still in the Drawer; open the Drawer \
+                             folder to look at it."
+                                .into(),
+                        ));
+                    }
+                    Err(e) => return Err(ScuttleError::Io(e)),
+                }
+            }
         }
 
         if let Some(parent) = record.original_path.parent() {
@@ -379,6 +454,15 @@ impl Quarantine {
     pub fn purge_all(&self, now_unix: i64) -> Result<PurgeOutcome> {
         let mut outcome = PurgeOutcome::default();
         for record in self.store.held_quarantine()? {
+            // Something an interrupted move could not settle is left for a
+            // person to look at one by one, never swept away with the rest.
+            if record.attention {
+                outcome.failed.push(PurgeFailure {
+                    display_name: record.display_name.clone(),
+                    reason: "Flagged after an interruption. Look at it on its own first.".into(),
+                });
+                continue;
+            }
             match self.purge(&record.id, now_unix) {
                 Ok(()) => {
                     outcome.removed += 1;
@@ -409,6 +493,16 @@ impl Quarantine {
             outcome: outcome.to_string(),
         });
     }
+}
+
+/// Whether the Drawer must hold on to an item until a person removes it.
+///
+/// Only something rebuildable or re-downloadable, moved without any caution to
+/// accept, may expire on its own. Anything a person moved past a caution —
+/// their own files, an application's data, an application — stays until they
+/// say otherwise, so a risky move they chose never quietly becomes permanent.
+pub fn keeps(assessment: &crate::safety::assess::Assessment) -> bool {
+    !(assessment.impact.may_expire() && assessment.cautions.is_empty())
 }
 
 /// The name to try for a restore. Attempt 0 is the original path itself;
@@ -523,9 +617,12 @@ mod tests {
             ActionContext {
                 protected: &self.protected,
                 allowed_roots: &self.roots,
-                // Test harnesses take the strict bidding, so every existing
-                // assertion keeps meaning what it meant.
-                bidding: crate::safety::Bidding::Scuttle,
+                // File mechanics, not policy: a person's choice with every
+                // caution accepted. Policy has its own tests, in
+                // `safety::validate`.
+                bidding: crate::safety::Bidding::User,
+                acknowledged: &crate::safety::assess::CautionKind::ALL,
+                installs: &crate::platform::installations::NO_INSTALL_AREAS,
             }
         }
 
@@ -562,6 +659,7 @@ mod tests {
                 created_unix: None,
                 group: vec![],
                 fingerprint,
+                assessment: Default::default(),
             }
         }
     }
@@ -745,6 +843,7 @@ mod tests {
                 mode: crate::storage::RecordMode::Whole,
                 item_count: 1,
                 attention: false,
+                keep: false,
             })
             .unwrap();
 
@@ -785,6 +884,10 @@ mod tests {
         let f = fixture();
         let old = f.file("Downloads/old.dmg", "old");
         let new = f.file("Downloads/new.dmg", "new");
+        // Old downloads: re-downloadable, nothing to acknowledge, so they are
+        // the kind of thing the Drawer may let go of on its own.
+        backdate(&old, 400);
+        backdate(&new, 400);
 
         let mut first = f.candidate(&old);
         first.id = "f1".into();
@@ -805,6 +908,78 @@ mod tests {
             f.store.quarantine_record(&held_new.id).unwrap().status,
             QuarantineStatus::Held
         );
+    }
+
+    fn backdate(path: &Path, days: u64) {
+        let when = std::time::SystemTime::now() - std::time::Duration::from_secs(days * 86_400);
+        let file = std::fs::File::options().write(true).open(path).unwrap();
+        file.set_times(
+            std::fs::FileTimes::new()
+                .set_modified(when)
+                .set_accessed(when),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_move_past_a_caution_never_expires_on_its_own() {
+        let f = fixture();
+        // Edited today: a person moved it knowing that.
+        let fresh = f.file("Downloads/draft.dmg", "draft");
+        let held = f
+            .quarantine
+            .hold(&f.candidate(&fresh), &f.ctx(), 0)
+            .unwrap();
+        assert!(held.keep);
+
+        // A personal file, however old, is not Scuttle's to throw away later.
+        let photo = f.file("Pictures/old.jpg", "photo");
+        backdate(&photo, 900);
+        let mut c = f.candidate(&photo);
+        c.id = "f2".into();
+        c.category = Category::HeavyStrays;
+        let held_photo = f.quarantine.hold(&c, &f.ctx(), 0).unwrap();
+        assert!(held_photo.keep);
+
+        let removed = f.quarantine.sweep_expired(10_000 * 86_400).unwrap();
+        assert_eq!(removed, 0);
+        assert!(held.stored_path.exists());
+        assert!(held_photo.stored_path.exists());
+    }
+
+    #[test]
+    fn a_restore_does_not_follow_a_link_planted_where_the_item_came_from() {
+        let f = fixture();
+        let file = f.file("Downloads/sub/thing.dmg", "bytes");
+        let record = f.quarantine.hold(&f.candidate(&file), &f.ctx(), 0).unwrap();
+
+        // While it was in the Drawer, its folder became a link to somewhere
+        // else entirely.
+        let elsewhere = f.home.join("Elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::remove_dir(f.home.join("Downloads/sub")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&elsewhere, f.home.join("Downloads/sub")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&elsewhere, f.home.join("Downloads/sub")).unwrap();
+
+        let error = f.quarantine.restore(&record.id, 10).unwrap_err();
+        assert_eq!(error.code(), "refused");
+        assert!(record.stored_path.exists(), "still safe in the Drawer");
+        assert!(!elsewhere.join("thing.dmg").exists());
+    }
+
+    #[test]
+    fn a_drawer_copy_that_changed_is_not_handed_back_as_if_it_had_not() {
+        let f = fixture();
+        let file = f.file("Downloads/thing.dmg", "original bytes");
+        let record = f.quarantine.hold(&f.candidate(&file), &f.ctx(), 0).unwrap();
+        std::fs::write(&record.stored_path, "tampered bytes").unwrap();
+
+        let error = f.quarantine.restore(&record.id, 10).unwrap_err();
+        assert_eq!(error.code(), "refused");
+        assert!(!file.exists(), "nothing was put back");
+        assert!(f.store.quarantine_record(&record.id).unwrap().attention);
     }
 
     #[test]
@@ -988,6 +1163,7 @@ mod tests {
                 mode: crate::storage::RecordMode::Whole,
                 item_count: 1,
                 attention: false,
+                keep: false,
             })
             .unwrap();
 

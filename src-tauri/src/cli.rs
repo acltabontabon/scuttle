@@ -36,6 +36,10 @@ pub fn handle_arguments() -> Option<Launch> {
         println!("scuttle {}", env!("CARGO_PKG_VERSION"));
         return None;
     }
+    if args.iter().any(|a| a == "--drawer-report") {
+        drawer_report();
+        return None;
+    }
     if args.iter().any(|a| a == "--dry-run") {
         let developer_debris = args.iter().any(|a| a == "--developer-debris");
         dry_run(developer_debris);
@@ -56,6 +60,10 @@ Run with no arguments to open the application.
                          Changes nothing.
   --developer-debris     Include build output and package caches in the
                          dry run.
+  --drawer-report        List everything the Drawer has held: where it came
+                         from, what Scuttle called it, whether it is still
+                         held, and whether the held copy is still on disk.
+                         Reads only; opens the database read-only.
   --background           Start without showing the window. Only does
                          anything when \"keep Scuttle in the menu bar\" is
                          on; otherwise the window opens as usual. This is
@@ -67,6 +75,103 @@ The dry run prints full paths. Everything else in Scuttle deliberately
 does not; see docs/privacy.md.",
         env!("CARGO_PKG_VERSION")
     );
+}
+
+/// What the Drawer holds and has held, straight from the database, opened
+/// read-only. For answering "what happened to X?" — including on a machine
+/// where something went wrong — without changing anything.
+fn drawer_report() {
+    let platform = platform::current();
+    let db = platform.data_dir().join("scuttle.db");
+    let conn = match rusqlite::Connection::open_with_flags(
+        &db,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) {
+        Ok(conn) => conn,
+        Err(e) => {
+            eprintln!("Could not open {} read-only: {e}", db.display());
+            return;
+        }
+    };
+    let query = "SELECT id, category, status, original_path, stored_path, size,
+                        quarantined_unix, expires_unix, resolved_unix, content_hash IS NOT NULL
+                 FROM quarantine_items ORDER BY quarantined_unix";
+    let mut statement = match conn.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Could not read the Drawer's records: {e}");
+            return;
+        }
+    };
+    let rows = statement.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+            r.get::<_, String>(4)?,
+            r.get::<_, i64>(5)?,
+            r.get::<_, i64>(6)?,
+            r.get::<_, i64>(7)?,
+            r.get::<_, Option<i64>>(8)?,
+            r.get::<_, bool>(9)?,
+        ))
+    });
+    let when = |t: i64| {
+        chrono::DateTime::from_timestamp(t, 0)
+            .map(|d| d.format("%Y-%m-%d %H:%M UTC").to_string())
+            .unwrap_or_else(|| t.to_string())
+    };
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    let _ = writeln!(out, "Drawer records in {}\n", db.display());
+    let mut count = 0;
+    if let Ok(rows) = rows {
+        for row in rows.flatten() {
+            count += 1;
+            let (id, category, status, original, stored, size, moved, expires, resolved, hashed) =
+                row;
+            let on_disk = std::path::Path::new(&stored).exists();
+            let back_home = std::path::Path::new(&original).exists();
+            let _ = writeln!(out, "{id}  [{category}] {status}");
+            let _ = writeln!(out, "  from      {original}");
+            let _ = writeln!(
+                out,
+                "  held at   {stored}  ({})",
+                if on_disk { "present" } else { "not on disk" }
+            );
+            let _ = writeln!(
+                out,
+                "  size      {}  hashed: {}",
+                human_bytes(size.max(0) as u64),
+                if hashed { "yes" } else { "no" }
+            );
+            let _ = writeln!(out, "  moved     {}", when(moved));
+            match resolved {
+                Some(t) => {
+                    let _ = writeln!(out, "  resolved  {}", when(t));
+                }
+                None => {
+                    let _ = writeln!(
+                        out,
+                        "  expiry    {} (only rebuildable items expire from 0.1.0 on)",
+                        when(expires)
+                    );
+                }
+            }
+            let _ = writeln!(
+                out,
+                "  original location currently {}",
+                if back_home {
+                    "has something at that path"
+                } else {
+                    "is empty"
+                }
+            );
+            let _ = writeln!(out);
+        }
+    }
+    let _ = writeln!(out, "{count} records. Nothing was changed.");
 }
 
 fn dry_run(developer_debris: bool) {

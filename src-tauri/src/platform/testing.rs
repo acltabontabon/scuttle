@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use super::apps::{AppSource, InstalledApp};
 use super::caches::CacheRule;
 use super::games::GameLibrary;
-use super::{KnownLocation, LocationRole, PlatformService};
+use super::{InstallAreas, KnownLocation, LocationRole, PlatformService};
 
 #[derive(Clone)]
 pub struct FixedPlatform {
@@ -28,6 +28,11 @@ pub struct FixedPlatform {
     pub libraries: Vec<GameLibrary>,
     pub processes: Vec<String>,
     pub installer_extensions: &'static [&'static str],
+    /// More application data roots, beyond the two every fixture home has.
+    /// `AppData/Local` for a Windows-shaped fixture, for instance.
+    pub extra_data_roots: Vec<PathBuf>,
+    /// Folders whose every child is an installed application.
+    pub install_containers: Vec<PathBuf>,
 }
 
 impl FixedPlatform {
@@ -41,6 +46,8 @@ impl FixedPlatform {
             // Both platforms' formats, so detector tests behave the same way
             // wherever the suite runs.
             installer_extensions: &["dmg", "pkg", "exe", "msi", "msix", "iso"],
+            extra_data_roots: Vec::new(),
+            install_containers: Vec::new(),
         }
     }
 
@@ -52,6 +59,20 @@ impl FixedPlatform {
             install_location: None,
             source: AppSource::Bundle,
         });
+        self
+    }
+
+    /// Treat `rel` (below home) as an application data root, the way
+    /// `%LOCALAPPDATA%` is on Windows.
+    pub fn with_data_root(mut self, rel: &str) -> Self {
+        self.extra_data_roots.push(self.home.join(rel));
+        self
+    }
+
+    /// Treat `rel` (below home) as a place applications are installed, the
+    /// way `%LOCALAPPDATA%\Programs` or /Applications is.
+    pub fn with_install_container(mut self, rel: &str) -> Self {
+        self.install_containers.push(self.home.join(rel));
         self
     }
 
@@ -101,8 +122,20 @@ impl PlatformService for FixedPlatform {
             self.home.join("Library/Application Support"),
         ]
         .into_iter()
+        .chain(self.extra_data_roots.iter().cloned())
         .filter(|p| p.is_dir())
         .collect()
+    }
+
+    fn install_areas(&self) -> InstallAreas {
+        InstallAreas {
+            containers: self.install_containers.clone(),
+            explicit: self
+                .apps
+                .iter()
+                .filter_map(|a| a.install_location.clone())
+                .collect(),
+        }
     }
 
     fn installed_apps(&self) -> Vec<InstalledApp> {

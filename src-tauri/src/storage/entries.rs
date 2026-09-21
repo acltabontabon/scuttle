@@ -476,7 +476,7 @@ impl Store {
         let mut statement = conn.prepare(
             "SELECT id, finding_id, original_path, stored_path, display_name, category, size,
                     content_hash, evidence, quarantined_unix, expires_unix, status, resolved_unix,
-                    mode, item_count, attention
+                    mode, item_count, attention, keep
              FROM quarantine_items WHERE status = ?1",
         )?;
         let rows = statement.query_map(params![status.as_str()], super::row_to_quarantine)?;

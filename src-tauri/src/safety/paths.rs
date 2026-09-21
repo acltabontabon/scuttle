@@ -159,6 +159,46 @@ pub fn first_link_below(path: &Path, base: &Path) -> Option<PathBuf> {
     None
 }
 
+/// Where a link check for a *destination* starts: the user's home when the
+/// path is inside it, otherwise the root of its drive or mount (`D:\\Games`,
+/// `/Volumes/Backup`). Links above that are the operating system's own —
+/// macOS `/var` is one — and are not Scuttle's to judge.
+pub fn link_check_base(path: &Path, home: Option<&Path>) -> PathBuf {
+    let normalized = normalize(path);
+    if let Some(home) = home {
+        if is_within(&normalized, home) {
+            return normalize(home);
+        }
+    }
+    let mut base = PathBuf::new();
+    let mut named = 0;
+    for comp in normalized.components() {
+        if matches!(comp, Component::Normal(_)) {
+            if named == 2 {
+                break;
+            }
+            named += 1;
+        }
+        base.push(comp.as_os_str());
+    }
+    base
+}
+
+/// Is `rel` a relative path that stays inside whatever it is joined to? Only
+/// plain names separated by `/`: no `..`, no `.`, no empty parts, no drive or
+/// stream syntax, no backslashes.
+pub fn is_contained_rel(rel: &str) -> bool {
+    !rel.is_empty()
+        && rel.split('/').all(|part| {
+            !part.is_empty()
+                && part != "."
+                && part != ".."
+                && !part.contains('\\')
+                && !part.contains(':')
+                && !part.contains('\0')
+        })
+}
+
 #[cfg(windows)]
 fn is_reparse_point(meta: &std::fs::Metadata) -> bool {
     use std::os::windows::fs::MetadataExt;

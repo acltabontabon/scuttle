@@ -170,6 +170,19 @@ pub const MIGRATIONS: &[&str] = &[
     ) WITHOUT ROWID;
     CREATE INDEX background_seen_age ON background_seen(seen_unix);
     "#,
+    // 4 — the Drawer keeps what cannot be rebuilt.
+    //
+    // `keep` marks items the retention sweep must never remove: a person's own
+    // files, an application's data, and anything moved past a caution. Only
+    // rebuildable things (caches, build output) and re-downloadable ones may
+    // expire on their own. Before 0.1.0 everything expired after its retention
+    // window, so every existing row is kept — including anything an alpha
+    // build mistook for an installer — except caches and build output, which
+    // were only ever rebuildable.
+    r#"
+    ALTER TABLE quarantine_items ADD COLUMN keep INTEGER NOT NULL DEFAULT 1;
+    UPDATE quarantine_items SET keep = 0 WHERE category IN ('caches', 'developer_debris');
+    "#,
 ];
 
 /// Bring a connection up to the current schema.
@@ -315,5 +328,53 @@ mod tests {
             })
             .unwrap();
         assert_eq!(kind, "full");
+    }
+
+    #[test]
+    fn an_alpha_drawer_keeps_everything_that_cannot_be_rebuilt() {
+        // A 0.1.0-alpha.2 database: three migrations, and a Drawer holding a
+        // cache, an "installer" an alpha build took from inside an
+        // application, and a person's screenshot. After upgrading, only the
+        // cache may still expire; the rest wait for a person.
+        let mut conn = Connection::open_in_memory().unwrap();
+        for sql in &MIGRATIONS[..3] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.execute_batch("PRAGMA user_version = 3").unwrap();
+        conn.execute_batch(
+            "INSERT INTO quarantine_items (id, original_path, stored_path, display_name,
+                category, size, quarantined_unix, expires_unix, status, content_hash)
+             VALUES
+               ('cache', '/c', '/q/cache/c', 'c', 'caches', 5, 1, 2, 'held', NULL),
+               ('app', 'C:/Users/x/AppData/Local/Discord/app-1.0.9001/Discord.exe',
+                  '/q/app/Discord.exe', 'Discord.exe', 'installers', 5, 1, 2, 'held', 'abc'),
+               ('shot', '/s.png', '/q/shot/s.png', 's.png', 'screenshots', 5, 1, 2, 'held', NULL);",
+        )
+        .unwrap();
+
+        apply(&mut conn).unwrap();
+
+        let keep = |id: &str| -> i64 {
+            conn.query_row("SELECT keep FROM quarantine_items WHERE id=?1", [id], |r| {
+                r.get(0)
+            })
+            .unwrap()
+        };
+        assert_eq!(keep("cache"), 0);
+        assert_eq!(
+            keep("app"),
+            1,
+            "an alpha's mistake must not expire behind anyone"
+        );
+        assert_eq!(keep("shot"), 1);
+        let (hash, path): (String, String) = conn
+            .query_row(
+                "SELECT content_hash, original_path FROM quarantine_items WHERE id='app'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(hash, "abc", "recovery metadata survives");
+        assert!(path.ends_with("Discord.exe"));
     }
 }

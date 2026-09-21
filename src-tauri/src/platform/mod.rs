@@ -11,6 +11,7 @@ use std::sync::Arc;
 pub mod apps;
 pub mod caches;
 pub mod games;
+pub mod installations;
 pub mod testing;
 
 #[cfg(target_os = "macos")]
@@ -21,6 +22,7 @@ mod windows;
 pub use apps::{AppIndex, AppSource, InstalledApp};
 pub use caches::{CacheRule, CacheSafety};
 pub use games::{GameInstall, GameLibrary, LibraryKind};
+pub use installations::{InstallAreas, InstallIndex, InstallKind, InstallRoot};
 
 /// A directory Scuttle knows something about before it looks inside.
 #[derive(Debug, Clone)]
@@ -104,6 +106,32 @@ pub trait PlatformService: Send + Sync {
     fn own_data_dirs(&self) -> Vec<PathBuf> {
         vec![self.data_dir(), self.quarantine_root()]
     }
+
+    /// Where applications are installed: folders whose every child is an
+    /// application (Program Files, `%LOCALAPPDATA%\Programs`, /Applications),
+    /// plus install folders the OS recorded for individual applications.
+    ///
+    /// Anything inside these is part of an application and is never offered
+    /// as cleanup, whatever else is true of it.
+    fn install_areas(&self) -> InstallAreas {
+        InstallAreas::default()
+    }
+}
+
+/// The folder holding Scuttle's own program. Moving it would remove the thing
+/// doing the moving, so it is protected like Scuttle's data.
+///
+/// On macOS that is the whole `.app` bundle, not just `Contents/MacOS`.
+pub fn own_program_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
+    let bundle = exe
+        .ancestors()
+        .find(|a| a.extension().is_some_and(|e| e.eq_ignore_ascii_case("app")));
+    match bundle {
+        Some(bundle) => Some(bundle.to_path_buf()),
+        None => exe.parent().map(Path::to_path_buf),
+    }
 }
 
 /// Mark Scuttle's own files as off limits in a protected-path table.
@@ -113,6 +141,13 @@ pub fn protect_own_files(
 ) {
     for dir in platform.own_data_dirs() {
         protected.also_protect("Scuttle's own files", dir);
+    }
+    // Not under test: a test binary lives in the build tree, which fixtures
+    // never scan, and protecting it would say nothing about Scuttle.
+    if !cfg!(test) {
+        if let Some(program) = own_program_dir() {
+            protected.also_protect("Scuttle itself", program);
+        }
     }
 }
 

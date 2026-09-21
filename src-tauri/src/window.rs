@@ -6,9 +6,11 @@
 //!   closed and never recreated, so reopening is the same window with the same
 //!   state, and there is never a second one.
 //! * An explicit quit — the tray's own item, ⌘Q, logging out, shutting down —
-//!   always quits. Nothing here ever prevents an exit; the hiding happens at
-//!   the window's close, which is a different event, and that is precisely why
-//!   hiding rather than closing is the right mechanism.
+//!   always quits. The only thing that delays it is files in motion: a move is
+//!   stopped at its next safe point and the window says so, and a second quit
+//!   does not wait at all. The hiding happens at the window's close, which is
+//!   a different event, and that is precisely why hiding rather than closing
+//!   is the right mechanism.
 //! * With background mode off, or with no tray to return from, behaviour is
 //!   exactly what it was before any of this existed.
 
@@ -102,13 +104,63 @@ pub fn should_conceal<R: Runtime>(app: &AppHandle<R>) -> bool {
 /// Stops the scheduler first so that nothing is mid-scan when the process
 /// goes. Quitting Scuttle stops Scuttle's background work: there is no helper,
 /// no service and nothing left running.
+///
+/// If files are moving, quitting waits for them — briefly, and visibly. The
+/// move is asked to stop at its next safe point (between files, or between
+/// chunks of a copy), the window says so, and the process ends once the
+/// Drawer's records are settled. Asking to quit a second time ends it at once:
+/// the journal was written for exactly that, and the next launch settles
+/// whatever was in flight.
 pub fn quit<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(state) = app.try_state::<AppState>() {
-        state.begin_quitting();
-        state.stop_scheduler();
-        state.cancel_scan();
+    let Some(state) = app.try_state::<AppState>() else {
+        app.exit(0);
+        return;
+    };
+    let already = state.quitting();
+    state.begin_quitting();
+    state.stop_scheduler();
+    state.cancel_scan();
+
+    if !already && finish_before_quitting(app, &state) {
+        return;
     }
     app.exit(0);
+}
+
+/// Is something changing files that should be allowed to reach a safe point?
+pub fn busy_with_files(state: &AppState) -> bool {
+    use crate::commands::Operation;
+    matches!(
+        state.current_operation(),
+        Some(Operation::Move | Operation::Restore | Operation::EmptyDrawer | Operation::RemoveItem)
+    )
+}
+
+/// Wind down a running file operation, then exit. Returns false when there was
+/// nothing to wait for.
+pub fn finish_before_quitting<R: Runtime>(app: &AppHandle<R>, state: &AppState) -> bool {
+    if !busy_with_files(state) {
+        return false;
+    }
+    state.cancel_move();
+    reveal(app);
+    ask_frontend_to(app, "quitting");
+
+    let app = app.clone();
+    let state = state.clone_handle();
+    let spawned = std::thread::Builder::new()
+        .name("scuttle-quit".into())
+        .spawn(move || {
+            // A move stops within a chunk; a restore or an empty finishes the
+            // item it is on. Two minutes is far past either, and past it the
+            // journal is the safer bet than waiting on a stuck disk.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+            while busy_with_files(&state) && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            app.exit(0);
+        });
+    spawned.is_ok()
 }
 
 /// Ask the window to go somewhere. Ignored if nobody is listening yet.

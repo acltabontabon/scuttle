@@ -37,6 +37,11 @@ pub enum ScuttleError {
     #[error("{0}")]
     Transfer(crate::quarantine::transfer::FsFailure),
 
+    /// The item can be moved, but only once the person has seen and accepted
+    /// a caution about it. Not a prohibition: a question the interface asks.
+    #[error("{0}")]
+    NeedsAcknowledgement(String),
+
     #[error("scan already running")]
     ScanBusy,
 
@@ -72,6 +77,7 @@ impl ScuttleError {
             Self::NotFound { .. } => "not_found",
             Self::Stale(_) => "stale",
             Self::Refused(_) => "refused",
+            Self::NeedsAcknowledgement(_) => "needs_acknowledgement",
             Self::Transfer(_) => "transfer",
             Self::ScanBusy => "scan_busy",
             Self::Busy(_) => "busy",

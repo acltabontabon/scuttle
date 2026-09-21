@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use crate::model::CleanupCandidate;
 use crate::platform::PlatformService;
 use crate::quarantine::Quarantine;
+use crate::safety::assess::CautionKind;
 use crate::safety::{ActionContext, Bidding, ProtectedPaths};
 use crate::scanning::{
     self, CleanupObserver, Phase, Progress, ScanContext, ScanObserver, ScanOptions, ScanSummary,
@@ -22,14 +23,21 @@ use crate::{Result, ScuttleError};
 pub struct ActionScope {
     protected: ProtectedPaths,
     roots: Vec<PathBuf>,
+    installs: crate::platform::InstallAreas,
 }
 
 impl ActionScope {
-    pub fn ctx(&self, bidding: Bidding) -> ActionContext<'_> {
+    pub fn ctx<'a>(
+        &'a self,
+        bidding: Bidding,
+        acknowledged: &'a [CautionKind],
+    ) -> ActionContext<'a> {
         ActionContext {
             protected: &self.protected,
             allowed_roots: &self.roots,
             bidding,
+            acknowledged,
+            installs: &self.installs,
         }
     }
 }
@@ -380,7 +388,8 @@ impl AppState {
             self.inner.platform.quarantine_root(),
             Arc::clone(&self.inner.store),
             retention,
-        ))
+        )
+        .with_protected(self.protected_paths()))
     }
 
     /// Register a new scan, refusing if one is already running.
@@ -823,24 +832,29 @@ impl AppState {
     /// the safety gate. Bound by the verdicts Scuttle computed, because in
     /// this path nobody looked at the item.
     pub fn hold(&self, candidate: &CleanupCandidate) -> Result<QuarantineRecord> {
-        self.hold_with(candidate, Bidding::Scuttle)
+        self.hold_with(candidate, Bidding::Scuttle, &[])
     }
 
     /// Move a candidate the user picked out by hand. Same gate, same protected
     /// table, same containment and staleness checks — the only thing that
     /// changes is that Scuttle's own "not suggested" verdict stops being
     /// binding, because someone looked and decided. See [`Bidding`].
-    pub fn hold_for_user(&self, candidate: &CleanupCandidate) -> Result<QuarantineRecord> {
-        self.hold_with(candidate, Bidding::User)
+    pub fn hold_for_user(
+        &self,
+        candidate: &CleanupCandidate,
+        acknowledged: &[CautionKind],
+    ) -> Result<QuarantineRecord> {
+        self.hold_with(candidate, Bidding::User, acknowledged)
     }
 
     fn hold_with(
         &self,
         candidate: &CleanupCandidate,
         bidding: Bidding,
+        acknowledged: &[CautionKind],
     ) -> Result<QuarantineRecord> {
         let scope = self.action_scope();
-        let ctx = scope.ctx(bidding);
+        let ctx = scope.ctx(bidding, acknowledged);
         let quarantine = self.quarantine()?;
 
         if candidate.is_shared_contents() {
@@ -878,6 +892,7 @@ impl AppState {
         ActionScope {
             protected: self.protected_paths(),
             roots: self.lock_roots().clone(),
+            installs: self.inner.platform.install_areas(),
         }
     }
 
@@ -898,7 +913,7 @@ impl AppState {
                 Ok(candidate) => candidate,
                 Err(_) => continue,
             };
-            let ctx = scope.ctx(Bidding::User);
+            let ctx = scope.ctx(Bidding::User, &[]);
             if candidate.is_shared_contents() {
                 // Structural checks only: the reviewed set replaces the
                 // freshness comparison.
@@ -954,8 +969,9 @@ impl AppState {
         &self,
         id: &str,
         keep: super::KeepChoice,
+        acknowledged: &[CautionKind],
     ) -> Result<super::GroupOutcome> {
-        super::run_group_action(self, id, keep)
+        super::run_group_action(self, id, keep, acknowledged)
     }
 
     /// Quarantine every confident finding in one pile. The Tauri command is a
@@ -973,8 +989,12 @@ impl AppState {
     }
 
     /// Quarantine a hand-picked selection of findings.
-    pub fn quarantine_many(&self, ids: &[String]) -> Result<super::BulkOutcome> {
-        super::run_quarantine_many(self, ids)
+    pub fn quarantine_many(
+        &self,
+        ids: &[String],
+        acknowledged: &[CautionKind],
+    ) -> Result<super::BulkOutcome> {
+        super::run_quarantine_many(self, ids, acknowledged)
     }
 
     /// Empty the drawer. The Tauri command is a thin wrapper over this.

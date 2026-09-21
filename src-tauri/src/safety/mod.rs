@@ -7,12 +7,13 @@
 //! * [`validate`] — the gate every destructive action passes through, which
 //!   re-derives all of the above against the live filesystem.
 
+pub mod assess;
 pub mod paths;
 pub mod protected;
 pub mod validate;
 
 pub use protected::ProtectedPaths;
 pub use validate::{
-    authorize, authorize_contents, authorize_path, observe, ActionContext, AuthorizedTarget,
-    Bidding,
+    assess_live, authorize, authorize_contents, authorize_path, observe, ActionContext,
+    AuthorizedTarget, Bidding,
 };

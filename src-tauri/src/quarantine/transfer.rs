@@ -36,9 +36,10 @@ use serde::Serialize;
 
 use super::fsx::{self, EntryKind, Identity, PathSource, Source};
 
-/// Files up to this size are re-read from the destination and their hash
-/// compared before the original is removed.
-pub const REREAD_VERIFY_LIMIT: u64 = 128 * 1024 * 1024;
+// Every copied file is re-read from the destination and its hash compared
+// with what was read from the source before the original is removed — at
+// every size. (Until 0.1.0 only files up to 128 MB were; a large video or
+// disk image was trusted on its length alone, which is not integrity.)
 
 const CHUNK: usize = 1024 * 1024;
 
@@ -652,11 +653,15 @@ fn copy_then_remove(
             return Err(FsFailure::new(FailureKind::Stale, Phase::Verify, &item));
         }
         let hash = hasher.finalize().to_hex().to_string();
-        if before.size <= REREAD_VERIFY_LIMIT {
-            let reread = hash_file(&part).map_err(|e| fail(&e, Phase::Verify))?;
-            if reread != hash {
-                return Err(FsFailure::new(FailureKind::Other, Phase::Verify, &item));
+        let reread = hash_stoppable(&part, ctl).map_err(|e| {
+            if e.kind() == io::ErrorKind::Interrupted {
+                FsFailure::new(FailureKind::Cancelled, Phase::Verify, &item)
+            } else {
+                fail(&e, Phase::Verify)
             }
+        })?;
+        if reread != hash {
+            return Err(FsFailure::new(FailureKind::Other, Phase::Verify, &item));
         }
         // Carry the file's own timestamp and permission bits across.
         if let Ok(mtime) = source_meta.modified() {
@@ -702,6 +707,25 @@ fn copy_then_remove(
         bytes: written,
         hash: Some(hash),
     })
+}
+
+/// blake3 of a file's content, read in chunks so a stop request is noticed
+/// between them. A stop is reported as `Interrupted`.
+fn hash_stoppable(path: &Path, ctl: &Ctl<'_>) -> io::Result<String> {
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = blake3::Hasher::new();
+    let mut buffer = vec![0u8; CHUNK];
+    loop {
+        if ctl.cancelled() {
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "stopped"));
+        }
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hasher.finalize().to_hex().to_string())
 }
 
 /// blake3 of a file's content.
@@ -1100,6 +1124,57 @@ mod tests {
         assert!(s.src.exists());
         assert!(!s.dst.exists());
         assert!(part_files(&s.dir).is_empty());
+    }
+
+    #[test]
+    fn a_stop_during_verification_leaves_the_original_whole_and_publishes_nothing() {
+        // Interrupted after the copy was written but before it was verified:
+        // nothing may be published and the source must be untouched.
+        let body = vec![9u8; 2 * CHUNK + 17];
+        let s = setup(&body);
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let flag = std::sync::Arc::clone(&cancel);
+        let script = Script::new()
+            .cross_device()
+            .on(Step::Verify, move || flag.store(true, Ordering::Relaxed));
+        let ctl = Ctl {
+            cancel: Some(&cancel),
+            faults: Some(&script),
+            ..Ctl::default()
+        };
+
+        let failure = move_entry(&s.src, &s.dst, &ctl).unwrap_err();
+        assert_eq!(failure.kind, FailureKind::Cancelled, "{failure:?}");
+        assert_eq!(failure.phase, Phase::Verify);
+        assert_eq!(fs::read(&s.src).unwrap(), body, "the original is intact");
+        assert!(!s.dst.exists());
+        assert!(part_files(&s.dir).is_empty());
+    }
+
+    #[test]
+    fn a_large_copy_is_verified_by_content_not_by_length() {
+        // Every size is re-read now. A copy whose bytes differ from what was
+        // read is never published, however long it is.
+        let body = vec![3u8; 3 * CHUNK];
+        let s = setup(&body);
+        let dst_dir = s.dst.parent().unwrap().to_path_buf();
+        let script = Script::new().cross_device().on(Step::Verify, move || {
+            for entry in fs::read_dir(&dst_dir).unwrap().flatten() {
+                if entry.file_name().to_string_lossy().ends_with(PART_SUFFIX) {
+                    let mut bytes = fs::read(entry.path()).unwrap();
+                    bytes[CHUNK + 1] ^= 0xff;
+                    fs::write(entry.path(), bytes).unwrap();
+                }
+            }
+        });
+        let ctl = Ctl {
+            faults: Some(&script),
+            ..Ctl::default()
+        };
+        let failure = move_entry(&s.src, &s.dst, &ctl).unwrap_err();
+        assert_eq!(failure.phase, Phase::Verify, "{failure:?}");
+        assert_eq!(fs::read(&s.src).unwrap(), body);
+        assert!(!s.dst.exists());
     }
 
     #[test]

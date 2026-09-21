@@ -17,8 +17,8 @@ mod updates;
 
 pub use dry_run::{DryRunReport, DryRunRow};
 pub use moves::{
-    FindingResult, FindingStatus, MovePhase, MoveReport, MoveRequest, MoveSink, MoveSnapshot,
-    Refusal, Unit,
+    CautionGroup, FindingResult, FindingStatus, MovePhase, MovePlan, MoveReport, MoveRequest,
+    MoveSink, MoveSnapshot, PlannedItem, PlannedShape, PlannedStatus, Refusal, Unit,
 };
 pub use state::{AppState, InstallLease, Operation, OperationGuard, Priority};
 
@@ -188,6 +188,10 @@ pub fn rummage(
         return Err(ScuttleError::Refused(
             "There is nowhere to look. Choose at least one folder in Settings.".into(),
         ));
+    }
+    let protected = state.protected_paths();
+    for root in &roots {
+        check_scan_root(&root.path, &protected)?;
     }
 
     let options = ScanOptions {
@@ -365,11 +369,23 @@ pub(super) fn plan_group(candidate: &CleanupCandidate, keep: KeepChoice) -> Resu
             "That finding is a single thing, not a group.".into(),
         ));
     }
-    if !candidate.is_actionable() {
-        return Err(ScuttleError::Refused(format!(
-            "Scuttle does not act on findings marked {}.",
-            candidate.recommended_action_label()
-        )));
+    // A group action is a person's choice about their own copies, so it is
+    // held to what a person may choose — not to what Scuttle would sweep.
+    // Cautions are checked per member at the gate.
+    match candidate.assessment.eligibility {
+        crate::safety::assess::Eligibility::Blocked => {
+            return Err(ScuttleError::Refused(
+                "Scuttle will not act on this at all.".into(),
+            ))
+        }
+        crate::safety::assess::Eligibility::ExplicitOnly => {
+            return Err(ScuttleError::Refused(
+                "These belong to an application. Scuttle only moves application files one \
+                 at a time, when you choose them."
+                    .into(),
+            ))
+        }
+        _ => {}
     }
 
     // Members with no timestamp sort last, so they are never silently chosen
@@ -407,6 +423,7 @@ pub(crate) fn run_group_action(
     state: &AppState,
     id: &str,
     keep: KeepChoice,
+    acknowledged: &[crate::safety::assess::CautionKind],
 ) -> Result<GroupOutcome> {
     let candidate = state.store().candidate(id)?;
     let plan = plan_group(&candidate, keep)?;
@@ -421,7 +438,7 @@ pub(crate) fn run_group_action(
                 continue;
             }
         };
-        match state.hold(&derived) {
+        match state.hold_for_user(&derived, acknowledged) {
             Ok(record) => held.push(record),
             Err(error) => refused.push(GroupRefusal {
                 display_name: derived.display_name.clone(),
@@ -483,7 +500,7 @@ pub(crate) fn run_bulk_quarantine(
         .candidates_for_scan(&scan.id)?
         .into_iter()
         .filter(|c| category.is_none_or(|wanted| c.category == wanted))
-        .filter(|c| c.recommended_action == RecommendedAction::Quarantine)
+        .filter(|c| c.assessment.eligibility == crate::safety::assess::Eligibility::Suggested)
         .collect();
 
     let mut held = Vec::new();
@@ -531,7 +548,11 @@ pub(crate) fn run_bulk_quarantine(
 /// [`Risk::Protected`] is the real prohibition, and it is enforced where it
 /// belongs: inside [`safety::authorize`], against the live filesystem, for
 /// every item individually. Nothing routed through here can get past it.
-pub(crate) fn run_quarantine_many(state: &AppState, ids: &[String]) -> Result<BulkOutcome> {
+pub(crate) fn run_quarantine_many(
+    state: &AppState,
+    ids: &[String],
+    acknowledged: &[crate::safety::assess::CautionKind],
+) -> Result<BulkOutcome> {
     let mut held = Vec::new();
     let mut refused = Vec::new();
     let mut bytes = 0u64;
@@ -553,7 +574,7 @@ pub(crate) fn run_quarantine_many(state: &AppState, ids: &[String]) -> Result<Bu
         // the live filesystem for every item — protected table, containment,
         // links, staleness — and only Scuttle's own "not suggested" verdict
         // steps aside, because someone looked at this one and chose it.
-        match state.hold_for_user(&candidate) {
+        match state.hold_for_user(&candidate, acknowledged) {
             Ok(record) => {
                 bytes += record.size;
                 held.push(record);
@@ -829,6 +850,13 @@ pub fn save_settings(
         settings.background_notify = false;
     }
 
+    // A folder to look in is also, after a scan, the boundary of what may be
+    // moved — so the same rules apply to it as to anything Scuttle moves.
+    let protected = state.protected_paths();
+    for root in &settings.scan_roots {
+        check_scan_root(root, &protected)?;
+    }
+
     let previous = state.store().settings()?;
     state.store().save_settings(&settings)?;
 
@@ -849,6 +877,37 @@ pub fn save_settings(
     emit_background(&app, state.inner());
 
     Ok(settings)
+}
+
+/// Refuse a folder that must never become the area Scuttle may act in: a
+/// filesystem or drive root, a folder directly beneath one (`/Users`,
+/// `C:\\Windows`), anything protected, or Scuttle's own storage. The home
+/// folder itself is allowed — looking is harmless, and everything structural
+/// inside it is still refused at the gate.
+pub(crate) fn check_scan_root(
+    root: &std::path::Path,
+    protected: &crate::safety::ProtectedPaths,
+) -> Result<()> {
+    let normalized = crate::safety::paths::normalize(root);
+    let named = normalized
+        .components()
+        .filter(|c| matches!(c, std::path::Component::Normal(_)))
+        .count();
+    if !normalized.is_absolute() || named <= 1 {
+        return Err(ScuttleError::Refused(format!(
+            "{} is too close to the root of the disk for Scuttle to look after. Choose a \
+             folder inside it.",
+            root.display()
+        )));
+    }
+    if let Some(rule) = protected.rule_for(&normalized) {
+        return Err(ScuttleError::Refused(format!(
+            "{} is protected ({}). Scuttle does not look there.",
+            root.display(),
+            rule.name
+        )));
+    }
+    Ok(())
 }
 
 /// The folders Scuttle would look at, so Settings can show them without
@@ -1146,6 +1205,7 @@ pub fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static
         findings,
         finding,
         moves::start_move,
+        moves::preview_move,
         moves::cancel_move,
         moves::move_status,
         moves::dismiss_move,
@@ -1225,4 +1285,22 @@ pub fn init(app: &tauri::App) -> std::result::Result<(), Box<dyn std::error::Err
 
     app.manage(state);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_scan_root;
+    use crate::safety::ProtectedPaths;
+    use std::path::Path;
+
+    #[test]
+    fn a_scan_root_must_be_somewhere_scuttle_can_look_after() {
+        let protected = ProtectedPaths::for_home("/home/tester");
+        assert!(check_scan_root(Path::new("/"), &protected).is_err());
+        assert!(check_scan_root(Path::new("/home"), &protected).is_err());
+        assert!(check_scan_root(Path::new("relative/path"), &protected).is_err());
+        assert!(check_scan_root(Path::new("/home/tester/.ssh"), &protected).is_err());
+        assert!(check_scan_root(Path::new("/home/tester"), &protected).is_ok());
+        assert!(check_scan_root(Path::new("/home/tester/Downloads"), &protected).is_ok());
+    }
 }

@@ -13,6 +13,7 @@ use fixtures::*;
 use scuttle_core::commands::AppState;
 use scuttle_core::model::{Category, RecommendedAction};
 use scuttle_core::platform::PlatformService;
+use scuttle_core::safety::assess::{CautionKind, Eligibility};
 use scuttle_core::scanning::{ScanObserver, ScanOptions, SilentObserver};
 
 /// Records what the interface would have been told during a scan.
@@ -208,7 +209,11 @@ fn keeping_the_newest_holds_every_other_copy() {
         .clone();
 
     let outcome = state
-        .quarantine_group(&group.id, scuttle_core::commands::KeepChoice::Newest)
+        .quarantine_group(
+            &group.id,
+            scuttle_core::commands::KeepChoice::Newest,
+            &CautionKind::ALL,
+        )
         .expect("group action");
 
     assert_eq!(outcome.held.len(), 2, "refused: {:?}", outcome.refused);
@@ -245,7 +250,11 @@ fn keeping_the_oldest_keeps_the_other_end_of_the_group() {
         .clone();
 
     let outcome = state
-        .quarantine_group(&group.id, scuttle_core::commands::KeepChoice::Oldest)
+        .quarantine_group(
+            &group.id,
+            scuttle_core::commands::KeepChoice::Oldest,
+            &CautionKind::ALL,
+        )
         .expect("group action");
     assert_eq!(outcome.held.len(), 2);
     assert!(oldest.exists());
@@ -289,7 +298,11 @@ fn a_group_action_keeps_going_when_one_member_has_changed() {
     std::fs::write(&victim, b"changed underneath us").expect("write");
 
     let outcome = state
-        .quarantine_group(&group.id, scuttle_core::commands::KeepChoice::Newest)
+        .quarantine_group(
+            &group.id,
+            scuttle_core::commands::KeepChoice::Newest,
+            &CautionKind::ALL,
+        )
         .expect("group action");
 
     assert_eq!(outcome.held.len(), 1);
@@ -316,16 +329,21 @@ fn a_group_action_is_refused_on_a_finding_scuttle_would_not_act_on() {
         .expect("something inspect-only");
 
     let error = state
-        .quarantine_group(&inspect_only.id, scuttle_core::commands::KeepChoice::Newest)
+        .quarantine_group(
+            &inspect_only.id,
+            scuttle_core::commands::KeepChoice::Newest,
+            &CautionKind::ALL,
+        )
         .expect_err("should refuse");
     assert_eq!(error.code(), "refused");
 }
 
 #[test]
-fn a_bulk_action_moves_only_what_scuttle_was_confident_about() {
-    // The safety line for bulk handling: anything rated Review or
-    // InspectOnly has to be opened and acted on individually, because those
-    // ratings exist precisely to say "look at this yourself".
+fn a_bulk_action_moves_only_what_scuttle_suggests() {
+    // The safety line for bulk handling: a sweep nobody looked at item by item
+    // may only move what Scuttle suggests — rebuildable, re-downloadable
+    // things with nothing to acknowledge. An application's data never
+    // qualifies, however confident Scuttle is that the application is gone.
     let world = abandoned_game();
     let (state, options) = state_for(&world);
     let scan_id = state.start_scan(&options).expect("start");
@@ -333,58 +351,192 @@ fn a_bulk_action_moves_only_what_scuttle_was_confident_about() {
         .run_scan_with(&scan_id, options, &SilentObserver)
         .expect("scan");
 
-    let before = state
+    let ghosts: Vec<_> = state
         .store()
         .candidates_for_scan(&scan_id)
-        .expect("findings");
-    let confident: Vec<_> = before
-        .iter()
+        .expect("findings")
+        .into_iter()
         .filter(|c| c.category == Category::Ghosts)
-        .filter(|c| c.recommended_action == RecommendedAction::Quarantine)
-        .cloned()
         .collect();
-    let spared: Vec<_> = before
+    assert!(!ghosts.is_empty(), "the fixture has leftovers");
+    assert!(ghosts
         .iter()
-        .filter(|c| c.category == Category::Ghosts)
-        .filter(|c| c.recommended_action != RecommendedAction::Quarantine)
-        .cloned()
-        .collect();
-    assert!(
-        !confident.is_empty(),
-        "fixture should have something confident"
-    );
-    assert!(!spared.is_empty(), "fixture should have something to spare");
+        .all(|c| c.assessment.eligibility != Eligibility::Suggested));
 
     let outcome = state
         .quarantine_confident(Category::Ghosts)
         .expect("bulk action");
-
-    assert_eq!(
-        outcome.held.len(),
-        confident.len(),
-        "refused: {:?}",
-        outcome.refused
-    );
-    assert_eq!(
-        outcome.bytes,
-        outcome.held.iter().map(|r| r.size).sum::<u64>()
-    );
-
-    for candidate in &confident {
+    assert!(outcome.held.is_empty(), "held: {:?}", outcome.held);
+    for candidate in &ghosts {
         assert!(
-            !candidate.path.exists(),
-            "{} should have moved",
+            candidate.path.exists(),
+            "{} was swept",
             candidate.display_name
         );
     }
-    for candidate in &spared {
+
+    // The same leftovers are still a person's to move, once they have seen
+    // what Scuttle has to say about them.
+    let ids: Vec<String> = ghosts
+        .iter()
+        .filter(|c| c.risk != scuttle_core::model::Risk::Protected)
+        .map(|c| c.id.clone())
+        .collect();
+    let refused = state.quarantine_many(&ids, &[]).expect("selection");
+    assert!(refused.held.is_empty());
+    assert!(refused
+        .refused
+        .iter()
+        .all(|r| r.code == "needs_acknowledgement"));
+    let chosen = state
+        .quarantine_many(&ids, &CautionKind::ALL)
+        .expect("selection");
+    assert_eq!(
+        chosen.held.len(),
+        ids.len(),
+        "refused: {:?}",
+        chosen.refused
+    );
+}
+
+#[test]
+fn installers_scuttle_is_sure_of_are_swept_and_nothing_else() {
+    let world = old_installers();
+    let (state, options) = state_for(&world);
+    let scan_id = state.start_scan(&options).expect("start");
+    state
+        .run_scan_with(&scan_id, options, &SilentObserver)
+        .expect("scan");
+    let before = state
+        .store()
+        .candidates_for_scan(&scan_id)
+        .expect("findings");
+    let suggested: Vec<_> = before
+        .iter()
+        .filter(|c| c.assessment.eligibility == Eligibility::Suggested)
+        .collect();
+    assert!(!suggested.is_empty(), "old installers for installed apps");
+    let outcome = state.quarantine_all_confident().expect("sweep");
+    assert_eq!(outcome.held.len(), suggested.len(), "{:?}", outcome.refused);
+    for c in before
+        .iter()
+        .filter(|c| c.assessment.eligibility != Eligibility::Suggested)
+    {
         assert!(
-            candidate.path.exists(),
-            "{} was swept up by a bulk action despite being {:?}",
-            candidate.display_name,
-            candidate.recommended_action
+            c.path.exists(),
+            "{} moved without being suggested",
+            c.display_name
         );
     }
+}
+
+/// The incident, end to end, through every detector: a Discord-shaped
+/// installation beneath a Windows-like `AppData/Local`, installed, closed,
+/// with an old version folder beside the current one — and a standalone
+/// installer in Downloads. Only the installer is ever offered, and the sweep
+/// cannot reach the application however it is asked.
+#[test]
+fn a_discord_like_install_survives_a_rummage_and_a_sweep() {
+    let mut world = World::new();
+    let base = "AppData/Local/Discord";
+    world.file(&format!("{base}/Update.exe"), 200, 2 * MB);
+    world.file(&format!("{base}/app-1.0.9001/Discord.exe"), 3, 2 * MB);
+    world.file(&format!("{base}/app-1.0.9001/ffmpeg.dll"), 3, MB);
+    world.file(&format!("{base}/app-1.0.9001/resources/app.asar"), 3, MB);
+    world.file(&format!("{base}/app-1.0.9000/Discord.exe"), 120, 2 * MB);
+    world.file(&format!("{base}/app-1.0.9000/ffmpeg.dll"), 120, MB);
+    world.file(
+        &format!("{base}/packages/Discord-1.0.9001-full.nupkg"),
+        3,
+        2 * MB,
+    );
+    world.file(&format!("{base}/packages/DiscordSetup.exe"), 3, 2 * MB);
+    for n in 0..4 {
+        world.file(
+            &format!("AppData/Roaming/discord/Cache/Cache_Data/f_{n}"),
+            90,
+            6 * MB,
+        );
+    }
+    world.file("Downloads/DiscordSetup.exe", 150, 2 * MB);
+    world.platform = world
+        .platform
+        .clone()
+        .with_app("Discord", None)
+        .with_process("finder")
+        .with_data_root("AppData/Local")
+        .with_data_root("AppData/Roaming")
+        .with_cache_rule(scuttle_core::platform::caches::CacheRule {
+            owner: "Discord",
+            label: "Discord cache",
+            path: world.path("AppData/Roaming/discord/Cache"),
+            safety: scuttle_core::platform::caches::CacheSafety::RegeneratesWhenClosed,
+            owner_process: Some("discord"),
+            developer_only: false,
+            settle_secs: 0,
+        });
+
+    let (state, options) = state_for(&world);
+    let scan_id = state.start_scan(&options).expect("start");
+    state
+        .run_scan_with(&scan_id, options, &SilentObserver)
+        .expect("scan");
+
+    let install = world.path(base);
+    let findings = state
+        .store()
+        .candidates_for_scan(&scan_id)
+        .expect("findings");
+    for c in &findings {
+        let inside = c.path.starts_with(&install) || install.starts_with(&c.path);
+        if inside {
+            assert_eq!(
+                c.assessment.eligibility,
+                Eligibility::ExplicitOnly,
+                "{} ({:?}) touches the install and was offered as {:?}",
+                c.path.display(),
+                c.category,
+                c.assessment.eligibility
+            );
+            assert_ne!(
+                c.category,
+                Category::Installers,
+                "never 'just an installer'"
+            );
+        }
+    }
+    let downloaded = findings
+        .iter()
+        .find(|c| c.path.ends_with("Downloads/DiscordSetup.exe"))
+        .expect("the real installer is still found");
+    assert_eq!(downloaded.category, Category::Installers);
+    // A cache is found as the cache, never as the application around it.
+    if let Some(cache) = findings.iter().find(|c| c.category == Category::Caches) {
+        assert!(
+            cache.path.ends_with("discord/Cache"),
+            "{}",
+            cache.path.display()
+        );
+    }
+
+    state.quarantine_all_confident().expect("sweep");
+    for rel in [
+        "Update.exe",
+        "app-1.0.9001/Discord.exe",
+        "app-1.0.9000/Discord.exe",
+        "packages/DiscordSetup.exe",
+        "packages/Discord-1.0.9001-full.nupkg",
+    ] {
+        assert!(install.join(rel).exists(), "{rel} was moved by a sweep");
+    }
+
+    // A hand-built batch of everything cannot reach it either.
+    let every: Vec<String> = findings.iter().map(|c| c.id.clone()).collect();
+    state
+        .quarantine_many(&every, &CautionKind::ALL)
+        .expect("batch");
+    assert!(install.join("Update.exe").exists());
+    assert!(install.join("app-1.0.9001/Discord.exe").exists());
 }
 
 #[test]
@@ -479,7 +631,9 @@ fn a_hand_picked_selection_may_include_what_scuttle_would_not_sweep() {
     );
 
     let ids: Vec<String> = hesitant.iter().map(|c| c.id.clone()).collect();
-    let outcome = state.quarantine_many(&ids).expect("hand-picked selection");
+    let outcome = state
+        .quarantine_many(&ids, &CautionKind::ALL)
+        .expect("hand-picked selection");
 
     // What must not appear is a refusal on the grounds of the verdict itself.
     // Some of this fixture's findings nest inside each other, so once the
@@ -526,7 +680,9 @@ fn a_hand_picked_selection_still_cannot_touch_anything_protected() {
 
     // Ask for everything the scan turned up, protected or not.
     let ids: Vec<String> = found.iter().map(|c| c.id.clone()).collect();
-    let outcome = state.quarantine_many(&ids).expect("selection");
+    let outcome = state
+        .quarantine_many(&ids, &CautionKind::ALL)
+        .expect("selection");
 
     for candidate in found
         .iter()

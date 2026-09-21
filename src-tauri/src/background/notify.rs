@@ -163,6 +163,7 @@ mod tests {
             fingerprint: StateFingerprint::default(),
             evidence: Vec::new(),
             group: Vec::new(),
+            assessment: Default::default(),
         }
     }
 

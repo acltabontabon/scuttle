@@ -29,9 +29,10 @@ use tauri::{Emitter, State};
 
 use super::state::{AppState, Operation};
 use super::{derive_member, events, KeepChoice};
-use crate::model::{Category, CleanupCandidate, RecommendedAction};
+use crate::model::{Category, CleanupCandidate, TargetKind};
 use crate::quarantine::contents::MoveObserver;
 use crate::quarantine::transfer::{Ctl, FailureKind, IssueGroup, IssueLog, Tally};
+use crate::safety::assess::{CautionKind, Eligibility};
 use crate::safety::Bidding;
 use crate::storage::SnapshotState;
 use crate::{Result, ScuttleError};
@@ -48,24 +49,46 @@ const THROTTLE: Duration = Duration::from_millis(100);
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MoveRequest {
-    /// A selection a person built by hand, with size and risk in front of them.
-    /// `retry` continues findings that already had a run, and only what did not
-    /// move.
+    /// A selection a person built by hand, with each item's cautions in front
+    /// of them. `retry` continues findings that already had a run, and only
+    /// what did not move. Never moves an application folder.
     Selection {
         ids: Vec<String>,
         #[serde(default)]
         retry: bool,
+        /// Cautions accepted for the whole batch, once each.
+        #[serde(default)]
+        acknowledged: Vec<CautionKind>,
     },
-    /// Everything Scuttle was confident about, in one pile or on the whole
-    /// floor. Nothing rated `review` or `inspect only` is eligible.
+    /// One finding a person opened and chose on its own. The only request
+    /// that can move an application folder — still past its cautions and every
+    /// hard protection.
+    Single {
+        id: String,
+        #[serde(default)]
+        acknowledged: Vec<CautionKind>,
+    },
+    /// Everything Scuttle suggests, in one pile or on the whole floor. Only
+    /// findings whose eligibility is `suggested`: nothing a person would need
+    /// to acknowledge, and nothing belonging to an application.
     Confident {
         #[serde(default)]
         category: Option<Category>,
     },
     /// Every member of a group finding except the one to keep.
-    Group { id: String, keep: KeepChoice },
+    Group {
+        id: String,
+        keep: KeepChoice,
+        #[serde(default)]
+        acknowledged: Vec<CautionKind>,
+    },
     /// One member of a group finding.
-    Member { id: String, member_index: usize },
+    Member {
+        id: String,
+        member_index: usize,
+        #[serde(default)]
+        acknowledged: Vec<CautionKind>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -466,6 +489,7 @@ struct Work {
     candidate: CleanupCandidate,
     bidding: Bidding,
     retry: bool,
+    acknowledged: Vec<CautionKind>,
 }
 
 enum Planned {
@@ -540,21 +564,42 @@ fn resolve(
 ) -> Vec<Work> {
     let mut work = Vec::new();
     match request {
-        MoveRequest::Selection { ids, retry } => {
+        MoveRequest::Selection {
+            ids,
+            retry,
+            acknowledged,
+        } => {
+            // The same finding twice is one decision, and one move.
+            let mut unique: Vec<String> = Vec::with_capacity(ids.len());
             for id in ids {
+                if !unique.contains(&id) {
+                    unique.push(id);
+                }
+            }
+            for id in unique {
                 match state.store().candidate(&id) {
-                    // Someone picked this exact item with its size and risk in
-                    // front of them, so Scuttle's own "not suggested" verdict
-                    // stops binding. Every other check still applies.
+                    // Someone picked this exact item with its cautions in front
+                    // of them, so Scuttle's own "not suggested" verdict stops
+                    // binding. Every other check still applies.
                     Ok(candidate) => work.push(Work {
                         candidate,
                         bidding: Bidding::User,
                         retry,
+                        acknowledged: acknowledged.clone(),
                     }),
                     Err(error) => results.push(result_for_error(None, &id, &error)),
                 }
             }
         }
+        MoveRequest::Single { id, acknowledged } => match state.store().candidate(&id) {
+            Ok(candidate) => work.push(Work {
+                candidate,
+                bidding: Bidding::UserSpecific,
+                retry: false,
+                acknowledged,
+            }),
+            Err(error) => results.push(result_for_error(None, &id, &error)),
+        },
         MoveRequest::Confident { category } => {
             let candidates = state
                 .store()
@@ -565,17 +610,22 @@ fn resolve(
                 .unwrap_or_default();
             for candidate in candidates {
                 if category.is_none_or(|wanted| candidate.category == wanted)
-                    && candidate.recommended_action == RecommendedAction::Quarantine
+                    && candidate.assessment.eligibility == Eligibility::Suggested
                 {
                     work.push(Work {
                         candidate,
                         bidding: Bidding::Scuttle,
                         retry: false,
+                        acknowledged: Vec::new(),
                     });
                 }
             }
         }
-        MoveRequest::Group { id, keep } => match state.store().candidate(&id) {
+        MoveRequest::Group {
+            id,
+            keep,
+            acknowledged,
+        } => match state.store().candidate(&id) {
             Err(error) => results.push(result_for_error(None, &id, &error)),
             Ok(candidate) => match super::plan_group(&candidate, keep) {
                 Err(error) => results.push(result_for_error(Some(&candidate), &id, &error)),
@@ -583,10 +633,14 @@ fn resolve(
                     *kept = Some(plan.kept);
                     for member in plan.members {
                         match member {
+                            // A person chose "keep the newest" for this group,
+                            // so these are their moves — with the group's
+                            // cautions acknowledged, not waived.
                             Ok(derived) => work.push(Work {
                                 candidate: derived,
-                                bidding: Bidding::Scuttle,
+                                bidding: Bidding::User,
                                 retry: false,
+                                acknowledged: acknowledged.clone(),
                             }),
                             Err(refusal) => results.push(FindingResult {
                                 finding_id: id.clone(),
@@ -612,19 +666,54 @@ fn resolve(
                 }
             },
         },
-        MoveRequest::Member { id, member_index } => match state.store().candidate(&id) {
+        MoveRequest::Member {
+            id,
+            member_index,
+            acknowledged,
+        } => match state.store().candidate(&id) {
             Err(error) => results.push(result_for_error(None, &id, &error)),
             Ok(candidate) => match derive_member(&candidate, member_index) {
                 Ok(derived) => work.push(Work {
                     candidate: derived,
-                    bidding: Bidding::Scuttle,
+                    bidding: Bidding::User,
                     retry: false,
+                    acknowledged,
                 }),
                 Err(error) => results.push(result_for_error(Some(&candidate), &id, &error)),
             },
         },
     }
+    // Parents before children, so a folder that moves whole is decided before
+    // anything inside it — see `execute`.
+    work.sort_by_key(|w| w.candidate.path.components().count());
     work
+}
+
+/// A finding inside a folder that is already moving as a whole: it goes with
+/// its parent, once, rather than being moved (or failing to be moved) twice.
+fn included_in(candidate: &CleanupCandidate, parent: &CleanupCandidate) -> FindingResult {
+    FindingResult {
+        finding_id: candidate.id.clone(),
+        display_name: candidate.display_name.clone(),
+        category: Some(candidate.category),
+        unit: Unit::of(candidate),
+        status: FindingStatus::Skipped,
+        moved: 0,
+        skipped: 0,
+        failed: 0,
+        moved_bytes: 0,
+        record_id: None,
+        needs_refresh: false,
+        retryable: false,
+        issues: Vec::new(),
+        refusal: Some(Refusal {
+            code: "included".into(),
+            message: format!(
+                "Inside {}, which was chosen to move as a whole, so it is handled with that folder.",
+                parent.display_name
+            ),
+        }),
+    }
 }
 
 fn execute(state: &AppState, job: &Job, request: MoveRequest) -> MoveReport {
@@ -650,8 +739,17 @@ fn execute(state: &AppState, job: &Job, request: MoveRequest) -> MoveReport {
         if job.cancelled() {
             break;
         }
+        // Already inside a folder that is moving whole.
+        if let Some((parent, _, _)) = accepted.iter().find(|(p, planned, _)| {
+            matches!(planned, Planned::Whole)
+                && p.candidate.target_kind == TargetKind::Directory
+                && crate::safety::paths::is_strictly_within(&item.candidate.path, &p.candidate.path)
+        }) {
+            results.push(included_in(&item.candidate, &parent.candidate));
+            continue;
+        }
         job.update(false, |s| s.label = item.candidate.display_name.clone());
-        let ctx = scope.ctx(item.bidding);
+        let ctx = scope.ctx(item.bidding, &item.acknowledged);
         let planned = if item.candidate.is_shared_contents() {
             quarantine
                 .plan_contents(&item.candidate, &ctx, item.retry)
@@ -697,7 +795,7 @@ fn execute(state: &AppState, job: &Job, request: MoveRequest) -> MoveReport {
             continue;
         }
         job.update(false, |s| s.label = item.candidate.display_name.clone());
-        let ctx = scope.ctx(item.bidding);
+        let ctx = scope.ctx(item.bidding, &item.acknowledged);
 
         let result = match planned {
             Planned::Contents => {
@@ -887,6 +985,233 @@ fn contents_result(
 }
 
 // ---------------------------------------------------------------------------
+// Review: what a move would do, before it does anything
+// ---------------------------------------------------------------------------
+
+/// What will happen to one finding if the reviewed move goes ahead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlannedStatus {
+    /// It will move, once any cautions are acknowledged.
+    Ready,
+    /// It cannot move by this request, and `note` says why.
+    Refused,
+    /// It is inside a folder in the same move and goes with it.
+    Included,
+}
+
+/// What the move takes, in the terms a person would check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlannedShape {
+    /// One file.
+    File,
+    /// A whole folder, with everything in it.
+    Folder,
+    /// The files Scuttle reviewed inside a shared folder. The folder stays.
+    FilesInside,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PlannedItem {
+    pub finding_id: String,
+    pub display_name: String,
+    /// The exact path that will move. Never a parent or a neighbour of what
+    /// was shown.
+    pub path: std::path::PathBuf,
+    pub shape: PlannedShape,
+    pub size: u64,
+    /// Files and folders a folder move takes with it, counted just now.
+    /// `None` for a single file, or when counting was stopped.
+    pub contains: Option<u64>,
+    pub confidence: crate::model::Confidence,
+    /// The evidence, as sentences. Positive and negative alike.
+    pub reasons: Vec<PlannedReason>,
+    pub remark: Option<String>,
+    pub impact: crate::safety::assess::Impact,
+    pub eligibility: Eligibility,
+    pub cautions: Vec<crate::safety::assess::Caution>,
+    pub status: PlannedStatus,
+    pub note: Option<String>,
+    /// Kept in the Drawer until a person removes it, rather than expiring.
+    pub kept_until_removed: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PlannedReason {
+    pub summary: String,
+    pub negative: bool,
+}
+
+/// One caution, to be acknowledged once for the whole move.
+#[derive(Debug, Clone, Serialize)]
+pub struct CautionGroup {
+    pub kind: CautionKind,
+    pub headline: String,
+    /// How many of the ready items it applies to.
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MovePlan {
+    pub items: Vec<PlannedItem>,
+    pub cautions: Vec<CautionGroup>,
+    pub ready: u64,
+    pub ready_bytes: u64,
+    /// Where things go.
+    pub drawer: std::path::PathBuf,
+    pub retention_days: u32,
+}
+
+/// Count what a folder holds, up to a limit. Links are counted, not followed.
+fn count_inside(path: &std::path::Path) -> Option<u64> {
+    const LIMIT: usize = 250_000;
+    let mut count = 0u64;
+    for entry in walkdir::WalkDir::new(path)
+        .follow_links(false)
+        .into_iter()
+        .take(LIMIT + 1)
+    {
+        if entry.is_ok() {
+            count += 1;
+        }
+    }
+    if count as usize > LIMIT {
+        None
+    } else {
+        Some(count.saturating_sub(1))
+    }
+}
+
+impl AppState {
+    /// Work out, without touching anything, what a move request would do:
+    /// exactly which paths, file or folder, why, what needs acknowledging and
+    /// what will be refused. The same gate as the move itself, run with every
+    /// caution provisionally accepted so that only the real refusals show.
+    pub fn preview_move(&self, request: MoveRequest) -> Result<MovePlan> {
+        let mut results = Vec::new();
+        let mut kept = None;
+        let work = resolve(self, request, &mut results, &mut kept);
+        let scope = self.action_scope();
+        let all = CautionKind::ALL;
+        let mut items: Vec<PlannedItem> = Vec::new();
+        let mut folders: Vec<(std::path::PathBuf, String)> = Vec::new();
+
+        for refused in results {
+            items.push(PlannedItem {
+                finding_id: refused.finding_id.clone(),
+                display_name: refused.display_name.clone(),
+                path: std::path::PathBuf::new(),
+                shape: PlannedShape::File,
+                size: 0,
+                contains: None,
+                confidence: crate::model::Confidence::Low,
+                reasons: Vec::new(),
+                remark: None,
+                impact: crate::safety::assess::Impact::PersonalFile,
+                eligibility: Eligibility::Blocked,
+                cautions: Vec::new(),
+                status: PlannedStatus::Refused,
+                note: refused.refusal.map(|r| r.message),
+                kept_until_removed: true,
+            });
+        }
+
+        for item in work {
+            let c = &item.candidate;
+            let ctx = scope.ctx(item.bidding, &all);
+            let assessment = crate::safety::assess_live(c, &ctx);
+            let shape = if c.is_shared_contents() {
+                PlannedShape::FilesInside
+            } else if c.target_kind == TargetKind::Directory {
+                PlannedShape::Folder
+            } else {
+                PlannedShape::File
+            };
+
+            let parent = folders
+                .iter()
+                .find(|(dir, _)| crate::safety::paths::is_strictly_within(&c.path, dir));
+            let (status, note) = if let Some((_, name)) = parent {
+                (
+                    PlannedStatus::Included,
+                    Some(format!("Inside {name}, which moves as a whole.")),
+                )
+            } else {
+                let checked = if c.is_shared_contents() {
+                    crate::safety::authorize_contents(c, &ctx).map(|_| ())
+                } else {
+                    crate::safety::authorize(c, &ctx).map(|_| ())
+                };
+                match checked {
+                    Ok(()) => (PlannedStatus::Ready, None),
+                    Err(error) => (PlannedStatus::Refused, Some(error.to_string())),
+                }
+            };
+            if status == PlannedStatus::Ready && shape == PlannedShape::Folder {
+                folders.push((c.path.clone(), c.display_name.clone()));
+            }
+            let contains = if shape == PlannedShape::Folder && status == PlannedStatus::Ready {
+                count_inside(&c.path)
+            } else {
+                None
+            };
+            items.push(PlannedItem {
+                finding_id: c.id.clone(),
+                display_name: c.display_name.clone(),
+                path: c.path.clone(),
+                shape,
+                size: c.size,
+                contains,
+                confidence: c.confidence,
+                reasons: c
+                    .evidence
+                    .iter()
+                    .map(|e| PlannedReason {
+                        summary: e.summary.clone(),
+                        negative: e.negative,
+                    })
+                    .collect(),
+                remark: c.remark.clone(),
+                impact: assessment.impact,
+                eligibility: assessment.eligibility,
+                kept_until_removed: crate::quarantine::keeps(&assessment),
+                cautions: assessment.cautions,
+                status,
+                note,
+            });
+        }
+
+        let mut cautions: Vec<CautionGroup> = Vec::new();
+        for item in items.iter().filter(|i| i.status == PlannedStatus::Ready) {
+            for caution in &item.cautions {
+                match cautions.iter_mut().find(|g| g.kind == caution.kind) {
+                    Some(group) => group.count += 1,
+                    None => cautions.push(CautionGroup {
+                        kind: caution.kind,
+                        headline: caution.kind.headline().to_string(),
+                        count: 1,
+                    }),
+                }
+            }
+        }
+        cautions.sort_by_key(|g| g.kind);
+        let ready: Vec<&PlannedItem> = items
+            .iter()
+            .filter(|i| i.status == PlannedStatus::Ready)
+            .collect();
+        Ok(MovePlan {
+            ready: ready.len() as u64,
+            ready_bytes: ready.iter().map(|i| i.size).sum(),
+            items,
+            cautions,
+            drawer: self.platform().quarantine_root(),
+            retention_days: self.store().settings()?.quarantine_retention_days,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
 
@@ -954,6 +1279,15 @@ fn spawn_main_thread_probe(app: tauri::AppHandle, state: AppState) {
                 );
             }
         });
+}
+
+/// What a move would do, reviewed before anything moves. Reads only.
+#[tauri::command]
+pub async fn preview_move(state: State<'_, AppState>, request: MoveRequest) -> Result<MovePlan> {
+    let handle = state.clone_handle();
+    tauri::async_runtime::spawn_blocking(move || handle.preview_move(request))
+        .await
+        .map_err(|e| ScuttleError::Internal(format!("reviewing stopped unexpectedly: {e}")))?
 }
 
 /// Ask the running move to stop. Returns whether there was one.

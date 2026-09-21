@@ -119,6 +119,8 @@ pub struct ScanContext {
     /// Directories a cache rule claims, whether or not that rule is enabled
     /// for this scan.
     cache_areas: Vec<PathBuf>,
+    /// Where applications are installed, and what each folder looked like.
+    pub installs: crate::platform::InstallIndex,
     pub now_unix: i64,
     cancel: Arc<AtomicBool>,
     /// Directory profiles gathered during the shared traversal. Set once, by
@@ -143,6 +145,7 @@ impl ScanContext {
         let libraries = platform.game_libraries();
         let processes = platform.running_processes();
         let application_areas = platform.application_managed_roots();
+        let installs = crate::platform::InstallIndex::new(platform.install_areas());
         let cache_areas = platform
             .cache_rules()
             .into_iter()
@@ -158,6 +161,7 @@ impl ScanContext {
             ignores,
             application_areas,
             cache_areas,
+            installs,
             now_unix: chrono::Utc::now().timestamp(),
             cancel,
             directories: std::sync::OnceLock::new(),
@@ -205,6 +209,26 @@ impl ScanContext {
         self.application_areas
             .iter()
             .any(|root| paths::is_strictly_within(path, root))
+    }
+
+    /// The scanned root `path` sits in — the boundary nothing climbs above.
+    pub fn root_of(&self, path: &std::path::Path) -> Option<&std::path::Path> {
+        self.options
+            .roots
+            .iter()
+            .filter(|root| paths::is_within(path, root))
+            .max_by_key(|root| root.components().count())
+            .map(PathBuf::as_path)
+    }
+
+    /// The application `path` is part of, recognised by its structure. For a
+    /// directory, also an application found *inside* it.
+    pub fn installation_of(
+        &self,
+        path: &std::path::Path,
+        is_dir: bool,
+    ) -> Option<crate::platform::InstallRoot> {
+        self.installs.involved(path, is_dir, self.root_of(path))
     }
 
     /// Does a cache rule claim this path?
@@ -452,6 +476,8 @@ struct GuardedSink<'a> {
     candidates: Vec<CleanupCandidate>,
     seen: HashMap<PathBuf, usize>,
     rejected_protected: u64,
+    /// Ids handed out so far.
+    issued: usize,
 }
 
 impl<'a> GuardedSink<'a> {
@@ -463,6 +489,7 @@ impl<'a> GuardedSink<'a> {
             candidates: Vec::new(),
             seen: HashMap::new(),
             rejected_protected: 0,
+            issued: 0,
         }
     }
 }
@@ -503,6 +530,50 @@ impl CandidateSink for GuardedSink<'_> {
             }
         }
 
+        // 3b. Applications. Whatever a detector thought it found, a thing
+        //     that is part of an installed application — or a folder holding
+        //     one — says so, and the arithmetic below makes sure it is never
+        //     proposed as cleanup. This is the net under the Discord incident:
+        //     a detector that mistakes an application's own `.exe` for a
+        //     finished installer cannot get it into a sweep.
+        let is_dir = finding.target_kind == TargetKind::Directory;
+        if finding.category == Category::Caches {
+            // A cache is a specific folder an application rebuilds. It may
+            // live beside the application; it must never *be* it, or hold it.
+            if crate::platform::installations::looks_installed(&path).is_some()
+                || self
+                    .ctx
+                    .installs
+                    .contained(&path, crate::platform::installations::CONTAINED_DEPTH)
+                    .is_some()
+            {
+                return;
+            }
+        } else if let Some(install) = self.ctx.installation_of(&path, is_dir) {
+            if !finding
+                .evidence
+                .iter()
+                .any(|e| matches!(e.kind, EvidenceKind::PartOfInstalledApplication { .. }))
+            {
+                finding
+                    .evidence
+                    .push(ev(EvidenceKind::PartOfInstalledApplication {
+                        app: install.name.clone(),
+                        how: install.kind.describe().to_string(),
+                    }));
+            }
+        } else if !matches!(finding.category, Category::DeveloperDebris)
+            && self.ctx.is_application_managed(&path)
+            && !finding
+                .evidence
+                .iter()
+                .any(|e| matches!(e.kind, EvidenceKind::InsideApplicationData))
+        {
+            finding
+                .evidence
+                .push(ev(EvidenceKind::InsideApplicationData));
+        }
+
         // 4. The arithmetic. Detectors do not get a vote here.
         let verdict = evidence::weigh(&finding.evidence, finding.base_risk);
 
@@ -518,8 +589,13 @@ impl CandidateSink for GuardedSink<'_> {
             child_count: None,
         });
 
-        let candidate = CleanupCandidate {
-            id: format!("{}-{}", self.scan_id, self.candidates.len()),
+        // Ids come from a counter of their own, never from the list's length:
+        // a better-evidenced finding that replaces another below does not grow
+        // the list, and an id taken from its length was then handed out twice
+        // — so the id a person reviewed could name a different finding.
+        self.issued += 1;
+        let mut candidate = CleanupCandidate {
+            id: format!("{}-{}", self.scan_id, self.issued - 1),
             detector: finding.detector.to_string(),
             category: finding.category,
             target_kind: finding.target_kind,
@@ -538,7 +614,9 @@ impl CandidateSink for GuardedSink<'_> {
             group_bytes: crate::model::group_footprint(&finding.group, finding.size),
             group: finding.group,
             fingerprint,
+            assessment: Default::default(),
         };
+        crate::safety::assess::settle(&mut candidate, self.ctx.now_unix);
 
         // 6. One object, one pile. When two detectors claim the same path the
         //    better-evidenced account wins, so a file is not shown twice.
@@ -548,6 +626,10 @@ impl CandidateSink for GuardedSink<'_> {
                 || (candidate.evidence.len() == incumbent.evidence.len()
                     && candidate.confidence > incumbent.confidence);
             if better {
+                // The replacement answers to the id already announced for this
+                // path, so nothing that heard of it is left holding an id that
+                // names nothing — or names something else.
+                candidate.id = incumbent.id.clone();
                 self.candidates[existing] = candidate;
             }
             return;

@@ -9,10 +9,13 @@
 
 use std::path::{Path, PathBuf};
 
+use super::assess::{self, Assessment, Caution, CautionKind, Eligibility};
 use super::paths::{self};
 use super::protected::ProtectedPaths;
 use crate::error::{Result, ScuttleError};
 use crate::model::{CleanupCandidate, Risk, StateFingerprint, TargetKind};
+use crate::platform::installations::CONTAINED_DEPTH;
+use crate::platform::InstallAreas;
 
 /// A path that has survived every check, together with the freshly observed
 /// state that justified it. Only the quarantine module can consume one.
@@ -21,29 +24,36 @@ pub struct AuthorizedTarget {
     pub path: PathBuf,
     pub kind: TargetKind,
     pub observed: StateFingerprint,
+    /// What the gate concluded about it, live. The Drawer records from this
+    /// whether the item may ever expire on its own.
+    pub assessment: Assessment,
 }
 
-/// Who asked for this.
+/// Who asked for this, and how specifically.
 ///
-/// The distinction decides exactly one thing: whether a verdict of
-/// `InspectOnly` is binding. That verdict means *cleanup is not suggested* —
-/// a statement about what Scuttle should do of its own accord, which is a
-/// very different claim from "this must never move".
+/// The distinction decides which of an item's [eligibilities] a request may
+/// act on. It never unlocks a hard protection: `Blocked` refuses everyone.
 ///
-/// Treating the two as one made the largest piles most people have —
-/// screenshots, heavy strays, the categories Scuttle deliberately vouches for
-/// nothing in — impossible to act on by any route. Nothing about that was
-/// safe; it just moved the mess somewhere the application could not reach.
+/// Treating "Scuttle would not suggest this" as "this must never move" once
+/// made the largest piles most people have — screenshots, heavy strays —
+/// impossible to act on by any route. Nothing about that was safe; it just
+/// moved the mess somewhere the application could not reach. The opposite
+/// mistake is the one the Discord incident made: a sweep that nobody looked at
+/// item by item reaching an application. Both are ruled out here.
 ///
-/// `Risk::Protected` is unaffected and stays refused for both.
+/// [eligibilities]: crate::safety::assess::Eligibility
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Bidding {
-    /// Scuttle acting on its own judgement: a sweep, or the retention sweep.
-    /// Bound by its own verdicts, because nobody looked.
+    /// Scuttle acting on its own judgement: a sweep. Only what it suggests,
+    /// with nothing needing acknowledgement, because nobody looked.
     Scuttle,
-    /// A person who ticked this exact item with its size and risk in front of
-    /// them. Their call to make.
+    /// A batch a person built, with every item's cautions in front of them.
+    /// Anything eligible by choice, once its cautions are acknowledged —
+    /// never an application folder.
     User,
+    /// One item a person opened and chose on its own. The only request that
+    /// may move an application folder, and still only past its cautions.
+    UserSpecific,
 }
 
 /// Everything the gate needs to make a decision.
@@ -52,8 +62,12 @@ pub struct ActionContext<'a> {
     /// The roots the user actually asked Scuttle to look at. Nothing outside
     /// them can be acted on, whatever a stored finding claims.
     pub allowed_roots: &'a [PathBuf],
-    /// Whether Scuttle decided this or a person did.
+    /// Whether Scuttle decided this or a person did, and how specifically.
     pub bidding: Bidding,
+    /// Cautions the person accepted for this batch, by kind.
+    pub acknowledged: &'a [CautionKind],
+    /// Where applications live, to recognise one the stored finding did not.
+    pub installs: &'a InstallAreas,
 }
 
 /// Re-check a stored finding against the world as it is *now*.
@@ -63,24 +77,23 @@ pub fn authorize(
 ) -> Result<AuthorizedTarget> {
     let path = paths::normalize(&candidate.path);
 
-    // 1. Is this the kind of finding that may be acted on at all?
-    //
-    // Protected is absolute and refuses both biddings. An `InspectOnly`
-    // verdict only binds Scuttle itself: see [`Bidding`] for why those are
-    // not the same rule.
-    if candidate.risk == Risk::Protected {
-        return Err(ScuttleError::Refused(
-            "Scuttle will not act on this at all.".into(),
-        ));
-    }
-    if ctx.bidding == Bidding::Scuttle && !candidate.is_actionable() {
-        return Err(ScuttleError::Refused(format!(
-            "Scuttle does not act on findings marked {} unless you pick them yourself.",
-            candidate.recommended_action_label()
-        )));
-    }
+    // 1. What may this request move? Recomputed here from the stored evidence
+    //    and the live filesystem; the webview's copy is never consulted.
+    let assessment = assess_live(candidate, ctx);
+    permit(candidate, &assessment, ctx)?;
 
     authorize_path(&path, candidate.target_kind, ctx)?;
+
+    // 5b. A folder moves with everything in it, so a folder holding something
+    //     protected is as off limits as the protected thing.
+    if candidate.target_kind == TargetKind::Directory {
+        if let Some((rule, _)) = ctx.protected.first_protected_descendant(&path, &|| false) {
+            return Err(ScuttleError::Refused(format!(
+                "This folder contains something protected ({rule}). Moving the folder would \
+                 move that too, so Scuttle will not."
+            )));
+        }
+    }
 
     // 6. Identity: is this still the same thing Scuttle looked at?
     let observed = observe(&path)?;
@@ -90,7 +103,83 @@ pub fn authorize(
         path,
         kind: candidate.target_kind,
         observed,
+        assessment,
     })
+}
+
+/// The assessment the gate acts on: the stored evidence, plus whatever the
+/// live filesystem says about applications at or around the path.
+pub fn assess_live(candidate: &CleanupCandidate, ctx: &ActionContext<'_>) -> Assessment {
+    let path = paths::normalize(&candidate.path);
+    let root = ctx
+        .allowed_roots
+        .iter()
+        .filter(|root| paths::is_within(&path, root))
+        .max_by_key(|root| root.components().count());
+    let install = if candidate.is_shared_contents() {
+        // A cache is judged as the folder it is; the gate for contents
+        // checks it does not hold an application.
+        None
+    } else {
+        ctx.installs
+            .enclosing(&path, root.map(PathBuf::as_path))
+            .or_else(|| {
+                if candidate.target_kind == TargetKind::Directory {
+                    ctx.installs.contained(&path, CONTAINED_DEPTH)
+                } else {
+                    None
+                }
+            })
+    };
+    assess::with_installation(
+        assess::assess(candidate, now_unix()),
+        install.as_ref(),
+        candidate.target_kind,
+    )
+}
+
+/// Does this request's bidding and acknowledgement cover this assessment?
+fn permit(candidate: &CleanupCandidate, a: &Assessment, ctx: &ActionContext<'_>) -> Result<()> {
+    if candidate.risk == Risk::Protected || a.eligibility == Eligibility::Blocked {
+        return Err(ScuttleError::Refused(
+            a.blocked
+                .clone()
+                .unwrap_or_else(|| "Scuttle will not act on this at all.".into()),
+        ));
+    }
+    match (ctx.bidding, a.eligibility) {
+        (Bidding::Scuttle, Eligibility::Suggested) => {}
+        (Bidding::Scuttle, _) => {
+            return Err(ScuttleError::Refused(
+                "Scuttle only moves this if you choose it yourself.".into(),
+            ));
+        }
+        (Bidding::User, Eligibility::ExplicitOnly) => {
+            return Err(ScuttleError::Refused(
+                "This is part of an application. Scuttle only moves an application folder \
+                 when you open it and choose it on its own, never as part of a batch."
+                    .into(),
+            ));
+        }
+        _ => {}
+    }
+    let missing: Vec<&Caution> = a
+        .cautions
+        .iter()
+        .filter(|c| !ctx.acknowledged.contains(&c.kind))
+        .collect();
+    if let Some(first) = missing.first() {
+        return Err(ScuttleError::NeedsAcknowledgement(format!(
+            "{} {}",
+            first.kind.headline(),
+            first.detail
+        )));
+    }
+    Ok(())
+}
+
+fn now_unix() -> i64 {
+    chrono::Utc::now().timestamp()
 }
 
 /// The gate for cleaning the *contents* of a shared folder.
@@ -111,17 +200,19 @@ pub fn authorize_contents(
 ) -> Result<PathBuf> {
     let path = paths::normalize(&candidate.path);
 
-    if candidate.risk == Risk::Protected {
+    // A shared folder's own application does not make its files the
+    // application: this is the one kind of finding that lives inside
+    // application territory by design. But the folder must not *be* an
+    // application, or hold one.
+    let install = crate::platform::installations::looks_installed(&path)
+        .map(|_| ())
+        .or_else(|| ctx.installs.contained(&path, CONTAINED_DEPTH).map(|_| ()));
+    if install.is_some() {
         return Err(ScuttleError::Refused(
-            "Scuttle will not act on this at all.".into(),
+            "This folder holds an application, not a cache. Scuttle will not clean it.".into(),
         ));
     }
-    if ctx.bidding == Bidding::Scuttle && !candidate.is_actionable() {
-        return Err(ScuttleError::Refused(format!(
-            "Scuttle does not act on findings marked {} unless you pick them yourself.",
-            candidate.recommended_action_label()
-        )));
-    }
+    permit(candidate, &assess::assess(candidate, now_unix()), ctx)?;
     if !candidate.is_shared_contents() {
         return Err(ScuttleError::Refused(
             "That is not a folder whose contents Scuttle cleans.".into(),
@@ -266,17 +357,6 @@ fn check_unchanged(at_scan: &StateFingerprint, now: &StateFingerprint, path: &Pa
     Ok(())
 }
 
-impl CleanupCandidate {
-    pub(crate) fn recommended_action_label(&self) -> &'static str {
-        use crate::model::RecommendedAction::*;
-        match self.recommended_action {
-            Quarantine => "quarantine",
-            Review => "review",
-            InspectOnly => "inspect only",
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,9 +392,11 @@ mod tests {
             ActionContext {
                 protected: &self.protected,
                 allowed_roots: &self.roots,
-                // Test harnesses take the strict bidding, so every existing
-                // assertion keeps meaning what it meant.
-                bidding: Bidding::Scuttle,
+                // Path checks are what these tests are about, so every
+                // caution is accepted; the bidding tests say otherwise.
+                bidding: Bidding::User,
+                acknowledged: &CautionKind::ALL,
+                installs: &crate::platform::installations::NO_INSTALL_AREAS,
             }
         }
         fn file(&self, rel: &str, contents: &str) -> PathBuf {
@@ -349,6 +431,7 @@ mod tests {
                 created_unix: None,
                 group: vec![],
                 fingerprint,
+                assessment: Default::default(),
             }
         }
     }
@@ -457,13 +540,185 @@ mod tests {
         assert!(err.to_string().contains("link"), "{err}");
     }
 
+    impl Harness {
+        fn ctx_as<'a>(
+            &'a self,
+            bidding: Bidding,
+            acknowledged: &'a [CautionKind],
+        ) -> ActionContext<'a> {
+            ActionContext {
+                bidding,
+                acknowledged,
+                ..self.ctx()
+            }
+        }
+
+        /// A synthetic Squirrel install, shaped like Discord's.
+        fn discord_like(&self, base: &str) -> PathBuf {
+            let root = self.home.join(base).join("Discord");
+            self.file(&format!("{base}/Discord/Update.exe"), "updater");
+            self.file(
+                &format!("{base}/Discord/app-1.0.9001/Discord.exe"),
+                "program",
+            );
+            self.file(
+                &format!("{base}/Discord/app-1.0.9001/ffmpeg.dll"),
+                "library",
+            );
+            self.file(
+                &format!("{base}/Discord/packages/DiscordSetup.exe"),
+                "setup",
+            );
+            root
+        }
+    }
+
     #[test]
-    fn an_inspect_only_finding_cannot_be_acted_on_even_if_the_ui_asks() {
+    fn a_sweep_moves_only_what_scuttle_suggests() {
         let h = harness();
+        // Fresh: it changed today, so it carries a caution and is not
+        // something Scuttle sweeps on its own.
         let f = h.file("Downloads/big.zip", "bytes");
+        let c = h.candidate_for(&f);
+        let err = authorize(&c, &h.ctx_as(Bidding::Scuttle, &[])).unwrap_err();
+        assert_eq!(err.code(), "refused");
+        // A person may still choose it, once they have seen why it is
+        // flagged.
+        assert!(authorize(
+            &c,
+            &h.ctx_as(Bidding::User, &[CautionKind::RecentlyChanged])
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn a_caution_must_be_acknowledged_but_is_not_a_prohibition() {
+        let h = harness();
+        let f = h.file("Downloads/draft.docx", "words");
         let mut c = h.candidate_for(&f);
         c.recommended_action = RecommendedAction::InspectOnly;
-        let err = authorize(&c, &h.ctx()).unwrap_err();
+        c.confidence = Confidence::Low;
+
+        let err = authorize(&c, &h.ctx_as(Bidding::User, &[])).unwrap_err();
+        assert_eq!(err.code(), "needs_acknowledgement");
+        let err = authorize(
+            &c,
+            &h.ctx_as(Bidding::User, &[CautionKind::RecentlyChanged]),
+        )
+        .unwrap_err();
+        assert_eq!(err.code(), "needs_acknowledgement", "uncertainty too");
+        authorize(
+            &c,
+            &h.ctx_as(
+                Bidding::User,
+                &[CautionKind::RecentlyChanged, CautionKind::Uncertain],
+            ),
+        )
+        .expect("a recently edited document of the person's own can be moved after a caution");
+    }
+
+    #[test]
+    fn an_application_is_never_moved_by_a_sweep_or_a_batch() {
+        // The Discord incident at the gate: a stored finding that calls an
+        // application's program "an installer, confident, low risk" — as the
+        // old detector did. The live filesystem says otherwise, and that wins.
+        let h = harness();
+        let root = h.discord_like("AppData/Local");
+        let exe = root.join("app-1.0.9001/Discord.exe");
+        let c = h.candidate_for(&exe);
+        assert_eq!(c.recommended_action, RecommendedAction::Quarantine);
+
+        let sweep = authorize(&c, &h.ctx_as(Bidding::Scuttle, &CautionKind::ALL)).unwrap_err();
+        assert_eq!(sweep.code(), "refused");
+        let batch = authorize(&c, &h.ctx_as(Bidding::User, &CautionKind::ALL)).unwrap_err();
+        assert_eq!(batch.code(), "refused");
+        assert!(batch.to_string().contains("application"), "{batch}");
+
+        // Chosen on its own, it still has to be acknowledged as breaking it.
+        let specific = authorize(
+            &c,
+            &h.ctx_as(Bidding::UserSpecific, &[CautionKind::RecentlyChanged]),
+        )
+        .unwrap_err();
+        assert_eq!(specific.code(), "needs_acknowledgement");
+        assert!(
+            specific.to_string().contains("stop that application"),
+            "{specific}"
+        );
+        assert!(authorize(&c, &h.ctx_as(Bidding::UserSpecific, &CautionKind::ALL)).is_ok());
+        assert!(exe.exists(), "the gate never touches anything");
+    }
+
+    #[test]
+    fn a_parent_holding_an_application_is_an_application_folder() {
+        let h = harness();
+        h.discord_like("Downloads/stuff");
+        let parent = h.home.join("Downloads/stuff");
+        let c = h.candidate_for(&parent);
+        let err = authorize(&c, &h.ctx_as(Bidding::User, &CautionKind::ALL)).unwrap_err();
+        assert_eq!(err.code(), "refused");
+    }
+
+    #[test]
+    fn a_folder_containing_something_protected_is_refused_for_everyone() {
+        let h = harness();
+        h.file("Downloads/backup/.ssh/id_ed25519", "secret");
+        h.file("Downloads/backup/notes.txt", "notes");
+        let dir = h.home.join("Downloads/backup");
+        let c = h.candidate_for(&dir);
+        for bidding in [Bidding::Scuttle, Bidding::User, Bidding::UserSpecific] {
+            let err = authorize(&c, &h.ctx_as(bidding, &CautionKind::ALL)).unwrap_err();
+            assert_eq!(err.code(), "refused", "{bidding:?}");
+        }
+        assert!(dir.join(".ssh/id_ed25519").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_to_a_protected_place_is_refused() {
+        let h = harness();
+        let link = h.home.join("Downloads/keys");
+        std::os::unix::fs::symlink(h.home.join(".ssh"), &link).unwrap();
+        let fingerprint = StateFingerprint {
+            is_dir: true,
+            ..Default::default()
+        };
+        let mut c = h.candidate_for(&h.home.join("Downloads"));
+        c.path = link.clone();
+        c.fingerprint = fingerprint;
+        c.target_kind = TargetKind::Directory;
+        let err = authorize(&c, &h.ctx_as(Bidding::UserSpecific, &CautionKind::ALL)).unwrap_err();
+        assert_eq!(err.code(), "refused");
+        assert!(h.home.join(".ssh").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_junction_to_a_protected_place_is_refused() {
+        let h = harness();
+        let link = h.home.join("Downloads\\keys");
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(h.home.join(".ssh"))
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let mut c = h.candidate_for(&h.home.join("Downloads"));
+        c.path = link;
+        c.target_kind = TargetKind::Directory;
+        c.fingerprint.is_dir = true;
+        let err = authorize(&c, &h.ctx_as(Bidding::UserSpecific, &CautionKind::ALL)).unwrap_err();
+        assert_eq!(err.code(), "refused");
+    }
+
+    #[test]
+    fn protected_is_refused_even_for_a_specific_choice() {
+        let h = harness();
+        let f = h.file("Downloads/thing.dmg", "bytes");
+        let mut c = h.candidate_for(&f);
+        c.risk = Risk::Protected;
+        let err = authorize(&c, &h.ctx_as(Bidding::UserSpecific, &CautionKind::ALL)).unwrap_err();
         assert_eq!(err.code(), "refused");
     }
 

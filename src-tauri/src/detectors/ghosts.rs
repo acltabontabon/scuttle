@@ -73,6 +73,14 @@ impl GhostDetector {
                 }
                 self.seen.push(path.clone());
 
+                // Shaped like an application — an updater beside versioned
+                // folders, a program beside its libraries. Then it is one,
+                // whether or not anything registered it: missing uninstall
+                // metadata is not proof an application was removed.
+                if ctx.installation_of(&path, true).is_some() {
+                    continue;
+                }
+
                 let token = display_name(&path);
                 match ctx.apps.attribute(&token) {
                     // Still installed: its data is its own business.
@@ -326,6 +334,7 @@ mod tests {
     use crate::detectors::test_support::*;
     use crate::model::{Confidence, RecommendedAction};
     use crate::platform::games::{GameInstall, GameLibrary, LibraryKind};
+    use crate::safety::assess::{CautionKind, Eligibility, Impact};
 
     fn mb(n: u64) -> u64 {
         n * 1024 * 1024
@@ -364,7 +373,59 @@ mod tests {
             .iter()
             .any(|e| matches!(e.kind, EvidenceKind::GeneratedContent { .. })));
         assert_eq!(c.confidence, Confidence::High);
-        assert_eq!(c.recommended_action, RecommendedAction::Quarantine);
+        // Confident, and still not something Scuttle sweeps on its own: this
+        // is an application's data, which may hold things a person made. It is
+        // shown for a person to choose, with that said plainly.
+        assert_eq!(c.recommended_action, RecommendedAction::Review);
+        assert_eq!(c.assessment.impact, Impact::ApplicationData);
+        assert_eq!(c.assessment.eligibility, Eligibility::ByChoice);
+        assert!(c
+            .assessment
+            .cautions
+            .iter()
+            .any(|x| x.kind == CautionKind::ApplicationData));
+    }
+
+    /// The Discord incident, from the ghost detector's side: a Squirrel-style
+    /// install beneath app data, old, not running, and with no uninstall
+    /// record at all. It is an application, not a leftover.
+    #[test]
+    fn an_old_install_with_incomplete_metadata_is_not_a_ghost() {
+        let h = app_data_harness(&[]);
+        h.materialise(&[
+            fixture_entry("AppData/Discord/Update.exe", 400, mb(2)),
+            fixture_entry("AppData/Discord/app-1.0.9000/Discord.exe", 400, mb(30)),
+            fixture_entry("AppData/Discord/app-1.0.9000/ffmpeg.dll", 400, mb(2)),
+            fixture_entry(
+                "AppData/Discord/packages/Discord-1.0.9000-full.nupkg",
+                400,
+                mb(1),
+            ),
+        ]);
+        let candidates = h.run_bare(GhostDetector::new());
+        assert!(candidates.is_empty(), "got {candidates:#?}");
+    }
+
+    #[test]
+    fn app_data_holding_what_a_person_made_is_never_suggested() {
+        let h = app_data_harness(&[]);
+        h.materialise(&[
+            fixture_entry("AppData/com.old.editor/cache/blob.bin", 300, mb(30)),
+            fixture_entry(
+                "AppData/com.old.editor/projects/chapter-one.docx",
+                300,
+                mb(1),
+            ),
+            fixture_entry(
+                "AppData/com.old.editor/projects/chapter-two.docx",
+                300,
+                mb(1),
+            ),
+        ]);
+        let candidates = h.run_bare(GhostDetector::new());
+        let c = one(&candidates);
+        assert_ne!(c.assessment.eligibility, Eligibility::Suggested);
+        assert_ne!(c.recommended_action, RecommendedAction::Quarantine);
     }
 
     #[test]

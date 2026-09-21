@@ -6,7 +6,7 @@ use super::apps::{AppSource, InstalledApp};
 use super::caches::{self, CacheRule};
 use super::games::{self, GameLibrary};
 use super::util;
-use super::{KnownLocation, LocationRole, PlatformService};
+use super::{InstallAreas, KnownLocation, LocationRole, PlatformService};
 use crate::{Result, ScuttleError};
 
 pub struct MacPlatformService {
@@ -253,6 +253,21 @@ impl PlatformService for MacPlatformService {
 
     fn installer_extensions(&self) -> &'static [&'static str] {
         &["dmg", "pkg", "mpkg", "iso"]
+    }
+
+    fn install_areas(&self) -> InstallAreas {
+        let containers = [
+            PathBuf::from("/Applications"),
+            PathBuf::from("/System/Applications"),
+            self.home.join("Applications"),
+        ]
+        .into_iter()
+        .filter(|p| p.is_dir())
+        .collect();
+        InstallAreas {
+            containers,
+            explicit: Vec::new(),
+        }
     }
 
     fn own_data_dirs(&self) -> Vec<PathBuf> {

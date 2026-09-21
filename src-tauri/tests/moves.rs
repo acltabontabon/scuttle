@@ -17,10 +17,12 @@ use std::time::{Duration, Instant};
 use fixtures::*;
 use scuttle_core::commands::{
     AppState, FindingStatus, MovePhase, MoveRequest, MoveSink, MoveSnapshot, Operation,
+    PlannedShape, PlannedStatus,
 };
 use scuttle_core::model::Category;
 use scuttle_core::platform::caches::{CacheRule, CacheSafety};
 use scuttle_core::platform::PlatformService;
+use scuttle_core::safety::assess::CautionKind;
 use scuttle_core::scanning::{ScanOptions, SilentObserver};
 
 /// Collects every snapshot the interface would have been sent.
@@ -92,7 +94,11 @@ fn cache_id(state: &AppState, scan_id: &str) -> String {
 }
 
 fn select(ids: Vec<String>) -> MoveRequest {
-    MoveRequest::Selection { ids, retry: false }
+    MoveRequest::Selection {
+        ids,
+        retry: false,
+        acknowledged: CautionKind::ALL.to_vec(),
+    }
 }
 
 #[test]
@@ -528,4 +534,177 @@ fn reviewing_again_takes_a_fresh_set_and_moves_nothing() {
         .unwrap();
     again.join().unwrap();
     assert_eq!(state.move_status().unwrap().report.unwrap().moved_files, 1);
+}
+
+/// A heavy folder with a heavy file inside it, both findings, for reviewing a
+/// parent and child selected together.
+fn nested_world() -> World {
+    let world = World::new();
+    for n in 0..3 {
+        world.file(&format!("Downloads/old-renders/take-{n}.mov"), 400, 4 * MB);
+    }
+    world.file("Downloads/old-renders/master.mov", 400, 9 * MB);
+    world
+}
+
+#[test]
+fn a_review_names_exact_paths_and_moves_nothing() {
+    let world = nested_world();
+    let (state, options) = state_for(&world);
+    let scan_id = scan(&state, options);
+    let findings = state.store().candidates_for_scan(&scan_id).unwrap();
+    let folder = findings
+        .iter()
+        .find(|c| c.path.ends_with("old-renders"))
+        .expect("the heavy folder");
+    let master = findings
+        .iter()
+        .find(|c| c.path.ends_with("master.mov"))
+        .expect("the heavy file");
+
+    let plan = state
+        .preview_move(MoveRequest::Selection {
+            ids: vec![master.id.clone(), folder.id.clone(), folder.id.clone()],
+            retry: false,
+            acknowledged: vec![],
+        })
+        .unwrap();
+
+    // The same finding twice is one item; the child goes with its parent.
+    assert_eq!(plan.items.len(), 2, "{:#?}", plan.items);
+    let parent = plan
+        .items
+        .iter()
+        .find(|i| i.finding_id == folder.id)
+        .unwrap();
+    assert_eq!(parent.status, PlannedStatus::Ready, "{:?}", parent.note);
+    assert_eq!(parent.shape, PlannedShape::Folder);
+    assert_eq!(parent.path, folder.path, "the exact folder, not its parent");
+    assert_eq!(parent.contains, Some(4), "four files inside");
+    let child = plan
+        .items
+        .iter()
+        .find(|i| i.finding_id == master.id)
+        .unwrap();
+    assert_eq!(child.status, PlannedStatus::Included);
+    assert_eq!(plan.ready, 1);
+    assert!(world.path("Downloads/old-renders/master.mov").exists());
+}
+
+#[test]
+fn a_move_needs_its_cautions_acknowledged_and_then_goes_ahead() {
+    let world = World::new();
+    let draft = world.file("Downloads/chapter-draft.pdf", 1, 20 * MB);
+    let (state, mut options) = state_for(&world);
+    options.heavy_threshold = 8 * MB;
+    let scan_id = scan(&state, options);
+    let id = state
+        .store()
+        .candidates_for_scan(&scan_id)
+        .unwrap()
+        .into_iter()
+        .find(|c| c.path == draft)
+        .expect("the recently edited file")
+        .id;
+
+    let plan = state
+        .preview_move(MoveRequest::Selection {
+            ids: vec![id.clone()],
+            retry: false,
+            acknowledged: vec![],
+        })
+        .unwrap();
+    assert!(plan
+        .cautions
+        .iter()
+        .any(|g| g.kind == CautionKind::RecentlyChanged));
+    assert!(plan.items[0].kept_until_removed);
+
+    // Direct invocation without the acknowledgement: refused, nothing moves.
+    let (_, worker) = state
+        .spawn_move(
+            MoveRequest::Selection {
+                ids: vec![id.clone()],
+                retry: false,
+                acknowledged: vec![],
+            },
+            Arc::new(Collector::default()),
+        )
+        .unwrap();
+    worker.join().unwrap();
+    let report = state.move_status().unwrap().report.unwrap();
+    assert_eq!(report.moved_files, 0);
+    assert_eq!(
+        report.findings[0].refusal.as_ref().unwrap().code,
+        "needs_acknowledgement"
+    );
+    assert!(draft.exists());
+
+    // Acknowledged once for the batch: it moves, and it is kept.
+    let acknowledged: Vec<CautionKind> = plan.cautions.iter().map(|g| g.kind).collect();
+    let (_, worker) = state
+        .spawn_move(
+            MoveRequest::Selection {
+                ids: vec![id],
+                retry: false,
+                acknowledged,
+            },
+            Arc::new(Collector::default()),
+        )
+        .unwrap();
+    worker.join().unwrap();
+    let report = state.move_status().unwrap().report.unwrap();
+    assert_eq!(report.moved_files, 1, "{:#?}", report.findings);
+    assert!(!draft.exists());
+    let held = state.store().held_quarantine().unwrap();
+    assert!(held[0].keep, "a cautioned move never expires on its own");
+}
+
+#[test]
+fn a_sweep_request_cannot_be_used_to_reach_what_needs_a_person() {
+    let world = World::new();
+    let draft = world.file("Downloads/chapter-draft.pdf", 1, 20 * MB);
+    let (state, mut options) = state_for(&world);
+    options.heavy_threshold = 8 * MB;
+    scan(&state, options);
+    let (_, worker) = state
+        .spawn_move(
+            MoveRequest::Confident { category: None },
+            Arc::new(Collector::default()),
+        )
+        .unwrap();
+    worker.join().unwrap();
+    assert!(draft.exists());
+}
+
+#[test]
+fn the_app_stays_responsive_during_a_large_move() {
+    // Thousands of files: the worker does the work, and the state the window
+    // reads answers immediately throughout.
+    let world = cache_world(3_000);
+    let (state, options) = state_for(&world);
+    let scan_id = scan(&state, options);
+    let cache = cache_id(&state, &scan_id);
+
+    let (_, worker) = state
+        .spawn_move(select(vec![cache]), Arc::new(Collector::default()))
+        .unwrap();
+    let mut worst = Duration::ZERO;
+    let mut samples = 0;
+    while !worker.is_finished() {
+        let asked = Instant::now();
+        let _ = state.move_status();
+        let _ = state.store().held_quarantine();
+        worst = worst.max(asked.elapsed());
+        samples += 1;
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    worker.join().unwrap();
+    assert!(samples > 0);
+    assert!(
+        worst < Duration::from_millis(250),
+        "reading state took {worst:?} while a move ran"
+    );
+    let report = state.move_status().unwrap().report.unwrap();
+    assert_eq!(report.moved_files, 3_001);
 }

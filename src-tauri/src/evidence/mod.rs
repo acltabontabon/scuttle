@@ -75,6 +75,17 @@ pub enum EvidenceKind {
     InUse { by: String },
     /// Nothing appears to reference it.
     NoProcessUsingIt,
+    /// Part of an installed or portable application, recognised by its
+    /// structure. Moving it breaks the application; it is never a leftover.
+    PartOfInstalledApplication { app: String, how: String },
+    /// Inside a folder an application keeps for itself (`%LOCALAPPDATA%`,
+    /// `~/Library/Application Support`). Not proof of anything either way,
+    /// but a reason not to presume it is the user's to discard.
+    InsideApplicationData,
+    /// The operating system recorded that this arrived from the internet.
+    DownloadedFromInternet,
+    /// The file name reads like an installer ("Setup", "Installer").
+    NamedLikeInstaller,
 }
 
 /// A single observation, with its arithmetic already resolved.
@@ -111,13 +122,21 @@ impl Evidence {
 fn describe(kind: &EvidenceKind) -> (String, i32, Option<Risk>) {
     use EvidenceKind::*;
     match kind {
-        ApplicationNotInstalled { app } => (format!("{app} is not installed"), 45, None),
+        // Worded as what was checked, not as a fact about the world: missing
+        // uninstall metadata is not proof an application is gone.
+        ApplicationNotInstalled { app } => (
+            format!("Scuttle found no installed application called {app}"),
+            35,
+            None,
+        ),
         ApplicationInstalled { app } => (
             format!("{app} is still installed"),
             -60,
             Some(Risk::Moderate),
         ),
-        InstalledAppSupersedes { app } => (format!("{app} is already installed"), 45, None),
+        // One signal, not a verdict: it takes a second one (a newer copy, a
+        // download record, long disuse) to make an installer a confident find.
+        InstalledAppSupersedes { app } => (format!("{app} is already installed"), 30, None),
         GameNotInLibrary { app, library } => {
             (format!("{library} has no installation of {app}"), 35, None)
         }
@@ -207,7 +226,30 @@ fn describe(kind: &EvidenceKind) -> (String, i32, Option<Risk>) {
             Some(Risk::Moderate),
         ),
         InUse { by } => (format!("In use by {by}"), -70, Some(Risk::High)),
-        NoProcessUsingIt => ("Nothing appears to be using it".to_string(), 15, None),
+        // Shown, but worth nothing: an application that is closed right now
+        // is still installed, and "not running" was how Scuttle once argued
+        // itself into moving one.
+        NoProcessUsingIt => (
+            "Nothing appears to be using it right now".to_string(),
+            0,
+            None,
+        ),
+        PartOfInstalledApplication { app, how } => (
+            format!("Part of {app} — {how}. Moving it would likely stop {app} working"),
+            -200,
+            Some(Risk::High),
+        ),
+        InsideApplicationData => (
+            "Inside a folder applications keep their own data in".to_string(),
+            -10,
+            Some(Risk::Moderate),
+        ),
+        DownloadedFromInternet => (
+            "Your computer recorded that this was downloaded".to_string(),
+            15,
+            None,
+        ),
+        NamedLikeInstaller => ("Named like an installer".to_string(), 10, None),
     }
 }
 

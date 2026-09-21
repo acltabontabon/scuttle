@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use crate::evidence::Evidence;
+use crate::safety::assess::Assessment;
 
 /// The piles Scuttle empties its pockets into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -215,6 +216,11 @@ pub struct CleanupCandidate {
     pub group: Vec<GroupMember>,
     /// Snapshot of file state at scan time, used to detect staleness later.
     pub fingerprint: StateFingerprint,
+    /// Confidence, impact and eligibility, kept apart. Derived from the
+    /// evidence whenever a candidate is built or loaded; the gate derives it
+    /// again rather than trusting this copy.
+    #[serde(default)]
+    pub assessment: Assessment,
 }
 
 /// The whole footprint a finding covers.
@@ -356,6 +362,7 @@ mod tests {
             created_unix: None,
             group: vec![],
             fingerprint: StateFingerprint::default(),
+            assessment: Default::default(),
         }
     }
 }

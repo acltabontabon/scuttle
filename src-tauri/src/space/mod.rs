@@ -243,6 +243,7 @@ mod tests {
             created_unix: None,
             group: vec![],
             fingerprint: StateFingerprint::default(),
+            assessment: Default::default(),
         }
     }
 

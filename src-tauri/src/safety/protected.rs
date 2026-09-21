@@ -448,6 +448,52 @@ impl ProtectedPaths {
         &self.home
     }
 
+    /// A protected place *inside* `dir`, if there is one that can be named
+    /// without walking: a protected subtree, or the home folder itself.
+    ///
+    /// Moving a folder moves everything in it, so a folder that contains
+    /// something protected is refused just as firmly as the protected thing.
+    /// Rules that match by name anywhere (`.git`, `*.kdbx`) need a walk; see
+    /// [`ProtectedPaths::first_protected_descendant`].
+    pub fn protected_inside(&self, dir: &Path) -> Option<&'static str> {
+        let dir = paths::normalize(dir);
+        if paths::is_within(&self.home, &dir) {
+            return Some("your home folder");
+        }
+        self.rules.iter().find_map(|rule| match &rule.scope {
+            Scope::Subtree(root) if paths::is_strictly_within(root, &dir) => Some(rule.name),
+            _ => None,
+        })
+    }
+
+    /// Walk `dir` for anything the table protects. Links are not followed:
+    /// a link inside a moved folder moves as a link, and what it points at
+    /// stays where it is.
+    ///
+    /// Returns the rule's name and the offending path.
+    pub fn first_protected_descendant(
+        &self,
+        dir: &Path,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Option<(&'static str, PathBuf)> {
+        if let Some(name) = self.protected_inside(dir) {
+            return Some((name, dir.to_path_buf()));
+        }
+        let walker = walkdir::WalkDir::new(dir).follow_links(false).into_iter();
+        for entry in walker.flatten() {
+            if entry.depth() == 0 {
+                continue;
+            }
+            if cancelled() {
+                return Some(("a check that was stopped", entry.path().to_path_buf()));
+            }
+            if let Some(rule) = self.rule_for(entry.path()) {
+                return Some((rule.name, entry.path().to_path_buf()));
+            }
+        }
+        None
+    }
+
     /// The first rule that forbids this path, if any.
     ///
     /// Called for every entry in a scan, so the candidate path is folded once
@@ -479,10 +525,33 @@ impl ProtectedPaths {
     /// no evidence could justify it.
     pub fn is_too_shallow(&self, path: &Path) -> bool {
         let normalized = paths::normalize(path);
-        let depth = normalized.components().count();
-        // Below any filesystem root: `/`, `/Users`, `C:\`, `C:\Users`.
-        if depth <= 2 {
+        // Named folders only: a drive prefix (`C:`) and the root separator
+        // are not depth. Counting them made `C:\Users` and `C:\Windows` three
+        // components deep on Windows, one more than the limit below — so the
+        // limit that holds `/Users` never held them.
+        let depth = normalized
+            .components()
+            .filter(|c| matches!(c, std::path::Component::Normal(_)))
+            .count();
+        // A filesystem root or anything directly beneath one: `/`, `/Users`,
+        // `C:\`, `C:\Users`, `D:\Games`.
+        if depth <= 1 {
             return true;
+        }
+        // The root of a mounted drive is as structural as `C:\`.
+        if depth == 2 {
+            let first = normalized
+                .components()
+                .find_map(|c| match c {
+                    std::path::Component::Normal(name) => {
+                        Some(name.to_string_lossy().to_lowercase())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_default();
+            if matches!(first.as_str(), "volumes" | "mnt" | "media" | "run") {
+                return true;
+            }
         }
         match paths::depth_below(&normalized, &self.home) {
             // The home directory itself, or a direct child of it that is a
@@ -724,5 +793,33 @@ mod tests {
     #[test]
     fn no_rule_is_nameless() {
         assert!(table().rule_names().iter().all(|n| !n.is_empty()));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_drive_and_its_top_folders_are_structural_on_windows() {
+        let table = ProtectedPaths::for_home(r"C:\Users\tester");
+        for path in [r"C:\", r"C:\Users", r"C:\Windows", r"D:\Games", r"c:\users"] {
+            assert!(table.is_too_shallow(Path::new(path)), "{path}");
+        }
+        assert!(!table.is_too_shallow(Path::new(r"D:\Games\Old")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_mounted_drive_root_is_structural() {
+        let table = ProtectedPaths::for_home("/Users/tester");
+        assert!(table.is_too_shallow(Path::new("/Volumes/Backup")));
+        assert!(table.is_too_shallow(Path::new("/Users")));
+        assert!(!table.is_too_shallow(Path::new("/Volumes/Backup/old")));
+    }
+
+    #[test]
+    fn a_folder_holding_something_protected_is_known_to() {
+        let table = ProtectedPaths::for_home("/home/tester");
+        assert!(table.protected_inside(Path::new("/home")).is_some());
+        assert!(table
+            .protected_inside(Path::new("/home/tester/Downloads"))
+            .is_none());
     }
 }

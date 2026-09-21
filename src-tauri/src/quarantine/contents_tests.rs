@@ -16,6 +16,8 @@ use super::transfer::{Ctl, FailureKind, Faults, Step};
 use super::*;
 use crate::evidence::{ev, EvidenceKind};
 use crate::model::*;
+use crate::platform::installations::NO_INSTALL_AREAS;
+use crate::safety::assess::CautionKind;
 use crate::safety::{Bidding, ProtectedPaths};
 use crate::scanning::snapshot::{self, SnapshotPolicy};
 use crate::scanning::ScanOptions;
@@ -79,6 +81,7 @@ fn world_on(drawer: Option<PathBuf>, files: &[(&str, &str)]) -> World {
         created_unix: None,
         group: vec![],
         fingerprint,
+        assessment: Default::default(),
     };
     store
         .begin_scan("s1", ScanKind::Full, &ScanOptions::default(), 0)
@@ -106,7 +109,11 @@ impl World {
         ActionContext {
             protected: &self.protected,
             allowed_roots: &self.roots,
-            bidding: Bidding::Scuttle,
+            // File mechanics, not policy: a person's choice with every caution
+            // accepted. Policy has its own tests, in `safety::validate`.
+            bidding: Bidding::User,
+            acknowledged: &CautionKind::ALL,
+            installs: &NO_INSTALL_AREAS,
         }
     }
 
@@ -1091,6 +1098,7 @@ fn a_whole_item_interrupted_at_each_point_is_settled_by_looking_at_the_disk() {
                 mode: crate::storage::RecordMode::Whole,
                 item_count: 1,
                 attention: false,
+                keep: false,
             })
             .unwrap();
         q.reconcile(10).unwrap();
@@ -1324,7 +1332,9 @@ fn real_second_volume_a_whole_folder_is_refused_and_nothing_is_lost() {
     let ctx = ActionContext {
         protected: &protected,
         allowed_roots: &roots,
-        bidding: Bidding::Scuttle,
+        bidding: Bidding::User,
+        acknowledged: &CautionKind::ALL,
+        installs: &NO_INSTALL_AREAS,
     };
     let fingerprint = safety::observe(&dir).unwrap();
     let candidate = CleanupCandidate {
@@ -1347,6 +1357,7 @@ fn real_second_volume_a_whole_folder_is_refused_and_nothing_is_lost() {
         created_unix: None,
         group: vec![],
         fingerprint,
+        assessment: Default::default(),
     };
 
     let err = q.hold(&candidate, &ctx, 1).unwrap_err();

@@ -11,7 +11,7 @@ use super::apps::{AppSource, InstalledApp};
 use super::caches::{self, CacheRule};
 use super::games::{self, GameLibrary};
 use super::util;
-use super::{KnownLocation, LocationRole, PlatformService};
+use super::{InstallAreas, KnownLocation, LocationRole, PlatformService};
 use crate::{Result, ScuttleError};
 
 const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall";
@@ -178,6 +178,39 @@ impl PlatformService for WindowsPlatformService {
         }
         roots.retain(|path| path.is_dir());
         roots
+    }
+
+    fn install_areas(&self) -> InstallAreas {
+        let mut containers = vec![self.local_app_data().join("Programs")];
+        for var in ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"] {
+            if let Some(dir) = std::env::var_os(var) {
+                containers.push(PathBuf::from(dir));
+            }
+        }
+        containers.retain(|p| p.is_dir());
+        containers.dedup();
+
+        // Install folders recorded by uninstallers. A record pointing at a
+        // whole data root (some do: "InstallLocation = %LOCALAPPDATA%") would
+        // swallow every application's data, so only specific folders count.
+        let data_roots = self.application_data_roots();
+        let explicit = self
+            .installed_apps()
+            .into_iter()
+            .filter_map(|app| app.install_location)
+            .map(|p| crate::safety::paths::normalize(&p))
+            .filter(|p| {
+                p.is_absolute()
+                    && p.components().count() >= 4
+                    && !data_roots
+                        .iter()
+                        .any(|root| crate::safety::paths::is_within(root, p))
+            })
+            .collect();
+        InstallAreas {
+            containers,
+            explicit,
+        }
     }
 
     fn installed_apps(&self) -> Vec<InstalledApp> {

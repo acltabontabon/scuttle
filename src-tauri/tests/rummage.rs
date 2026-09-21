@@ -99,7 +99,9 @@ fn an_uninstalled_game_is_found_and_its_save_data_is_spared() {
 
     let cyberpunk = named(&outcome, "Cyberpunk 2077").expect("the uninstalled game");
     assert_eq!(cyberpunk.category, Category::Ghosts);
-    assert_eq!(cyberpunk.recommended_action, RecommendedAction::Quarantine);
+    // Found and explained, and a person's to move — but an application's
+    // folder is never something Scuttle sweeps up on its own.
+    assert_eq!(cyberpunk.recommended_action, RecommendedAction::Review);
     assert!(cyberpunk
         .evidence
         .iter()

@@ -3,6 +3,20 @@
 //! The interesting signal is not age. It is that the thing the installer
 //! installs is already installed, or that a newer copy of the same installer
 //! is sitting right next to it.
+//!
+//! What this detector must never do is the thing it once did: call an
+//! application's own program an installer. It used to accept any `.exe` over
+//! 512 KB anywhere it looked — including `%LOCALAPPDATA%\Discord\app-*\Discord.exe`
+//! and Discord's `Update.exe` — and, because Discord was installed, rate the
+//! running application a confident, low-risk "installer whose job is done".
+//! So now:
+//!
+//! * nothing inside a folder applications keep for themselves is considered;
+//! * nothing that is part of an installation — Squirrel, Electron, a program
+//!   beside its libraries, a portable app unpacked in Downloads — is either;
+//! * a bare `.exe` needs more than its extension: its name has to read like an
+//!   installer's. A lone program is not presumed to be anything;
+//! * and confidence takes two independent signals beyond the file format.
 
 use std::collections::HashMap;
 
@@ -56,11 +70,32 @@ impl Detector for InstallerDetector {
         if entry.size < 1024 * 512 {
             return;
         }
+        // Applications' own territory. Whatever sits in there with an
+        // installer's extension is an application's business — its updater,
+        // its program, its cached packages — never a download of the user's.
+        if ctx.is_application_managed(&entry.path) {
+            return;
+        }
+        // Part of an application wherever it is: a portable app unpacked in
+        // Downloads, an install folder a person chose to scan.
+        if ctx
+            .installs
+            .enclosing(&entry.path, ctx.root_of(&entry.path))
+            .is_some()
+        {
+            return;
+        }
         let stem = entry
             .path
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
+        // A package format (`.dmg`, `.msi`, `.pkg`) is an installer by
+        // construction. A bare program is not: `.exe` is also how portable
+        // tools and games arrive, so it needs a name that says "installer".
+        if ext == "exe" && !named_like_installer(&stem) {
+            return;
+        }
         self.by_product
             .entry(product_key(&stem))
             .or_default()
@@ -107,6 +142,20 @@ impl Detector for InstallerDetector {
                     finding = finding.with(EvidenceKind::NewerInstallerPresent {
                         newer: newest_name.clone(),
                     });
+                }
+
+                let stem = entry
+                    .path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                if named_like_installer(&stem) {
+                    finding = finding.with(EvidenceKind::NamedLikeInstaller);
+                }
+                if crate::platform::installations::downloaded_from_internet(&entry.path)
+                    == Some(true)
+                {
+                    finding = finding.with(EvidenceKind::DownloadedFromInternet);
                 }
 
                 if let Some(days) = entry.idle_days(ctx.now_unix) {
@@ -157,8 +206,19 @@ fn remark(
             "{} of installer, untouched for {days} days.",
             human_bytes(entry.size)
         ),
-        _ => "An installer. Probably done with this.".to_string(),
+        _ => "Looks like an installer. Scuttle cannot tell what for.".to_string(),
     }
+}
+
+/// Does a file name read like an installer's? "DiscordSetup", "Steam
+/// Installer", "vlc-3.0-win64-install" — but not "Discord" or "Update".
+pub(crate) fn named_like_installer(stem: &str) -> bool {
+    let lower = stem.to_lowercase();
+    ["setup", "installer", "install", "_inst", "-inst"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+        && !lower.contains("uninstall")
+        && !lower.starts_with("unins")
 }
 
 #[cfg(test)]
@@ -231,6 +291,93 @@ mod tests {
             4,
             "every copy but the newest has a newer sibling"
         );
+    }
+
+    /// A synthetic Squirrel-style install shaped like Discord's, beneath a
+    /// Windows-like `AppData/Local`. No real application is involved.
+    fn discord_like_install() -> Vec<FixtureFile> {
+        vec![
+            installer("AppData/Local/Discord/Update.exe", 200, 1),
+            installer("AppData/Local/Discord/app-1.0.9001/Discord.exe", 3, 1),
+            fixture_entry("AppData/Local/Discord/app-1.0.9001/ffmpeg.dll", 3, 1024),
+            installer("AppData/Local/Discord/app-1.0.9000/Discord.exe", 90, 1),
+            installer(
+                "AppData/Local/Discord/packages/Discord-1.0.9001-full.nupkg",
+                3,
+                1,
+            ),
+            installer("AppData/Local/Discord/packages/DiscordSetup.exe", 3, 1),
+        ]
+    }
+
+    #[test]
+    fn an_installed_application_is_never_mistaken_for_its_installer() {
+        // The incident: Discord installed, not running, files old enough.
+        let h = Harness::with_apps(&[("Discord", None)]);
+        let candidates = h.run(InstallerDetector::new(), discord_like_install());
+        assert!(
+            candidates.is_empty(),
+            "an application's own files were offered as installers: {:?}",
+            candidates.iter().map(|c| &c.path).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn an_installed_application_without_uninstall_metadata_is_still_an_application() {
+        // Missing registry records are not proof of anything.
+        let h = Harness::with_apps(&[]);
+        let candidates = h.run(InstallerDetector::new(), discord_like_install());
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn a_standalone_installer_in_downloads_is_found() {
+        let h = Harness::with_apps(&[("Discord", None)]);
+        let mut files = discord_like_install();
+        files.push(installer("Downloads/DiscordSetup.exe", 120, 1));
+        let candidates = h.run(InstallerDetector::new(), files);
+        let c = one(&candidates);
+        assert!(c.path.ends_with("Downloads/DiscordSetup.exe"));
+        assert!(c
+            .evidence
+            .iter()
+            .any(|e| matches!(e.kind, EvidenceKind::InstalledAppSupersedes { .. })));
+        assert_eq!(c.target_kind, crate::model::TargetKind::File);
+    }
+
+    #[test]
+    fn a_portable_app_in_downloads_is_not_an_installer() {
+        let h = Harness::with_apps(&[]);
+        let candidates = h.run(
+            InstallerDetector::new(),
+            vec![
+                installer("Downloads/ToolPortable/ToolSetup.exe", 200, 1),
+                installer("Downloads/ToolPortable/Tool.exe", 200, 1),
+                fixture_entry("Downloads/ToolPortable/Qt5Core.dll", 200, 1024),
+            ],
+        );
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn a_bare_program_is_not_presumed_to_be_an_installer() {
+        let h = Harness::with_apps(&[("Tool", None)]);
+        let candidates = h.run(
+            InstallerDetector::new(),
+            vec![installer("Downloads/Tool.exe", 400, 1)],
+        );
+        assert!(candidates.is_empty(), "a name is not evidence");
+    }
+
+    #[test]
+    fn installer_names() {
+        assert!(named_like_installer("DiscordSetup"));
+        assert!(named_like_installer("Steam Installer"));
+        assert!(named_like_installer("vlc-3.0.20-win64-install"));
+        assert!(!named_like_installer("Discord"));
+        assert!(!named_like_installer("Update"));
+        assert!(!named_like_installer("unins000"));
+        assert!(!named_like_installer("Uninstall Tool"));
     }
 
     #[test]

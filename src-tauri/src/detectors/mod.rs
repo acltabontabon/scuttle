@@ -152,6 +152,18 @@ pub mod naming {
             .split(|c: char| !c.is_alphanumeric())
             .filter(|t| !t.is_empty())
             .map(|t| t.to_lowercase())
+            // "DiscordSetup", "SteamInstaller": the installer word glued to the
+            // product's name is still noise.
+            .map(|t| {
+                for suffix in ["installer", "setup"] {
+                    if let Some(head) = t.strip_suffix(suffix) {
+                        if head.len() >= 3 {
+                            return head.to_string();
+                        }
+                    }
+                }
+                t
+            })
             .collect();
 
         let kept: Vec<String> = tokens

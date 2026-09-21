@@ -103,6 +103,20 @@ pub fn run() {
                         api.prevent_exit();
                         return;
                     }
+                    // Files in motion: stop them at a safe point first, and
+                    // say so. `code` is `None` for a quit a person asked for
+                    // (⌘Q, the menu); Scuttle's own exit after winding down
+                    // arrives with a code and passes straight through, as does
+                    // a second request.
+                    if code.is_none() && !state.quitting() && window::busy_with_files(&state) {
+                        state.begin_quitting();
+                        state.stop_scheduler();
+                        state.cancel_scan();
+                        if window::finish_before_quitting(app, &state) {
+                            api.prevent_exit();
+                            return;
+                        }
+                    }
                     state.begin_quitting();
                     state.stop_scheduler();
                     state.cancel_scan();

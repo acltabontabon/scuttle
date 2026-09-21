@@ -217,6 +217,15 @@ pub struct QuarantineRecord {
     /// its own. Nothing is deleted on that account; the person is told.
     #[serde(default)]
     pub attention: bool,
+    /// Never removed by the retention sweep; only by a person. True for
+    /// anything that cannot simply be rebuilt or downloaded again, and for
+    /// anything moved after a caution was acknowledged.
+    #[serde(default = "yes")]
+    pub keep: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn one() -> u64 {
@@ -490,6 +499,7 @@ impl Store {
         for row in rows {
             let mut candidate = row?;
             candidate.evidence = read_evidence(&conn, &candidate.id)?;
+            crate::safety::assess::settle(&mut candidate, chrono::Utc::now().timestamp());
             out.push(candidate);
         }
         Ok(out)
@@ -509,6 +519,7 @@ impl Store {
             .optional()?
             .ok_or_else(|| ScuttleError::not_found("That finding"))?;
         candidate.evidence = read_evidence(&conn, id)?;
+        crate::safety::assess::settle(&mut candidate, chrono::Utc::now().timestamp());
         Ok(candidate)
     }
 
@@ -602,8 +613,8 @@ impl Store {
         conn.execute(
             "INSERT INTO quarantine_items (id, finding_id, original_path, stored_path,
                 display_name, category, size, content_hash, evidence, quarantined_unix,
-                expires_unix, status, resolved_unix, mode, item_count, attention)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+                expires_unix, status, resolved_unix, mode, item_count, attention, keep)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
             params![
                 record.id,
                 record.finding_id,
@@ -621,6 +632,7 @@ impl Store {
                 record.mode.as_str(),
                 record.item_count,
                 record.attention as i32,
+                record.keep as i32,
             ],
         )?;
         Ok(())
@@ -631,7 +643,7 @@ impl Store {
         conn.query_row(
             "SELECT id, finding_id, original_path, stored_path, display_name, category, size,
                     content_hash, evidence, quarantined_unix, expires_unix, status, resolved_unix,
-                    mode, item_count, attention
+                    mode, item_count, attention, keep
              FROM quarantine_items WHERE id = ?1",
             params![id],
             row_to_quarantine,
@@ -646,11 +658,30 @@ impl Store {
         let mut statement = conn.prepare(
             "SELECT id, finding_id, original_path, stored_path, display_name, category, size,
                     content_hash, evidence, quarantined_unix, expires_unix, status, resolved_unix,
-                    mode, item_count, attention
+                    mode, item_count, attention, keep
              FROM quarantine_items WHERE status = 'held' ORDER BY quarantined_unix DESC",
         )?;
         let rows = statement.query_map([], row_to_quarantine)?;
-        Ok(rows.filter_map(std::result::Result::ok).collect())
+        let mut out = Vec::new();
+        for row in rows {
+            match row {
+                Ok(record) => out.push(record),
+                // Never silently: an unreadable row is still a held item on
+                // disk. The files stay put; `reconcile` counts the cell.
+                Err(error) => tracing::warn!(%error, "a Drawer record could not be read"),
+            }
+        }
+        Ok(out)
+    }
+
+    /// Flag a record for a person's attention, or clear the flag.
+    pub fn set_attention(&self, id: &str, attention: bool) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "UPDATE quarantine_items SET attention = ?2 WHERE id = ?1",
+            params![id, attention as i32],
+        )?;
+        Ok(())
     }
 
     pub fn expired_quarantine(&self, now_unix: i64) -> Result<Vec<QuarantineRecord>> {
@@ -658,8 +689,9 @@ impl Store {
         let mut statement = conn.prepare(
             "SELECT id, finding_id, original_path, stored_path, display_name, category, size,
                     content_hash, evidence, quarantined_unix, expires_unix, status, resolved_unix,
-                    mode, item_count, attention
-             FROM quarantine_items WHERE status = 'held' AND attention = 0 AND expires_unix <= ?1",
+                    mode, item_count, attention, keep
+             FROM quarantine_items
+             WHERE status = 'held' AND attention = 0 AND keep = 0 AND expires_unix <= ?1",
         )?;
         let rows = statement.query_map(params![now_unix], row_to_quarantine)?;
         Ok(rows.filter_map(std::result::Result::ok).collect())
@@ -872,6 +904,8 @@ fn row_to_candidate(row: &rusqlite::Row<'_>) -> rusqlite::Result<CleanupCandidat
             .unwrap_or_default(),
         group,
         evidence: Vec::new(),
+        // Filled in once the evidence is read, by `assess::settle`.
+        assessment: Default::default(),
     })
 }
 
@@ -915,6 +949,7 @@ pub(crate) fn row_to_quarantine(row: &rusqlite::Row<'_>) -> rusqlite::Result<Qua
         mode: RecordMode::parse(&row.get::<_, String>(13)?),
         item_count: row.get::<_, i64>(14)?.max(0) as u64,
         attention: row.get::<_, i64>(15)? != 0,
+        keep: row.get::<_, i64>(16)? != 0,
     })
 }
 
@@ -1025,6 +1060,7 @@ mod tests {
                 is_dir: false,
                 child_count: None,
             },
+            assessment: Default::default(),
         }
     }
 
@@ -1146,6 +1182,7 @@ mod tests {
             mode: crate::storage::RecordMode::Whole,
             item_count: 1,
             attention: false,
+            keep: false,
         };
         store.insert_quarantine(&record).unwrap();
 
@@ -1190,6 +1227,7 @@ mod tests {
                     mode: crate::storage::RecordMode::Whole,
                     item_count: 1,
                     attention: false,
+                    keep: false,
                 })
                 .unwrap();
         }

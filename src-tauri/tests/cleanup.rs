@@ -66,9 +66,10 @@ impl Bench {
         ActionContext {
             protected: &self.protected,
             allowed_roots: &self.roots,
-            // Test harnesses take the strict bidding, so every existing
-            // assertion keeps meaning what it meant.
-            bidding: scuttle_core::safety::Bidding::Scuttle,
+            // File mechanics: a person's choice with every caution accepted.
+            bidding: scuttle_core::safety::Bidding::User,
+            acknowledged: &scuttle_core::safety::assess::CautionKind::ALL,
+            installs: &scuttle_core::platform::installations::NO_INSTALL_AREAS,
         }
     }
 
@@ -156,11 +157,24 @@ fn nothing_scuttle_refuses_to_recommend_can_be_quarantined_anyway() {
         .clone();
     let path = refused.path.clone();
 
+    // Not by a sweep: nobody looked.
+    let mut sweep = bench.ctx();
+    sweep.bidding = scuttle_core::safety::Bidding::Scuttle;
     let error = bench
         .quarantine
-        .hold(&refused, &bench.ctx(), NOW)
+        .hold(&refused, &sweep, NOW)
         .expect_err("should be refused");
     assert_eq!(error.code(), "refused");
+
+    // Nor by a person who has not been told there is save data in it. Their
+    // own choice, once told, is theirs to make — see `command_layer`.
+    let mut unacknowledged = bench.ctx();
+    unacknowledged.acknowledged = &[];
+    let error = bench
+        .quarantine
+        .hold(&refused, &unacknowledged, NOW)
+        .expect_err("should need acknowledging");
+    assert_eq!(error.code(), "needs_acknowledgement");
     assert!(path.exists(), "a refused action must not move anything");
 }
 

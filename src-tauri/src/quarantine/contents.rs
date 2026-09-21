@@ -158,8 +158,16 @@ fn has_partial_copies(dir: &Path) -> bool {
     false
 }
 
+/// `base` joined with a journal's relative path. A part that could climb out
+/// of `base` (`..`, a drive, a root) is dropped rather than followed, so no
+/// stored record, however damaged, can aim a restore outside its folder.
+/// Restore also refuses such entries outright; see `restore_contents`.
 fn join_rel(base: &Path, rel: &str) -> PathBuf {
-    rel.split('/').fold(base.to_path_buf(), |p, c| p.join(c))
+    rel.split('/')
+        .filter(|c| {
+            !c.is_empty() && *c != "." && *c != ".." && !c.contains('\\') && !c.contains(':')
+        })
+        .fold(base.to_path_buf(), |p, c| p.join(c))
 }
 
 /// The state a folder-cache lookup keeps between files: consecutive entries of
@@ -288,6 +296,7 @@ impl Quarantine {
             mode: RecordMode::Contents,
             item_count: 0,
             attention: false,
+            keep: super::keeps(&crate::safety::assess::assess(candidate, now_unix)),
         };
 
         // Intent first: the manifest and the record exist before a single file
@@ -565,8 +574,25 @@ impl Quarantine {
                         back.push((entry.rel.clone(), journal::DONE));
                         continue;
                     }
+                    if !crate::safety::paths::is_contained_rel(&entry.rel) {
+                        issues_add(
+                            &mut out.issues,
+                            &FsFailure::new(FailureKind::Unsafe, Phase::Restore, entry.rel.clone()),
+                        );
+                        back.push((entry.rel.clone(), journal::DONE));
+                        continue;
+                    }
                     let source = join_rel(base, &entry.rel);
                     let destination = join_rel(original, &entry.rel);
+                    if let Err(error) = self.check_destination(&destination) {
+                        tracing::warn!(%error, "a restore destination was refused");
+                        issues_add(
+                            &mut out.issues,
+                            &FsFailure::new(FailureKind::Unsafe, Phase::Restore, entry.rel.clone()),
+                        );
+                        back.push((entry.rel.clone(), journal::DONE));
+                        continue;
+                    }
                     match restore_file(&source, &destination, ctl) {
                         Ok(renamed) => {
                             out.restored += 1;
