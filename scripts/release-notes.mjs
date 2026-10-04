@@ -87,30 +87,22 @@ export function downloads(version) {
     `| **Mac · Intel** (macOS 10.15+) | **[Download for Intel →](${base}/${file('macos-intel', 'dmg')})** |`,
     `| **Windows** 10 or 11, 64-bit | **[Download for Windows →](${base}/${file('windows-x64-setup', 'exe')})** |`,
     '',
-    'Not sure which Mac you have? Apple menu → About This Mac. "Apple M1" or later',
-    'means Apple silicon.',
+    'Not sure which Mac you have? Apple menu → About This Mac. "Apple M1" or later means Apple silicon.',
     '',
     '**First launch:** macOS builds are ad-hoc signed, without an Apple Developer ID or notarization; the Windows installer is unsigned. Expect an operating-system warning. Installation steps are below.',
     '',
     '<details>',
     '<summary><strong>Installation & first-launch help</strong></summary>',
     '',
-    'Scuttle is built without paid code-signing certificates, so neither operating',
-    'system can tell you who made it. Both of them will say so once, the first time.',
+    'Scuttle is built without paid code-signing certificates, so neither operating system can verify the publisher.',
     '',
-    '**macOS** — open the `.dmg`, drag Scuttle to Applications, and open it from there.',
-    'You will be told the developer cannot be verified. Go to **System Settings →',
-    'Privacy & Security**, scroll to **Security**, and click **Open Anyway** next to',
-    'Scuttle, then open it again. That button appears only after you have tried to',
-    'open the app, and only for about an hour afterwards. You do this once.',
+    '**macOS** — open the `.dmg`, drag Scuttle to Applications, and open it from there. You will be told the developer cannot be verified. Go to **System Settings → Privacy & Security**, scroll to **Security**, and click **Open Anyway** next to Scuttle, then open it again. That button appears only after you have tried to open the app, and only for about an hour afterwards. You do this once.',
+    '',
     'If macOS says **damaged**, check the checksum and download again; that is not the expected first-launch prompt.',
     '',
-    '**Windows** — run the `-setup.exe`. Microsoft Defender SmartScreen will say it',
-    'stopped an unrecognised app: click **More info**, then **Run anyway**. Scuttle',
-    'installs for your user account only, so there is no administrator prompt.',
+    '**Windows** — run the `-setup.exe`. Microsoft Defender SmartScreen will say it stopped an unrecognised app: click **More info**, then **Run anyway**. Scuttle installs for your user account only, so there is no administrator prompt. The warning may appear again for a new version.',
     '',
-    'Please do not turn off Gatekeeper, SmartScreen or your antivirus for this — or',
-    'for anything else. Neither instruction above changes a system setting.',
+    'Keep Gatekeeper, SmartScreen and your antivirus enabled. These steps allow Scuttle to open without disabling those protections.',
     '',
     '</details>',
     '',
@@ -133,7 +125,7 @@ export function downloads(version) {
 }
 
 export function limitations(version) {
-  return [
+  return unwrap([
     '## You stay in charge',
     '',
     '| Find it | Understand it | Decide what stays |',
@@ -162,7 +154,7 @@ export function limitations(version) {
     '---',
     '',
     `**[Explore Scuttle](https://acltabontabon.com/scuttle/) · [Read the guide](https://github.com/${REPO}/blob/v${version}/README.md) · [Full changelog](https://github.com/${REPO}/blob/v${version}/CHANGELOG.md) · [Report an issue](https://github.com/${REPO}/issues)**`,
-  ].join('\n');
+  ]).join('\n');
 }
 
 export function releaseBody(version, section, { media = null, checksums = '' } = {}) {
