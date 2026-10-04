@@ -190,7 +190,8 @@ export function Preview() {
       refreshSpace: ok,
       settings: { ...SETTINGS, appearance: theme },
       updateSettings: async (next) => {
-        setTheme(next.appearance)
+        const changes = typeof next === 'function' ? next({ ...SETTINGS, appearance: theme }) : next
+        if (changes.appearance) setTheme(changes.appearance)
         return true
       },
       background: BACKGROUND_STATUS,

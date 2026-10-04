@@ -56,8 +56,11 @@ and use today's date, the day you are cutting it.
 
 This section becomes the release body. There is nowhere else to write release
 notes, which is the point: `scripts/release-notes.mjs` reads this file, adds
-the download table, the Gatekeeper and SmartScreen instructions and the
-checksums, and that is the whole release page. Preview it at any time:
+the Scuttle header and recorded demo, platform download links, installation
+help and checksums, and that is the whole release page. A `### Highlights`
+section stays visible; the following Added, Fixed and Changed sections fold
+into **All fixes & improvements**. Images and guides are pinned to the release
+tag so the page stays faithful to the build. Preview it at any time:
 
 ```sh
 node scripts/release-notes.mjs 0.2.0 | less

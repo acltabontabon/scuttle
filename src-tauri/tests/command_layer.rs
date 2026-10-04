@@ -44,6 +44,73 @@ fn state_for(world: &World) -> (AppState, ScanOptions) {
 }
 
 #[test]
+fn a_failed_scan_registration_releases_the_gate_and_can_be_retried() {
+    let world = World::new();
+    let (state, options) = state_for(&world);
+    let connection =
+        rusqlite::Connection::open(world.platform.data_dir().join("scuttle.db")).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER fail_scan BEFORE INSERT ON scan_runs
+         BEGIN SELECT RAISE(FAIL, 'simulated storage failure'); END;",
+        )
+        .unwrap();
+    assert!(state.start_scan(&options).is_err());
+    assert_eq!(state.current_operation(), None);
+    assert!(!state.cancel_scan());
+    connection.execute_batch("DROP TRIGGER fail_scan;").unwrap();
+    let id = state
+        .start_scan(&options)
+        .expect("a failed start must not leave a running slot");
+    state.run_scan_with(&id, options, &SilentObserver).unwrap();
+    assert_eq!(state.current_operation(), None);
+}
+
+#[test]
+fn a_panicking_scan_worker_releases_the_gate() {
+    struct PanickingObserver;
+    impl ScanObserver for PanickingObserver {
+        fn phase(&self, _: scuttle_core::scanning::Phase) {
+            panic!("simulated worker panic");
+        }
+        fn progress(&self, _: &scuttle_core::scanning::Progress) {}
+        fn candidate(&self, _: &scuttle_core::model::CleanupCandidate) {}
+        fn finished(&self, _: &scuttle_core::scanning::ScanSummary) {}
+    }
+    let world = World::new();
+    let (state, options) = state_for(&world);
+    let id = state.start_scan(&options).unwrap();
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        state.run_scan_with(&id, options.clone(), &PanickingObserver)
+    }));
+    assert!(panic.is_err());
+    assert_eq!(state.current_operation(), None);
+    let retry = state
+        .start_scan(&options)
+        .expect("a panic must not leave Scuttle busy");
+    state
+        .run_scan_with(&retry, options, &SilentObserver)
+        .unwrap();
+}
+
+#[test]
+fn space_measurement_uses_the_platform_home() {
+    let world = World::new();
+    world.file("Downloads/fixture.bin", 1, 1234);
+    let (state, _) = state_for(&world);
+    let overview = state.space_overview().unwrap();
+    let downloads = overview
+        .areas
+        .iter()
+        .find(|area| area.label == "Downloads")
+        .unwrap();
+    assert_eq!(
+        downloads.bytes, 1234,
+        "only the fixture home may be measured"
+    );
+}
+
+#[test]
 fn a_rummage_persists_what_it_found_and_reads_it_back() {
     let world = old_installers();
     let (state, options) = state_for(&world);

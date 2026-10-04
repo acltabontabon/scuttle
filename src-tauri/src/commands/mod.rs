@@ -217,7 +217,16 @@ pub fn rummage(
     std::thread::Builder::new()
         .name("scuttle-rummage".into())
         .spawn(move || {
-            if let Err(err) = state_for_worker.run_scan(&scan_id_for_worker, options, &handle) {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                state_for_worker.run_scan(&scan_id_for_worker, options, &handle)
+            }))
+            .unwrap_or_else(|_| {
+                Err(ScuttleError::Internal(
+                    "The rummage stopped unexpectedly. Your files were not changed. Try again."
+                        .into(),
+                ))
+            });
+            if let Err(err) = result {
                 tracing::warn!(error = %err, "rummage ended badly");
                 let _ = handle.emit(
                     events::DONE,
@@ -228,7 +237,10 @@ pub fn rummage(
                 );
             }
         })
-        .map_err(|e| ScuttleError::Internal(format!("could not start rummaging: {e}")))?;
+        .map_err(|e| {
+            state.finish_scan(&scan_id);
+            ScuttleError::Internal(format!("could not start rummaging: {e}"))
+        })?;
 
     Ok(started)
 }

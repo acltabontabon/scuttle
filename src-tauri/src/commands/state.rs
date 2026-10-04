@@ -412,6 +412,10 @@ impl AppState {
         // needed has already happened above, before this lock was taken.
         let guard = self.claim_gate(Operation::Scan)?;
         let id = uuid::Uuid::new_v4().to_string();
+        // Commit before publishing the running slot. A failed database write
+        // must release the local guard rather than leave Scuttle busy forever.
+        self.store()
+            .begin_scan(&id, kind, options, super::now_unix())?;
         *running = Some(RunningScan {
             id: id.clone(),
             kind,
@@ -421,8 +425,6 @@ impl AppState {
         drop(running);
 
         *self.lock_roots() = options.roots.clone();
-        self.store()
-            .begin_scan(&id, kind, options, super::now_unix())?;
         Ok(id)
     }
 
@@ -491,7 +493,7 @@ impl AppState {
     /// slot unconditionally at that point would clear the rummage's entry —
     /// releasing its gate underneath it and leaving `cancel_rummage` with
     /// nothing to stop.
-    fn finish_scan(&self, scan_id: &str) {
+    pub(super) fn finish_scan(&self, scan_id: &str) {
         let mut running = self.lock_running();
         if running.as_ref().is_some_and(|scan| scan.id == scan_id) {
             // Dropping the scan releases the operation gate with it.
@@ -749,7 +751,17 @@ impl AppState {
             _ => return Err(ScuttleError::ScanBusy),
         };
 
-        let result = (|| {
+        // Release the slot even if a detector or observer panics. The worker
+        // catches that panic and reports a failed scan to the window.
+        struct Finish<'a>(&'a AppState, &'a str);
+        impl Drop for Finish<'_> {
+            fn drop(&mut self) {
+                self.0.finish_scan(self.1);
+            }
+        }
+        let _finish = Finish(self, scan_id);
+
+        (|| {
             let ignores = self.store().ignore_set()?;
             let ctx = ScanContext::new(
                 options.clone(),
@@ -787,10 +799,7 @@ impl AppState {
             }
 
             Ok(outcome)
-        })();
-
-        self.finish_scan(scan_id);
-        result
+        })()
     }
 
     /// Record, for every shared folder that was found, the files it was

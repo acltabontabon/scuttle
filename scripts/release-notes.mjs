@@ -77,18 +77,23 @@ export function downloads(version) {
   const base = `https://github.com/${REPO}/releases/download/v${version}`;
   const file = (slug, ext) => `Scuttle-${version}-${slug}.${ext}`;
   return [
-    '## Which one do I want?',
+    '## Give your disk a little breathing room',
     '',
-    '| Your computer | Download |',
+    'Choose your download. No account. No cloud scanning. Your files stay on your computer.',
+    '',
+    '| Your computer | Get Scuttle |',
     '| --- | --- |',
-    `| Mac with Apple silicon (M1 and later) | [${file('macos-apple-silicon', 'dmg')}](${base}/${file('macos-apple-silicon', 'dmg')}) |`,
-    `| Mac with an Intel processor | [${file('macos-intel', 'dmg')}](${base}/${file('macos-intel', 'dmg')}) |`,
-    `| Windows 10 or 11, 64-bit | [${file('windows-x64-setup', 'exe')}](${base}/${file('windows-x64-setup', 'exe')}) |`,
+    `| **Mac · Apple silicon** (M1 and later, macOS 11+) | **[Download for Apple silicon →](${base}/${file('macos-apple-silicon', 'dmg')})** |`,
+    `| **Mac · Intel** (macOS 10.15+) | **[Download for Intel →](${base}/${file('macos-intel', 'dmg')})** |`,
+    `| **Windows** 10 or 11, 64-bit | **[Download for Windows →](${base}/${file('windows-x64-setup', 'exe')})** |`,
     '',
     'Not sure which Mac you have? Apple menu → About This Mac. "Apple M1" or later',
     'means Apple silicon.',
     '',
-    '### The warning you are going to get',
+    '**First launch:** macOS builds are ad-hoc signed, without an Apple Developer ID or notarization; the Windows installer is unsigned. Expect an operating-system warning. Installation steps are below.',
+    '',
+    '<details>',
+    '<summary><strong>Installation & first-launch help</strong></summary>',
     '',
     'Scuttle is built without paid code-signing certificates, so neither operating',
     'system can tell you who made it. Both of them will say so once, the first time.',
@@ -98,6 +103,7 @@ export function downloads(version) {
     'Privacy & Security**, scroll to **Security**, and click **Open Anyway** next to',
     'Scuttle, then open it again. That button appears only after you have tried to',
     'open the app, and only for about an hour afterwards. You do this once.',
+    'If macOS says **damaged**, check the checksum and download again; that is not the expected first-launch prompt.',
     '',
     '**Windows** — run the `-setup.exe`. Microsoft Defender SmartScreen will say it',
     'stopped an unrecognised app: click **More info**, then **Run anyway**. Scuttle',
@@ -106,7 +112,10 @@ export function downloads(version) {
     'Please do not turn off Gatekeeper, SmartScreen or your antivirus for this — or',
     'for anything else. Neither instruction above changes a system setting.',
     '',
-    '### Verifying what you downloaded',
+    '</details>',
+    '',
+    '<details>',
+    '<summary><strong>Verify your download</strong></summary>',
     '',
     'Each download has a `.sha256` file beside it.',
     '',
@@ -114,14 +123,27 @@ export function downloads(version) {
     'shasum -a 256 -c Scuttle-VERSION-macos-apple-silicon.dmg.sha256      # macOS',
     'Get-FileHash .\\Scuttle-VERSION-windows-x64-setup.exe -Algorithm SHA256   # Windows',
     '```',
+    '',
+    'On Windows, compare the hash with the matching entry in `SHA256SUMS.txt`.',
+    '',
+    '</details>',
   ]
     .join('\n')
     .replace(/VERSION/g, version);
 }
 
-export function limitations() {
+export function limitations(version) {
   return [
-    '### Worth knowing',
+    '## You stay in charge',
+    '',
+    '| Find it | Understand it | Decide what stays |',
+    '| --- | --- | --- |',
+    '| Rummage through leftovers, screenshots, installers, caches and duplicates. | See the evidence, confidence and risk behind each finding. | Review moves, keep items you want, and restore from the drawer. |',
+    '',
+    '**The drawer keeps a moved copy on disk.** Moving something there does not free space. Only permanently removing it does. Caches and re-downloadable installers may expire after your chosen retention period; other items stay until you remove them.',
+    '',
+    '<details>',
+    '<summary><strong>Updates & platform details</strong></summary>',
     '',
     '- These builds are **not signed with an Apple Developer ID and not notarized**',
     '  on macOS, and the Windows installer is **unsigned**. macOS bundles are ad-hoc',
@@ -132,12 +154,40 @@ export function limitations() {
     '  release with updates cannot; they need this download installed by hand once.',
     '- **Linux is not supported yet.** Scuttle compiles there, but it knows nothing',
     '  about where a Linux system keeps things, so there is no Linux download.',
-    '- Nothing Scuttle removes goes to the Trash or the Recycle Bin. Things wait in',
-    '  the drawer until you empty it, and emptying it is permanent.',
+    '- Nothing goes to the Trash or the Recycle Bin. Emptying the drawer is permanent.',
+    '- Whole folders on another drive cannot be moved into the drawer.',
     '',
-    `[Full changelog](https://github.com/${REPO}/blob/main/CHANGELOG.md) ·`,
-    `[Installing and what Scuttle does](https://github.com/${REPO}#readme)`,
+    '</details>',
+    '',
+    '---',
+    '',
+    `**[Explore Scuttle](https://acltabontabon.com/scuttle/) · [Read the guide](https://github.com/${REPO}/blob/v${version}/README.md) · [Full changelog](https://github.com/${REPO}/blob/v${version}/CHANGELOG.md) · [Report an issue](https://github.com/${REPO}/issues)**`,
   ].join('\n');
+}
+
+export function releaseBody(version, section, { media = null, checksums = '' } = {}) {
+  const parts = [
+    '<div align="center">',
+    '',
+    `<img src="https://raw.githubusercontent.com/${REPO}/v${version}/src-tauri/icons/128x128.png" width="80" alt="Scuttle">`,
+    '',
+    '# Find the forgotten. Keep what matters.',
+    '',
+    '**Your computer leaves stuff everywhere. Scuttle finds it.**',
+    '',
+    `Scuttle ${version} · macOS & Windows · Free & open source`,
+    '',
+    '</div>',
+    '',
+  ];
+  if (media) parts.push(`![Scuttle in action: a rummage, reviewing findings, moving an item into the drawer and restoring it](https://raw.githubusercontent.com/${REPO}/v${version}/docs/media/${media})`, '');
+  const detailStart = section.includes('### Highlights') ? section.search(/^### (Fixed|Changed|Added)$/m) : -1;
+  const summary = detailStart < 0 ? section : section.slice(0, detailStart).trim();
+  parts.push(downloads(version), '', '## What’s better in this release', '', summary);
+  if (detailStart >= 0) parts.push('', '<details>', '<summary><strong>All fixes & improvements</strong></summary>', '', section.slice(detailStart).trim(), '', '</details>');
+  parts.push('', limitations(version));
+  if (checksums.trim()) parts.push('', '<details>', '<summary><strong>SHA-256 checksums</strong></summary>', '', '```text', checksums.trim(), '```', '', '</details>');
+  return `${parts.join('\n')}\n`;
 }
 
 function main() {
@@ -160,34 +210,9 @@ function main() {
   // copy of docs/media so it cannot drift from what the release actually
   // looks like. A release cut before the recording exists simply opens with
   // the changelog rather than with a broken image.
-  const parts = [];
-  for (const [file, alt] of [
-    [
-      'demo.gif',
-      'A run through Scuttle: the rummage working through 301,264 files, the findings settling into four piles, one leftover folder going into the drawer and then coming back out again',
-    ],
-    ['findings.png', "Scuttle's findings, drawn as four piles on a paper floor"],
-  ]) {
-    if (existsSync(join(root, 'docs/media', file))) {
-      parts.push(`![${alt}](https://raw.githubusercontent.com/${REPO}/v${version}/docs/media/${file})`, '');
-      break;
-    }
-  }
-
-  parts.push(
-    section,
-    '',
-    downloads(version),
-    '',
-    limitations(),
-  );
-
-  if (checksumFile) {
-    const sums = readFileSync(checksumFile, 'utf8').trim();
-    if (sums) parts.push('', '<details><summary>SHA-256</summary>', '', '```', sums, '```', '', '</details>');
-  }
-
-  process.stdout.write(`${parts.join('\n')}\n`);
+  const media = ['demo.gif', 'findings.png'].find((file) => existsSync(join(root, 'docs/media', file)));
+  const checksums = checksumFile ? readFileSync(checksumFile, 'utf8') : '';
+  process.stdout.write(releaseBody(version, section, { media, checksums }));
 }
 
 if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) main();

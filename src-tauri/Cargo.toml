@@ -1,12 +1,12 @@
 [package]
 name = "scuttle"
-version = "0.1.0"
+version = "0.1.1"
 description = "Your computer leaves stuff everywhere. Scuttle finds it."
 authors = ["Scuttle contributors"]
 license = "Apache-2.0"
 repository = "https://github.com/acltabontabon/scuttle"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.89"
 
 [lib]
 name = "scuttle_core"

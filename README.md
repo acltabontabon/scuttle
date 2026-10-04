@@ -122,9 +122,19 @@ Scuttle has no idea what this is.
 You decide.
 ```
 
-Open a pile and you get every file in it, each one tickable, with a running
-total of what you have picked. Scuttle marks its own suggestions, and you are
-free to ignore them — a finding is something noticed, not something condemned.
+Open a pile to review its largest findings, each one tickable, with a running
+total of what you have picked. Up to 200 findings are shown at once; handling
+those brings the next ones into view, and the pile's total always includes
+the whole set. Scuttle marks its own suggestions, and you are free to ignore
+them — a finding is something noticed, not something condemned.
+
+**Space** explains where the room went. Its folder measurements have entry,
+depth and time limits, and leave protected places and application bundles
+unopened. A partial figure says **at least**; it is a lower bound, not an exact
+total. Measuring stops between entries after a five-second budget, though an
+individual filesystem call can take longer. Choose **Measure again** for a
+fresh look. Moving something into the drawer keeps it on disk; only permanent
+removal gives space back.
 
 ## The drawer
 
@@ -296,12 +306,12 @@ The Windows tray icon picks its light or dark version when Scuttle starts.
 
 ## Development
 
-Rust via [rustup](https://rustup.rs) and [Node](https://nodejs.org) 22+:
+Rust 1.89+ via [rustup](https://rustup.rs) and [Node](https://nodejs.org) 22.12+:
 
 ```sh
 git clone https://github.com/acltabontabon/scuttle
 cd scuttle
-npm install
+npm ci
 npm run app:dev       # the app, with the frontend hot-reloading
 npm run check         # everything CI runs, in one command
 npm run app:build     # a .dmg on macOS, a -setup.exe on Windows

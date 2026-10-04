@@ -96,6 +96,10 @@ impl FixedPlatform {
 }
 
 impl PlatformService for FixedPlatform {
+    fn home_dir(&self) -> PathBuf {
+        self.home.clone()
+    }
+
     fn name(&self) -> &'static str {
         "fixed"
     }

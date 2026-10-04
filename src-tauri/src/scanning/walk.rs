@@ -114,8 +114,7 @@ pub enum Step {
 
 pub struct WalkOptions {
     pub max_depth: usize,
-    /// Entries smaller than this are still counted but not handed to
-    /// detectors, which keeps the common case cheap.
+    /// Whether ordinary directories are reported alongside files.
     pub report_dirs: bool,
 }
 
@@ -134,11 +133,28 @@ pub fn walk<E, H>(
     root: &Path,
     protected: &ProtectedPaths,
     options: &WalkOptions,
-    mut on_entry: E,
-    mut on_hiccup: H,
+    on_entry: E,
+    on_hiccup: H,
 ) where
     E: FnMut(FileEntry) -> Step,
     H: FnMut(Hiccup),
+{
+    walk_with_skips(root, protected, options, on_entry, on_hiccup, |_| {});
+}
+
+/// Measurements also need to know about deliberately unopened corners.
+/// Skips are not errors, but make a claimed whole-tree total incomplete.
+pub(crate) fn walk_with_skips<E, H, S>(
+    root: &Path,
+    protected: &ProtectedPaths,
+    options: &WalkOptions,
+    mut on_entry: E,
+    mut on_hiccup: H,
+    mut on_skipped: S,
+) where
+    E: FnMut(FileEntry) -> Step,
+    H: FnMut(Hiccup),
+    S: FnMut(&Path),
 {
     let mut it = WalkDir::new(root)
         .follow_links(false)
@@ -181,6 +197,7 @@ pub fn walk<E, H>(
         // The protected table prunes the walk, not just the results: there is
         // no reason to read the contents of someone's keychain directory.
         if protected.is_protected(path) {
+            on_skipped(path);
             if file_type.is_dir() {
                 it.skip_current_dir();
             }
@@ -195,6 +212,15 @@ pub fn walk<E, H>(
         let opaque = is_dir
             && entry.depth() > 0
             && (paths::is_opaque_bundle(path) || is_leaf_directory(path));
+
+        if opaque || (is_dir && entry.depth() >= options.max_depth) {
+            on_skipped(path);
+        }
+
+        // Sockets, devices and FIFOs are not ordinary files to analyse.
+        if !is_dir && !file_type.is_file() {
+            continue;
+        }
 
         if is_dir && !options.report_dirs && !opaque {
             continue;
@@ -264,12 +290,12 @@ pub fn measure_tree(
     // Shared between the two closures below; both may mark the count partial.
     let complete = std::cell::Cell::new(true);
 
-    walk(
+    walk_with_skips(
         root,
         protected,
         &WalkOptions {
             max_depth: 32,
-            report_dirs: false,
+            report_dirs: true,
         },
         |entry| {
             seen += 1;
@@ -291,6 +317,7 @@ pub fn measure_tree(
             // An unreadable corner means the total is a floor, not a fact.
             complete.set(false);
         },
+        |_| complete.set(false),
     );
 
     (bytes, files, complete.get())
@@ -557,6 +584,50 @@ mod tests {
         }
         let (_, _, complete) = measure_tree(&t.root().join("x"), &open_table(), 5, &never());
         assert!(!complete, "a truncated measurement must admit it");
+    }
+
+    #[test]
+    fn a_measurement_that_skips_opaque_contents_is_a_floor() {
+        let t = Tree::new();
+        t.file("area/visible.bin", 100);
+        t.file("area/project/node_modules/pkg/index.js", 200);
+        t.file("area/Thing.app/Contents/MacOS/thing", 300);
+        let (bytes, files, complete) =
+            measure_tree(&t.root().join("area"), &open_table(), 10_000, &never());
+        assert_eq!((bytes, files), (100, 1));
+        assert!(!complete, "unopened folders cannot be claimed as measured");
+    }
+
+    #[test]
+    fn protected_contents_make_a_measurement_partial() {
+        let t = Tree::new();
+        let home = t.dir("home/tester");
+        t.file("home/tester/visible.bin", 100);
+        t.file("home/tester/.ssh/key", 200);
+        let (bytes, files, complete) =
+            measure_tree(&home, &ProtectedPaths::for_home(&home), 10_000, &never());
+        assert_eq!((bytes, files), (100, 1));
+        assert!(!complete);
+    }
+
+    #[test]
+    fn empty_directories_also_consume_the_measurement_budget() {
+        let t = Tree::new();
+        for i in 0..40 {
+            t.dir(&format!("empty-{i}"));
+        }
+        let (_, _, complete) = measure_tree(&t.root(), &open_table(), 5, &never());
+        assert!(!complete, "a large empty tree must still be bounded");
+    }
+
+    #[test]
+    fn depth_limited_measurements_are_partial() {
+        let t = Tree::new();
+        let deep = std::iter::repeat_n("a", 34).collect::<Vec<_>>().join("/");
+        t.file(&format!("{deep}/hidden.bin"), 100);
+        let (bytes, _, complete) = measure_tree(&t.root(), &open_table(), 10_000, &never());
+        assert_eq!(bytes, 0);
+        assert!(!complete);
     }
 
     #[test]

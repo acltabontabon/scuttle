@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import { useStore } from '@/app/store'
+import { useStore, type SettingsChange } from '@/app/store'
 import { api } from '@/lib/ipc'
 import { bytes, shortPath } from '@/lib/format'
 import { platform } from '@/lib/platform'
@@ -59,6 +59,8 @@ export function Settings() {
   } = useStore()
   const [roots, setRoots] = useState<RootDescription[]>([])
   const [ignored, setIgnored] = useState<IgnoredEntry[] | null>(null)
+  const [ignoredFailed, setIgnoredFailed] = useState(false)
+  const [rootsFailed, setRootsFailed] = useState(false)
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
   const [about, setAbout] = useState<{
@@ -71,15 +73,23 @@ export function Settings() {
   const loadIgnored = useCallback(() => {
     void api
       .ignored()
-      .then(setIgnored)
-      .catch(() => setIgnored([]))
+      .then((entries) => { setIgnored(entries); setIgnoredFailed(false) })
+      .catch(() => setIgnoredFailed(true))
+  }, [])
+
+  const loadRoots = useCallback(() => {
+    void api.suggestedRoots()
+      .then((next) => { setRoots(next); setRootsFailed(false) })
+      .catch(() => setRootsFailed(true))
   }, [])
 
   useEffect(() => {
-    void api.suggestedRoots().then(setRoots)
-    void api.about().then(setAbout)
+    loadRoots()
+    void api.about().then(setAbout).catch(() => {
+      say('Could not load information about this build.', { tone: 'warn' })
+    })
     loadIgnored()
-  }, [loadIgnored])
+  }, [loadIgnored, loadRoots, say])
 
   if (!settings) {
     return <Unavailable what="your settings" onRetry={() => window.location.reload()} />
@@ -91,10 +101,11 @@ export function Settings() {
    * a toast at the edge of the screen, because the control that did not take
    * is the thing somebody is looking at.
    */
-  const patch = async (changes: Partial<SettingsShape>) => {
+  const patch = async (changes: SettingsChange) => {
     setFailed(null)
-    const ok = await updateSettings({ ...settings, ...changes })
-    if (!ok) setFailed('That did not save. Your previous setting is still in effect.')
+    const ok = await updateSettings(changes)
+    setFailed(ok ? null : 'That did not save. Your previous setting is still in effect.')
+    return ok
   }
 
   // An empty list means "everywhere the platform suggests", which is what the
@@ -103,16 +114,18 @@ export function Settings() {
     settings.scan_roots.length === 0 || settings.scan_roots.includes(path)
 
   const togglePlace = (path: string) => {
-    const current =
-      settings.scan_roots.length === 0 ? roots.map((root) => root.path) : settings.scan_roots
-    const next = current.includes(path)
-      ? current.filter((existing) => existing !== path)
-      : [...current, path]
-    if (next.length === 0) {
-      say('Scuttle needs somewhere to look.', { tone: 'warn' })
-      return
-    }
-    void patch({ scan_roots: next.length === roots.length ? [] : next })
+    void patch((latest) => {
+      const current =
+        latest.scan_roots.length === 0 ? roots.map((root) => root.path) : latest.scan_roots
+      const next = current.includes(path)
+        ? current.filter((existing) => existing !== path)
+        : [...current, path]
+      if (next.length === 0) {
+        say('Scuttle needs somewhere to look.', { tone: 'warn' })
+        return {}
+      }
+      return { scan_roots: next.length === roots.length && roots.every((root) => next.includes(root.path)) ? [] : next }
+    })
   }
 
   return (
@@ -143,6 +156,12 @@ export function Settings() {
                   />
                 ))}
               </ul>
+              {rootsFailed && (
+                <p className={styles.trouble} role="alert">
+                  Could not load scan folders.{' '}
+                  <button className={styles.link} onClick={loadRoots}>Try again</button>
+                </p>
+              )}
             </section>
 
             <section className={styles.group}>
@@ -242,7 +261,7 @@ export function Settings() {
               say={say}
             />
 
-            <Ignored entries={ignored} onChanged={loadIgnored} say={say} />
+            <Ignored entries={ignored} failed={ignoredFailed} onChanged={loadIgnored} say={say} />
 
             <section className={styles.group}>
               <h3 className={styles.groupTitle}>Diagnostics</h3>
@@ -292,7 +311,9 @@ export function Settings() {
                   </div>
                   <button
                     className={styles.link}
-                    onClick={() => void api.revealQuarantineRoot()}
+                    onClick={() => void api.revealQuarantineRoot().catch(() => {
+                      say('Could not open the drawer folder.', { tone: 'warn' })
+                    })}
                   >
                     Open folder
                   </button>
@@ -420,7 +441,7 @@ function BackgroundGroup({
 }: {
   settings: SettingsShape
   status: BackgroundStatus | null
-  patch: (changes: Partial<SettingsShape>) => Promise<void>
+  patch: (changes: Partial<SettingsShape>) => Promise<boolean>
   onPause: (paused: boolean) => Promise<void>
   onLaunchAtLogin: (enabled: boolean) => Promise<void>
   say: (text: string, options?: { tone?: 'warn' }) => void
@@ -439,11 +460,11 @@ function BackgroundGroup({
    * the close or saying it after the window had already gone.
    */
   const onMode = async (value: boolean) => {
-    await patch({
+    const saved = await patch({
       background_mode: value,
       ...(value && !settings.background_intro_seen ? { background_intro_seen: true } : {}),
     })
-    if (value && !settings.background_intro_seen) {
+    if (saved && value && !settings.background_intro_seen) {
       say(
         `Closing the window will now leave Scuttle in the ${
           os === 'windows' ? 'system tray' : 'menu bar'
@@ -462,10 +483,14 @@ function BackgroundGroup({
       await patch({ background_notify: false })
       return
     }
-    const allowed = await api.requestNotificationPermission()
-    await patch({ background_notify: allowed })
-    if (!allowed) {
-      say('Your system is not allowing notifications, so that stays off.', { tone: 'warn' })
+    try {
+      const allowed = await api.requestNotificationPermission()
+      await patch({ background_notify: allowed })
+      if (!allowed) {
+        say('Your system is not allowing notifications, so that stays off.', { tone: 'warn' })
+      }
+    } catch {
+      say('Could not request notification permission. Notifications remain off.', { tone: 'warn' })
     }
   }
 

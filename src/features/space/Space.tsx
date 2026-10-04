@@ -158,7 +158,7 @@ export function Space() {
           className={styles.band}
           role="img"
           aria-label={`Storage on this volume: ${space.areas
-            .map((area) => `${area.label} ${bytes(area.bytes)}`)
+            .map((area) => `${area.label} ${area.complete ? '' : 'at least '}${bytes(area.bytes)}`)
             .join(', ')}`}
         >
           {space.areas.map((area, index) => (
@@ -169,7 +169,7 @@ export function Space() {
                 flexGrow: area.bytes,
                 background: SEGMENT_COLOURS[index % SEGMENT_COLOURS.length],
               }}
-              title={`${area.label} — ${bytes(area.bytes)}`}
+              title={`${area.label} — ${area.complete ? '' : 'at least '}${bytes(area.bytes)}`}
             />
           ))}
           {unaccounted > 0 && (
@@ -219,7 +219,9 @@ export function Space() {
           <h3 className={styles.sectionTitle}>Things Scuttle thinks are worth checking</h3>
           {space.worth_checking.length === 0 ? (
             <p className={styles.sectionNote}>
-              Nothing yet. Rummage and this fills in.
+              {space.has_findings
+                ? 'Nothing left to check from the last rummage.'
+                : 'Nothing yet. Rummage and this fills in.'}
             </p>
           ) : (
             <>
@@ -253,8 +255,8 @@ From the last rummage, and the same figures the piles show: what you could
 
         {anyIncomplete && (
           <p className={styles.footnote}>
-Marked <em>at least</em> where a folder was too large or too locked-down to
-            finish measuring. Those figures are floors, not totals.
+            Marked <em>at least</em> where a folder exceeded the measurement budget, was unreadable,
+            or contained places Scuttle leaves unopened. Those figures are floors, not totals.
           </p>
         )}
       </div>

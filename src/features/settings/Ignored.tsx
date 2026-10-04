@@ -18,10 +18,12 @@ import styles from './Settings.module.css'
  */
 export function Ignored({
   entries,
+  failed = false,
   onChanged,
   say,
 }: {
   entries: IgnoredEntry[] | null
+  failed?: boolean
   onChanged: () => void
   say: (text: string, options?: { tone?: 'plain' | 'warn' }) => void
 }) {
@@ -42,11 +44,30 @@ export function Ignored({
     }
   }
 
+  const clear = async () => {
+    if (busy) return
+    setBusy('all')
+    try {
+      await api.clearIgnores()
+      onChanged()
+      say('Scuttle has a clean slate again.')
+    } catch {
+      say('Could not clear ignored items. Try again.', { tone: 'warn' })
+    } finally {
+      setBusy(null)
+    }
+  }
+
   return (
     <section className={styles.group}>
       <h3 className={styles.groupTitle}>Ignored items</h3>
 
-      {count === 0 ? (
+      {failed ? (
+        <p className={styles.trouble} role="alert">
+          Could not load ignored items.{' '}
+          <button className={styles.link} onClick={onChanged}>Try again</button>
+        </p>
+      ) : count === 0 ? (
         <p className={styles.rowHint}>
           {entries === null
             ? 'Looking…'
@@ -100,12 +121,7 @@ export function Ignored({
                 <button
                   className={`${styles.link} ${styles.danger}`}
                   disabled={busy !== null}
-                  onClick={() => {
-                    void api.clearIgnores().then(() => {
-                      onChanged()
-                      say('Scuttle has a clean slate again.')
-                    })
-                  }}
+                  onClick={() => void clear()}
                 >
                   Stop ignoring all {count}
                 </button>

@@ -98,7 +98,7 @@ export function App() {
   useEffect(() => {
     if (findings?.has_rummaged !== true || space !== null) return
     void refreshSpace()
-  }, [findings?.has_rummaged, space, refreshSpace])
+  }, [findings, space, refreshSpace])
 
   const navState: NavState = {
     hasRummaged: findings?.has_rummaged === true,

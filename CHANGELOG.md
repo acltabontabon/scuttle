@@ -8,6 +8,56 @@ major version is 0, a minor bump may change behaviour.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.1] - 2026-10-05
+
+**A steadier rummage. A clearer picture of your disk.**
+
+Scuttle finds forgotten files, explains why they caught its eye, and lets you
+review what to keep. This maintenance release makes scanning more dependable,
+duplicate detection more careful, and everyday controls easier to recover from
+when something goes wrong.
+
+### Highlights
+
+- **Rummages that keep up.** Even a scan that finishes immediately reaches the
+  findings screen; repeated clicks leave the active rummage running properly.
+- **More trustworthy duplicates.** Hard links are counted as one file, and
+  files that change or become links during a scan are rejected.
+- **Honest space figures.** Incomplete measurements say **at least**, refresh
+  with your findings, and stop between entries after a five-second budget.
+- **Preferences that stick.** Quick changes save in order, while unreadable
+  lists and failed actions give you a clear error and a way to try again.
+
+### Fixed
+
+- Fast rummages no longer lose progress or completion events that arrive before
+  the start response. Repeated clicks cannot replace a running scan's state.
+- Failed database registration, worker startup, and worker panics release the
+  scan's operation gate, allowing a later rummage to run.
+- Duplicate detection excludes hard links and repeated paths, rejects changed
+  file sizes and links swapped in after traversal, and responds to cancellation
+  while reading large files.
+- Space measurements mark unopened, protected and depth-limited folders as
+  partial, and count empty directories against their work budget. Empty scans
+  are recognised as completed scans.
+- Space measurements stop between entries after a five-second time budget.
+  Fixture-platform measurements use the fixture home instead of the real home.
+- Space figures refresh when findings change; simultaneous requests share one
+  measurement, and older responses cannot overwrite figures for a newer scan.
+- Rapid preference changes preserve earlier saves, including folder selections
+  and launch-at-login changes.
+- Unreadable ignored-item lists and scan folders show failures with retry
+  controls. Failed notification requests, ignore clearing, cancellation and
+  folder reveals report what happened.
+- The drawer's Open folder action opens the holding folder itself.
+
+### Changed
+
+- Development instructions use locked installs, the current Diagnostics path,
+  and the dependencies' actual minimums: Rust 1.89 and Node 22.12.
+
 ## [0.1.0] - 2026-09-21
 
 The first stable release.
@@ -186,7 +236,8 @@ be undone.
   because it also holds logins, cookies and history. Firefox, which keeps its
   cache somewhere else, is covered.
 
-[Unreleased]: https://github.com/acltabontabon/scuttle/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/acltabontabon/scuttle/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/acltabontabon/scuttle/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/acltabontabon/scuttle/compare/v0.1.0-alpha.2...v0.1.0
 [0.1.0-alpha.2]: https://github.com/acltabontabon/scuttle/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/acltabontabon/scuttle/releases/tag/v0.1.0-alpha.1

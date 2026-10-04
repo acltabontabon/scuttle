@@ -6,6 +6,7 @@
 //! phrase estimates as estimates.
 
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +20,9 @@ use crate::Result;
 /// How many entries each area measurement will look at before settling for an
 /// estimate. Keeps the whole overview to a few seconds.
 const MEASURE_BUDGET: usize = 120_000;
+/// An entry budget alone still takes a long time on slow or large trees.
+/// Check this between entries; an individual OS filesystem call may take longer.
+const MEASURE_TIME_BUDGET: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Area {
@@ -69,7 +73,7 @@ pub fn volume_usage(path: &std::path::Path) -> Option<(u64, u64)> {
 
 /// Areas worth naming, resolved for this machine.
 fn areas_to_measure(platform: &dyn PlatformService) -> Vec<(String, PathBuf)> {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+    let home = platform.home_dir();
     let mut areas: Vec<(String, PathBuf)> = Vec::new();
 
     for library in platform.game_libraries() {
@@ -110,15 +114,27 @@ pub fn overview(
     store: &Store,
     cancel: &dyn Fn() -> bool,
 ) -> Result<SpaceOverview> {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+    overview_with_budget(platform, protected, store, cancel, MEASURE_TIME_BUDGET)
+}
+
+fn overview_with_budget(
+    platform: &dyn PlatformService,
+    protected: &ProtectedPaths,
+    store: &Store,
+    cancel: &dyn Fn() -> bool,
+    time_budget: Duration,
+) -> Result<SpaceOverview> {
+    let started = Instant::now();
+    let stop = || cancel() || started.elapsed() >= time_budget;
+    let home = platform.home_dir();
     let (volume_total, volume_free) = volume_usage(&home).unwrap_or((0, 0));
 
     let mut areas: Vec<Area> = Vec::new();
     for (label, path) in areas_to_measure(platform) {
-        if cancel() {
+        if stop() {
             break;
         }
-        let (bytes, _, complete) = walk::measure_tree(&path, protected, MEASURE_BUDGET, cancel);
+        let (bytes, _, complete) = walk::measure_tree(&path, protected, MEASURE_BUDGET, &stop);
         if bytes == 0 {
             continue;
         }
@@ -146,7 +162,10 @@ pub fn overview(
 
     if let Some(scan) = store.latest_scan()? {
         let candidates = store.candidates_for_scan(&scan.id)?;
-        has_findings = !candidates.is_empty();
+        // A completed, empty rummage is still a rummage. Otherwise a tidy
+        // machine (or one whose findings were all handled) says it was never
+        // scanned.
+        has_findings = true;
         for category in Category::ALL {
             let matching: Vec<_> = candidates
                 .iter()
@@ -300,6 +319,37 @@ mod tests {
     fn before_the_first_rummage_no_claims_are_made() {
         let text = summarise(500 * 1024_u64.pow(3), 0, false);
         assert!(text.contains("Nothing rummaged through yet"));
+    }
+
+    #[test]
+    fn an_empty_rummage_is_still_a_completed_rummage() {
+        let store = store_with(&[]);
+        let platform = crate::platform::current();
+        let protected = ProtectedPaths::for_home("/nonexistent-home-for-tests");
+        let overview = overview(platform.as_ref(), &protected, &store, &|| true).unwrap();
+        assert!(overview.has_findings);
+        assert!(overview.worth_checking.is_empty());
+        assert!(!overview.summary.contains("Nothing rummaged through yet"));
+    }
+
+    #[test]
+    fn an_exhausted_time_budget_still_returns_the_scan_tallies() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir(home.path().join("Downloads")).unwrap();
+        std::fs::write(home.path().join("Downloads/large.bin"), vec![0; 100]).unwrap();
+        let platform = crate::platform::testing::FixedPlatform::new(home.path());
+        let protected = ProtectedPaths::for_home(home.path());
+        let store = store_with(&[candidate(
+            "a",
+            Category::Installers,
+            500,
+            RecommendedAction::Quarantine,
+        )]);
+        let overview =
+            overview_with_budget(&platform, &protected, &store, &|| false, Duration::ZERO).unwrap();
+        assert!(overview.areas.is_empty());
+        assert_eq!(overview.reclaimable_estimate, 500);
+        assert_eq!(overview.worth_checking.len(), 1);
     }
 
     #[test]

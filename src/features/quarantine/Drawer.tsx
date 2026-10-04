@@ -19,7 +19,7 @@ import styles from './Drawer.module.css'
  * with the objects still sitting in it. Nothing here is a database table.
  */
 export function Drawer() {
-  const { drawer, refreshDrawer, restore, removePermanently, emptyDrawer, go, background } =
+  const { drawer, refreshDrawer, restore, removePermanently, emptyDrawer, go, background, say } =
     useStore()
   const [emptying, setEmptying] = useState(false)
   const [purging, setPurging] = useState(false)
@@ -175,7 +175,9 @@ export function Drawer() {
             className={styles.forever}
             style={{ color: 'var(--ink-soft)' }}
             onClick={() => {
-              void api.revealQuarantined(drawer.items[0]!.id)
+              void api.revealQuarantineRoot().catch(() => {
+                say('Could not open the drawer folder.', { tone: 'warn' })
+              })
             }}
           >
             Open drawer folder

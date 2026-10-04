@@ -2,8 +2,9 @@
 
 ## Prerequisites
 
-- **Rust** 1.82 or newer — [rustup.rs](https://rustup.rs)
-- **Node** 20 or newer
+- **Rust** 1.89 or newer — [rustup.rs](https://rustup.rs). The locked dependencies
+  require this minimum; CI pins the exact toolchain in `.github/workflows/ci.yml`.
+- **Node** 22.12 or newer
 - **macOS**: Xcode Command Line Tools (`xcode-select --install`)
 - **Windows**: Microsoft Visual Studio C++ Build Tools, and the WebView2
   runtime (already present on Windows 11 and up-to-date Windows 10)
@@ -14,7 +15,7 @@ uses the system webview.
 ## Day to day
 
 ```sh
-npm install
+npm ci
 
 npm run app:dev       # the app, with hot reload on the frontend
 npm run dev           # just the Vite server (for /preview.html)
@@ -24,12 +25,36 @@ npm run typecheck     # TypeScript
 npm run rust:test     # Rust unit + integration tests
 npm run rust:clippy   # Rust lints, warnings denied
 npm run rust:fmt      # rustfmt
+npm run check         # all app checks, including release-manifest tests
 
 npm run app:build     # installable artifact for the current platform
 ```
 
 Changing Rust restarts the backend automatically. Changing TypeScript or CSS
 hot-reloads.
+
+## Verifying a change
+
+Run `npm run check` before preparing a release. It checks version consistency,
+types, lint, frontend and release-manifest tests, the production frontend build,
+Rust formatting, Clippy and the Rust unit and integration suites.
+
+The frontend store tests simulate completion before the scan-start response,
+rapid preference changes, failed saves and overlapping space measurements. The
+Rust fixtures cover changed files, hard links, links swapped into scanned paths,
+cancelled hashing, partial measurements and scan failures that must release the
+operation gate. File-changing tests use temporary trees.
+
+Run the checks on both macOS and Windows through CI. A passing local macOS run
+does not verify Windows filesystem or installer behavior. After those checks,
+follow the native smoke tests in [releasing.md](releasing.md), including putting
+fixture files in the drawer and restoring them, and the update checks in
+[updates.md](updates.md). Browser previews cannot establish those guarantees.
+
+Some existing platform smoke tests inspect the live process list and disk
+metadata. A restricted development sandbox can block those reads. Run them in
+a normal local terminal or CI rather than treating an empty process list as a
+successful test.
 
 ## The design workbench
 
@@ -50,12 +75,20 @@ It is dev-only: `preview.html` is not an input to the production build, so
 ## The dry run
 
 ```
-Developer mode → Dry run
+Settings → Diagnostics → Open diagnostics
 ```
 
 Classifies everything and changes nothing. Prints what would be quarantined,
 what would be reviewed, what would merely be surfaced, and the evidence behind
 each — with full paths, which is the only place they appear.
+
+From a terminal, use `scuttle --dry-run`, or
+`scuttle --dry-run --developer-debris` to include build output. These commands
+classify files and print a report; they do not move files or save a scan.
+
+The browser workbench uses sample data. Its controls verify presentation;
+filesystem operations, operating-system permissions and updater installation
+need a native build. See [releasing.md](releasing.md) for the release checks.
 
 It also tells you when the ground truth was missing: an unreadable process
 list, or no installed applications discovered. In that state ghost detection

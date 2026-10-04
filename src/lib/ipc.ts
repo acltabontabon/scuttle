@@ -196,7 +196,7 @@ export async function watchRummage(handlers: {
   onFound?: (candidate: Candidate, scanId: string) => void
   onDone?: (summary: ScanSummary & { error?: unknown }, scanId: string) => void
 }): Promise<UnlistenFn> {
-  const unlisteners: UnlistenFn[] = await Promise.all([
+  const subscriptions = await Promise.allSettled([
     listen<WithScan<Phase>>(EVENTS.phase, ({ payload }) => {
       const { scan_id, ...phase } = payload
       handlers.onPhase?.(phase as Phase, scan_id)
@@ -214,6 +214,15 @@ export async function watchRummage(handlers: {
       handlers.onDone?.(summary as ScanSummary, scan_id)
     }),
   ])
+
+  const unlisteners: UnlistenFn[] = subscriptions.flatMap((result) =>
+    result.status === 'fulfilled' ? [result.value] : [],
+  )
+  const failed = subscriptions.find((result) => result.status === 'rejected')
+  if (failed?.status === 'rejected') {
+    unlisteners.forEach((off) => off())
+    throw failed.reason
+  }
 
   return () => unlisteners.forEach((off) => off())
 }

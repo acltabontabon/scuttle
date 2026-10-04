@@ -98,6 +98,8 @@ export interface Note {
   action?: { label: string; run: () => void }
 }
 
+export type SettingsChange = Partial<Settings> | ((current: Settings) => Partial<Settings>)
+
 export interface Store {
   view: View
   go: (view: View) => void
@@ -120,7 +122,7 @@ export interface Store {
 
   settings: Settings | null
   /** Reports whether the write actually landed. */
-  updateSettings: (next: Settings) => Promise<boolean>
+  updateSettings: (changes: SettingsChange) => Promise<boolean>
 
   /**
    * Where background mode stands, as the core reports it. Null until the
@@ -240,6 +242,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const noteId = useRef(0)
   const noteTimer = useRef<number | null>(null)
   const activeScan = useRef<string | null>(null)
+  const scanStarting = useRef(false)
+  const scanSubscription = useRef<Promise<void> | null>(null)
+  const earlyScanEvents = useRef<(() => void)[]>([])
+  const settingsWrites = useRef<Promise<unknown>>(Promise.resolve())
+  const spaceRequest = useRef<Promise<boolean> | null>(null)
+  const spaceVersion = useRef(0)
+  const findingsVersion = useRef(0)
+  const findingsKey = useRef('')
   // Mirrors of the move state for use inside event handlers, which must see
   // the latest value without being re-created on every progress event.
   const moveRef = useRef<MoveSnapshot | null>(null)
@@ -259,9 +269,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const dismissNote = useCallback(() => setNote(null), [])
 
+  useEffect(() => () => {
+    if (noteTimer.current) window.clearTimeout(noteTimer.current)
+  }, [])
+
   const refreshFindings = useCallback(async () => {
+    const version = ++findingsVersion.current
     try {
-      setFindings(await api.findings())
+      const next = await api.findings()
+      if (version !== findingsVersion.current) return true
+      setFindings(next)
+      const key = JSON.stringify([next.scan_id, next.total_bytes, next.reclaimable_bytes,
+        next.piles.map((pile) => [pile.category, pile.count, pile.bytes])])
+      if (key !== findingsKey.current) {
+        findingsKey.current = key
+        // An older measurement may still be in flight. Its answer belongs
+        // to the old findings and must not overwrite the next measurement.
+        spaceVersion.current += 1
+        spaceRequest.current = null
+        setSpace(null)
+      }
       return true
     } catch (error) {
       say(readError(error), { tone: 'warn' })
@@ -279,14 +306,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [say])
 
-  const refreshSpace = useCallback(async () => {
-    try {
-      setSpace(await api.space())
-      return true
-    } catch (error) {
-      say(readError(error), { tone: 'warn' })
-      return false
-    }
+  const refreshSpace = useCallback(() => {
+    // App prefetch and the Space screen can ask in the same render. Share
+    // that measurement instead of walking the disk twice concurrently.
+    if (spaceRequest.current) return spaceRequest.current
+    const version = spaceVersion.current
+    const request = (async () => {
+      try {
+        const next = await api.space()
+        if (version === spaceVersion.current) setSpace(next)
+        return true
+      } catch (error) {
+        say(readError(error), { tone: 'warn' })
+        return false
+      } finally {
+        if (version === spaceVersion.current) spaceRequest.current = null
+      }
+    })()
+    spaceRequest.current = request
+    return request
   }, [say])
 
   // One subscription for the whole app lifetime. Events carry a scan id and
@@ -295,46 +333,57 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let dispose: (() => void) | undefined
     let cancelled = false
 
-    watchRummage({
+    // The worker can emit even its final event before rummage's response
+    // supplies the id. Hold those events until the response identifies them.
+    const receive = (scanId: string, apply: () => void) => {
+      const deliver = () => {
+        if (!cancelled && activeScan.current === scanId) apply()
+      }
+      if (scanStarting.current) earlyScanEvents.current.push(deliver)
+      else deliver()
+    }
+    const subscription = watchRummage({
       onPhase: (phase, scanId) => {
-        if (activeScan.current !== scanId) return
-        setScan((previous) => ({ ...previous, phase }))
+        receive(scanId, () => setScan((previous) => ({ ...previous, phase })))
       },
       onProgress: (progress, scanId) => {
-        if (activeScan.current !== scanId) return
-        setScan((previous) => ({ ...previous, progress }))
+        receive(scanId, () => setScan((previous) => ({ ...previous, progress })))
       },
       onFound: (candidate, scanId) => {
-        if (activeScan.current !== scanId) return
-        setScan((previous) => ({
+        receive(scanId, () => setScan((previous) => ({
           ...previous,
           latest: candidate,
           foundCount: previous.foundCount + 1,
           heaviestBytes: Math.max(previous.heaviestBytes, candidate.size),
-        }))
+        })))
       },
       onDone: (summary, scanId) => {
-        if (activeScan.current !== scanId) return
-        activeScan.current = null
-        const failed = 'error' in summary && summary.error !== undefined
-        setScan((previous) => ({
-          ...previous,
-          status: failed ? 'failed' : summary.cancelled ? 'cancelled' : 'done',
-          summary: failed ? null : summary,
-          error: failed ? readError((summary as { error: unknown }).error) : null,
-        }))
-        void refreshFindings()
+        receive(scanId, () => {
+          activeScan.current = null
+          const failed = 'error' in summary && summary.error !== undefined
+          setScan((previous) => ({
+            ...previous,
+            status: failed ? 'failed' : summary.cancelled ? 'cancelled' : 'done',
+            summary: failed ? null : summary,
+            error: failed ? readError((summary as { error: unknown }).error) : null,
+          }))
+          void refreshFindings()
+        })
       },
     }).then((off) => {
       if (cancelled) off()
       else dispose = off
+    })
+    scanSubscription.current = subscription
+    void subscription.catch((error) => {
+      if (!cancelled) say(readError(error), { tone: 'warn' })
     })
 
     return () => {
       cancelled = true
       dispose?.()
     }
-  }, [refreshFindings])
+  }, [refreshFindings, say])
 
   // Initial load.
   useEffect(() => {
@@ -349,8 +398,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [refreshFindings, say])
 
   const rummage = useCallback(async () => {
+    if (scanStarting.current || activeScan.current) return
+    scanStarting.current = true
+    earlyScanEvents.current = []
     setScan({ ...EMPTY_SCAN, status: 'running' })
     try {
+      await scanSubscription.current
       const started = await api.rummage()
       activeScan.current = started.scan_id
       setScan((previous) => ({
@@ -358,25 +411,44 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         scanId: started.scan_id,
         roots: started.roots,
       }))
+      scanStarting.current = false
+      const events = earlyScanEvents.current
+      earlyScanEvents.current = []
+      events.forEach((deliver) => deliver())
     } catch (error) {
       activeScan.current = null
       setScan({ ...EMPTY_SCAN, status: 'failed', error: readError(error) })
+    } finally {
+      scanStarting.current = false
+      earlyScanEvents.current = []
     }
   }, [])
 
   const cancel = useCallback(async () => {
-    await api.cancelRummage()
-  }, [])
+    try {
+      await api.cancelRummage()
+    } catch (error) {
+      say(readError(error), { tone: 'warn' })
+    }
+  }, [say])
 
   const updateSettings = useCallback<Store['updateSettings']>(
-    async (next) => {
-      try {
-        setSettings(await api.saveSettings(next))
-        return true
-      } catch (error) {
-        say(readError(error), { tone: 'warn' })
-        return false
-      }
+    (changes) => {
+      // Merge against the latest saved preferences, inside one queue. Rapid
+      // clicks must not send two whole copies of the same old settings.
+      const write = settingsWrites.current.then(async () => {
+        try {
+          const latest = await api.settings()
+          const patch = typeof changes === 'function' ? changes(latest) : changes
+          setSettings(await api.saveSettings({ ...latest, ...patch }))
+          return true
+        } catch (error) {
+          say(readError(error), { tone: 'warn' })
+          return false
+        }
+      })
+      settingsWrites.current = write
+      return write
     },
     [say],
   )
@@ -432,21 +504,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const setLaunchAtLogin = useCallback<Store['setLaunchAtLogin']>(
     async (enabled) => {
-      try {
-        // The answer is what the system did, not what was asked. A setting
-        // that claims to be on while the platform refused is worse than one
-        // that admits it could not.
-        const actual = await api.setLaunchAtLogin(enabled)
-        setSettings((previous) =>
-          previous ? { ...previous, launch_at_login: actual } : previous,
-        )
-        if (enabled && !actual) {
-          say('Your system would not set that up, so it is still off.', { tone: 'warn' })
+      const write = settingsWrites.current.then(async () => {
+        try {
+          // The answer is what the system did, not what was asked. A setting
+          // that claims to be on while the platform refused is worse than one
+          // that admits it could not.
+          const actual = await api.setLaunchAtLogin(enabled)
+          setSettings((previous) =>
+            previous ? { ...previous, launch_at_login: actual } : previous,
+          )
+          if (enabled && !actual) {
+            say('Your system would not set that up, so it is still off.', { tone: 'warn' })
+          }
+        } catch (error) {
+          say(readError(error), { tone: 'warn' })
         }
-      } catch (error) {
-        say(readError(error), { tone: 'warn' })
-      }
-      await refreshBackground()
+        await refreshBackground()
+      })
+      settingsWrites.current = write
+      await write
     },
     [refreshBackground, say],
   )
@@ -550,6 +626,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         dispose = off
         catchUp()
       }
+    }).catch((error) => {
+      if (!stopped) say(readError(error), { tone: 'warn' })
     })
     const onVisible = () => {
       if (document.visibilityState === 'visible') catchUp()
@@ -560,7 +638,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dispose?.()
       document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [applyMove])
+  }, [applyMove, say])
 
   // The tray menu cannot navigate or start a scan itself; it says what it
   // wants and this decides what that means, so there is one place that owns
@@ -580,12 +658,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }).then((off) => {
       if (stopped) off()
       else dispose = off
+    }).catch((error) => {
+      if (!stopped) say(readError(error), { tone: 'warn' })
     })
     return () => {
       stopped = true
       dispose?.()
     }
-  }, [go, rummage])
+  }, [go, rummage, say])
 
   // Background status, on the same arrangement as moves: one subscription,
   // plus a catch-up whenever the window comes back. A window that was hidden
@@ -603,7 +683,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         dispose = off
         void refreshBackground()
       }
-    })
+    }).catch(() => undefined)
 
     const onVisible = () => {
       if (document.visibilityState === 'visible') void refreshBackground()

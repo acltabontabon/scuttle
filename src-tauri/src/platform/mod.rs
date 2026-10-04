@@ -50,6 +50,12 @@ pub enum LocationRole {
 pub trait PlatformService: Send + Sync {
     fn name(&self) -> &'static str;
 
+    /// The home whose storage is being described. Test platforms override
+    /// this so measuring space never accidentally traverses the real home.
+    fn home_dir(&self) -> PathBuf {
+        util::home()
+    }
+
     /// Where Scuttle looks when the user has not said otherwise. Chosen to be
     /// useful without being invasive: no blanket scan of the home directory.
     fn default_scan_roots(&self) -> Vec<KnownLocation>;

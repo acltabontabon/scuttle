@@ -10,13 +10,17 @@
 //! and the decision left to the reader.
 
 use rayon::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
+use std::path::Path;
+#[cfg(test)]
 use std::path::PathBuf;
 
 use super::naming::display_name;
 use crate::evidence::EvidenceKind;
 use crate::model::{human_bytes, Category, GroupMember, Risk};
+use crate::quarantine::fsx::{self, EntryKind, Identity};
+use crate::safety::paths;
 use crate::scanning::{CandidateSink, Detector, FileEntry, Finding, ScanContext};
 
 /// Bytes read from each end of a file for the cheap fingerprint.
@@ -112,9 +116,24 @@ fn resolve_group(
     cancelled: impl Fn() -> bool,
 ) -> Vec<(u64, Vec<FileEntry>)> {
     let mut by_probe: HashMap<[u8; 32], Vec<FileEntry>> = HashMap::new();
+    let mut seen_paths = HashSet::new();
+    let mut seen_files = HashSet::new();
     for entry in entries {
         if cancelled() {
             return Vec::new();
+        }
+        // Hard links share one allocation: deleting an extra name does not
+        // reclaim another copy. Overlapping roots may also offer a path twice.
+        if !seen_paths.insert(entry.path.clone()) {
+            continue;
+        }
+        let Ok(identity) = fsx::identity_of(&entry.path) else {
+            continue;
+        };
+        if let Some(id) = identity.file_id {
+            if !seen_files.insert(id) {
+                continue;
+            }
         }
         if let Some(probe) = probe_fingerprint(&entry.path, size) {
             by_probe.entry(probe).or_default().push(entry);
@@ -128,7 +147,10 @@ fn resolve_group(
         }
         let mut by_hash: HashMap<[u8; 32], Vec<FileEntry>> = HashMap::new();
         for entry in group {
-            if let Some(hash) = full_hash(&entry.path) {
+            if cancelled() {
+                return Vec::new();
+            }
+            if let Some(hash) = full_hash(&entry.path, size, &cancelled) {
                 by_hash.entry(hash).or_default().push(entry);
             }
         }
@@ -230,8 +252,8 @@ fn remark(copies: usize, reclaimable: u64, identical: &[FileEntry]) -> String {
 ///
 /// Files that differ almost always differ near one end; this rejects most
 /// non-matches for two seeks instead of a full read.
-fn probe_fingerprint(path: &PathBuf, size: u64) -> Option<[u8; 32]> {
-    let mut file = std::fs::File::open(path).ok()?;
+fn probe_fingerprint(path: &Path, size: u64) -> Option<[u8; 32]> {
+    let (mut file, identity) = checked_open(path, size)?;
     let mut hasher = blake3::Hasher::new();
     hasher.update(&size.to_le_bytes());
 
@@ -247,25 +269,77 @@ fn probe_fingerprint(path: &PathBuf, size: u64) -> Option<[u8; 32]> {
         hasher.update(&buffer);
     }
 
-    Some(*hasher.finalize().as_bytes())
+    unchanged(&file, path, &identity).then(|| *hasher.finalize().as_bytes())
+}
+
+/// Bind reads to the regular file that was checked, and reject stale sizes.
+/// This also avoids opening a FIFO or a link swapped in after traversal.
+fn checked_open(path: &Path, size: u64) -> Option<(std::fs::File, Identity)> {
+    let base = paths::link_check_base(path, dirs::home_dir().as_deref());
+    if paths::first_link_below(path, &base).is_some() {
+        return None;
+    }
+    let identity = fsx::identity_of(path).ok()?;
+    if identity.kind != EntryKind::File || identity.size != size {
+        return None;
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let file = options.open(path).ok()?;
+    let opened = fsx::identity_of_file(&file, path).ok()?;
+    identity.is_same_state(&opened).then_some((file, identity))
+}
+
+fn unchanged(file: &std::fs::File, path: &Path, before: &Identity) -> bool {
+    let Ok(opened) = fsx::identity_of_file(file, path) else {
+        return false;
+    };
+    let Ok(at_path) = fsx::identity_of(path) else {
+        return false;
+    };
+    before.is_same_state(&opened) && before.is_same_state(&at_path)
 }
 
 /// Stream the whole file. Never loads more than [`STREAM_CHUNK`] at a time, so
 /// a 40 GB disk image costs no more memory than a 40 KB text file.
-fn full_hash(path: &PathBuf) -> Option<[u8; 32]> {
-    let mut file = std::fs::File::open(path).ok()?;
+fn full_hash(path: &Path, size: u64, cancelled: &dyn Fn() -> bool) -> Option<[u8; 32]> {
+    if cancelled() {
+        return None;
+    }
+    let (mut file, identity) = checked_open(path, size)?;
     let mut hasher = blake3::Hasher::new();
     let mut buffer = vec![0u8; STREAM_CHUNK];
+    let mut read = 0u64;
     loop {
+        if cancelled() {
+            return None;
+        }
         match file.read(&mut buffer) {
             Ok(0) => break,
-            Ok(n) => hasher.update(&buffer[..n]),
+            Ok(n) => {
+                read += n as u64;
+                if read > size {
+                    return None;
+                }
+                hasher.update(&buffer[..n]);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
             // A file that vanishes or becomes unreadable mid-hash is simply
             // not a duplicate as far as this scan is concerned.
             Err(_) => return None,
-        };
+        }
     }
-    Some(*hasher.finalize().as_bytes())
+    (read == size && unchanged(&file, path, &identity)).then(|| *hasher.finalize().as_bytes())
 }
 
 #[cfg(test)]
@@ -493,7 +567,88 @@ mod tests {
 
     #[test]
     fn hashing_a_missing_file_yields_nothing_rather_than_panicking() {
-        assert!(full_hash(&PathBuf::from("/definitely/not/here")).is_none());
+        assert!(full_hash(&PathBuf::from("/definitely/not/here"), 10, &|| false).is_none());
         assert!(probe_fingerprint(&PathBuf::from("/definitely/not/here"), 10).is_none());
+    }
+
+    #[test]
+    fn a_file_whose_size_changed_after_traversal_is_not_a_copy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("changed.bin");
+        std::fs::write(&path, vec![1; 128]).unwrap();
+        assert!(probe_fingerprint(&path, 256).is_none());
+        assert!(full_hash(&path, 256, &|| false).is_none());
+        assert!(full_hash(&path, 128, &|| false).is_some());
+    }
+
+    #[test]
+    fn cancellation_is_checked_inside_a_large_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("large.bin");
+        let size = STREAM_CHUNK * 3;
+        std::fs::write(&path, vec![1; size]).unwrap();
+        let checks = std::cell::Cell::new(0);
+        let cancelled = || {
+            checks.set(checks.get() + 1);
+            checks.get() >= 3
+        };
+        assert!(full_hash(&path, size as u64, &cancelled).is_none());
+        assert_eq!(checks.get(), 3);
+    }
+
+    #[test]
+    fn hard_links_and_repeated_paths_are_not_extra_copies() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first = tmp.path().join("first.bin");
+        let linked = tmp.path().join("linked.bin");
+        std::fs::write(&first, vec![1; 128]).unwrap();
+        std::fs::hard_link(&first, &linked).unwrap();
+        let entry = |path: PathBuf| FileEntry {
+            path,
+            size: 128,
+            name: String::new(),
+            ext: String::new(),
+            modified_unix: None,
+            accessed_unix: None,
+            created_unix: None,
+            is_dir: false,
+            depth: 1,
+            opaque: false,
+        };
+        let found = resolve_group(
+            128,
+            vec![entry(first.clone()), entry(first), entry(linked)],
+            || false,
+        );
+        assert!(found.is_empty(), "one allocation is not three copies");
+    }
+
+    #[test]
+    fn a_link_swapped_in_after_traversal_is_not_read() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("target.bin");
+        let link = tmp.path().join("link.bin");
+        std::fs::write(&target, vec![1; 128]).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(&target, &link).unwrap();
+        assert!(probe_fingerprint(&link, 128).is_none());
+        assert!(full_hash(&link, 128, &|| false).is_none());
+    }
+
+    #[test]
+    fn a_linked_parent_swapped_in_after_traversal_is_not_read() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("real");
+        let link = tmp.path().join("linked");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("file.bin"), vec![1; 128]).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&target, &link).unwrap();
+        assert!(probe_fingerprint(&link.join("file.bin"), 128).is_none());
+        assert!(full_hash(&link.join("file.bin"), 128, &|| false).is_none());
     }
 }

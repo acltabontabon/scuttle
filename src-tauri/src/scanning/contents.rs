@@ -201,12 +201,12 @@ pub fn profile(
     // Both closures need to be able to mark the profile partial.
     let complete = std::cell::Cell::new(true);
 
-    walk::walk(
+    walk::walk_with_skips(
         dir,
         protected,
         &WalkOptions {
             max_depth: 8,
-            report_dirs: false,
+            report_dirs: true,
         },
         |entry| {
             seen += 1;
@@ -217,6 +217,7 @@ pub fn profile(
             out.observe(&entry);
             Step::Continue
         },
+        |_| complete.set(false),
         |_| complete.set(false),
     );
 
