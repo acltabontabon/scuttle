@@ -363,3 +363,7 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+
+.developerPlaces { margin: var(--close) 0 var(--close); }
+.developerPlace { display: flex; justify-content: space-between; gap: var(--close); padding: var(--snug) 0; }
+.developerActions { display: flex; gap: var(--close); margin-top: var(--close); }

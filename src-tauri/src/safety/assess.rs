@@ -193,7 +193,15 @@ pub fn assess(candidate: &CleanupCandidate, now_unix: i64) -> Assessment {
         Impact::ApplicationInstall
     } else {
         match candidate.category {
-            Category::Caches | Category::DeveloperDebris => Impact::Regenerable,
+            Category::Caches => Impact::Regenerable,
+            Category::DeveloperDebris
+                if candidate
+                    .developer_artifact()
+                    .is_some_and(|s| s.verified(now_unix)) =>
+            {
+                Impact::Regenerable
+            }
+            Category::DeveloperDebris => Impact::PersonalFile,
             Category::Ghosts | Category::Oddments => Impact::ApplicationData,
             _ if has(&|k| matches!(k, EvidenceKind::InsideApplicationData)) => {
                 Impact::ApplicationData
@@ -204,6 +212,14 @@ pub fn assess(candidate: &CleanupCandidate, now_unix: i64) -> Assessment {
     };
 
     let mut cautions = Vec::new();
+    if candidate.category == Category::DeveloperDebris {
+        match candidate.developer_artifact() {
+            Some(state) if state.verified(now_unix) => {},
+            state => cautions.push(Caution { kind: CautionKind::Uncertain,
+                detail: state.map(|s| s.caution(now_unix)).unwrap_or_else(||
+                    "This older finding has no developer verification. Rummage again before moving it.".into()) }),
+        }
+    }
     if let Some((app, how)) = &install {
         cautions.push(Caution {
             kind: CautionKind::BreaksApplication,
@@ -269,7 +285,16 @@ pub fn assess(candidate: &CleanupCandidate, now_unix: i64) -> Assessment {
     cautions.sort_by_key(|c| c.kind);
     cautions.dedup_by_key(|c| c.kind);
 
-    let (eligibility, blocked) = if candidate.risk == Risk::Protected {
+    let (eligibility, blocked) = if candidate.category == Category::DeveloperDebris
+        && candidate
+            .developer_artifact()
+            .is_some_and(|s| s.repository == crate::detectors::developer::RepositoryState::Tracked)
+    {
+        (
+            Eligibility::Blocked,
+            Some("This folder contains version-controlled files. Scuttle will not move it.".into()),
+        )
+    } else if candidate.risk == Risk::Protected {
         let rule = candidate.evidence.iter().find_map(|e| match &e.kind {
             EvidenceKind::ProtectedByRule { rule } => Some(rule.clone()),
             _ => None,
@@ -286,6 +311,10 @@ pub fn assess(candidate: &CleanupCandidate, now_unix: i64) -> Assessment {
     } else if candidate.recommended_action == RecommendedAction::Quarantine
         && impact.may_expire()
         && cautions.is_empty()
+        && (candidate.category != Category::DeveloperDebris
+            || candidate
+                .developer_artifact()
+                .is_some_and(|s| s.verified(now_unix)))
     {
         (Eligibility::Suggested, None)
     } else {

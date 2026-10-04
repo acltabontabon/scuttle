@@ -9,6 +9,10 @@ import { sweepLabel } from './PileView'
  * drawer.
  */
 describe('sweepLabel', () => {
+  it('labels an incomplete measurement as a lower bound', () => {
+    expect(sweepLabel(2, 1024 ** 2 * 420, true)).toBe('Put both in the drawer · at least 420 MB')
+  })
+
   it('names the count and the size every time', () => {
     expect(sweepLabel(1, 1024 ** 3 * 6.4)).toBe('Put it in the drawer · 6.40 GB')
     expect(sweepLabel(2, 1024 ** 2 * 420)).toBe('Put both in the drawer · 420 MB')

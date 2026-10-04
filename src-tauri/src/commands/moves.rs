@@ -1021,6 +1021,7 @@ pub struct PlannedItem {
     pub path: std::path::PathBuf,
     pub shape: PlannedShape,
     pub size: u64,
+    pub size_is_lower_bound: bool,
     /// Files and folders a folder move takes with it, counted just now.
     /// `None` for a single file, or when counting was stopped.
     pub contains: Option<u64>,
@@ -1104,6 +1105,7 @@ impl AppState {
                 path: std::path::PathBuf::new(),
                 shape: PlannedShape::File,
                 size: 0,
+                size_is_lower_bound: false,
                 contains: None,
                 confidence: crate::model::Confidence::Low,
                 reasons: Vec::new(),
@@ -1162,6 +1164,7 @@ impl AppState {
                 path: c.path.clone(),
                 shape,
                 size: c.size,
+                size_is_lower_bound: c.developer_artifact().is_some_and(|s| !s.output.complete),
                 contains,
                 confidence: c.confidence,
                 reasons: c

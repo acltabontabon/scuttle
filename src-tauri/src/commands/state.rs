@@ -24,6 +24,7 @@ pub struct ActionScope {
     protected: ProtectedPaths,
     roots: Vec<PathBuf>,
     installs: crate::platform::InstallAreas,
+    platform: Arc<dyn PlatformService>,
 }
 
 impl ActionScope {
@@ -38,6 +39,7 @@ impl ActionScope {
             bidding,
             acknowledged,
             installs: &self.installs,
+            developer_platform: Some(self.platform.as_ref()),
         }
     }
 }
@@ -213,18 +215,15 @@ impl AppState {
         let store = Arc::new(Store::open(&platform.data_dir().join("scuttle.db"))?);
         std::fs::create_dir_all(platform.quarantine_root())?;
 
-        // Roots default to whatever the platform suggests, so a restart that
-        // happens between a scan and an action does not strand the findings.
+        // Restore the exact completed scan boundary, including explicit roots.
+        // Before the first scan, use the same resolution as a fresh rummage.
         let settings = store.settings()?;
-        let roots = if settings.scan_roots.is_empty() {
-            platform
-                .default_scan_roots()
-                .into_iter()
-                .map(|k| k.path)
-                .collect()
-        } else {
-            settings.scan_roots.clone()
-        };
+        let roots = store
+            .latest_scan()?
+            .map(|scan| scan.roots)
+            .unwrap_or_else(|| {
+                scanning::roots::resolve(platform.as_ref(), &settings, None, None).all_roots()
+            });
 
         Ok(AppState {
             inner: Arc::new(Inner {
@@ -354,20 +353,8 @@ impl AppState {
     /// [`super::rummage`] performs — a background check must not look anywhere
     /// a rummage would not.
     pub fn resolved_roots(&self) -> Vec<PathBuf> {
-        let chosen = self
-            .store()
-            .settings()
-            .map(|s| s.scan_roots)
-            .unwrap_or_default();
-        if !chosen.is_empty() {
-            return chosen;
-        }
-        self.inner
-            .platform
-            .default_scan_roots()
-            .into_iter()
-            .map(|known| known.path)
-            .collect()
+        let settings = self.store().settings().unwrap_or_default();
+        scanning::roots::resolve(self.platform().as_ref(), &settings, None, None).all_roots()
     }
 
     pub fn clone_handle(&self) -> AppState {
@@ -424,7 +411,7 @@ impl AppState {
         });
         drop(running);
 
-        *self.lock_roots() = options.roots.clone();
+        *self.lock_roots() = options.all_roots();
         Ok(id)
     }
 
@@ -654,17 +641,10 @@ impl AppState {
     /// up when asked. It moves nothing, deletes nothing and selects nothing.
     pub fn run_glance(&self, budget_secs: u64) -> Result<crate::scanning::ScanOutcome> {
         let settings = self.store().settings()?;
-        let roots = self.resolved_roots();
-        if roots.is_empty() {
+        let options = scanning::roots::resolve(self.platform().as_ref(), &settings, None, None);
+        if options.all_roots().is_empty() {
             return Err(ScuttleError::Refused("There is nowhere to look.".into()));
         }
-
-        let options = ScanOptions {
-            roots,
-            include_developer_debris: settings.include_developer_debris,
-            heavy_threshold: settings.heavy_threshold,
-            ..Default::default()
-        };
 
         let scan_id = self.start_scan_as(&options, ScanKind::Glance, Priority::Background)?;
 
@@ -902,6 +882,7 @@ impl AppState {
             protected: self.protected_paths(),
             roots: self.lock_roots().clone(),
             installs: self.inner.platform.install_areas(),
+            platform: Arc::clone(&self.inner.platform),
         }
     }
 
@@ -1024,27 +1005,15 @@ impl AppState {
     /// Classify everything, change nothing.
     pub fn dry_run(&self, request: super::RummageRequest) -> Result<super::DryRunReport> {
         let settings = self.store().settings()?;
-        let roots = request.roots.filter(|r| !r.is_empty()).unwrap_or_else(|| {
-            if settings.scan_roots.is_empty() {
-                self.inner
-                    .platform
-                    .default_scan_roots()
-                    .into_iter()
-                    .map(|k| k.path)
-                    .collect()
-            } else {
-                settings.scan_roots.clone()
-            }
-        });
-
-        let options = ScanOptions {
-            roots,
-            include_developer_debris: request
-                .include_developer_debris
-                .unwrap_or(settings.include_developer_debris),
-            heavy_threshold: settings.heavy_threshold,
-            ..Default::default()
-        };
+        let options = scanning::roots::resolve(
+            self.platform().as_ref(),
+            &settings,
+            request.roots,
+            request.include_developer_debris,
+        );
+        for root in options.all_roots() {
+            super::check_scan_root(&root, &self.protected_paths())?;
+        }
 
         let ctx = ScanContext::new(
             options.clone(),

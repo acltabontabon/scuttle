@@ -183,6 +183,11 @@ pub const MIGRATIONS: &[&str] = &[
     ALTER TABLE quarantine_items ADD COLUMN keep INTEGER NOT NULL DEFAULT 1;
     UPDATE quarantine_items SET keep = 0 WHERE category IN ('caches', 'developer_debris');
     "#,
+    // 5 — older developer findings lack the verification required for expiry.
+    // Preserve their recovery metadata and let the person remove them by hand.
+    r#"
+    UPDATE quarantine_items SET keep = 1 WHERE category = 'developer_debris';
+    "#,
 ];
 
 /// Bring a connection up to the current schema.
@@ -225,6 +230,44 @@ mod tests {
         apply(&mut conn).unwrap();
         // Would fail with "table already exists" if migrations re-ran.
         apply(&mut conn).unwrap();
+    }
+
+    #[test]
+    fn legacy_developer_drawer_items_no_longer_expire() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        for sql in &MIGRATIONS[..4] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.execute_batch("PRAGMA user_version = 4").unwrap();
+        conn.execute_batch(
+            "INSERT INTO quarantine_items (id, original_path, stored_path, display_name,
+                category, size, quarantined_unix, expires_unix, status, keep, evidence)
+             VALUES
+               ('dev', '/project/target', '/q/dev/target', 'target',
+                  'developer_debris', 123, 1, 2, 'held', 0, '[{\"legacy\":true}]'),
+               ('cache', '/cache', '/q/cache', 'cache',
+                  'caches', 123, 1, 2, 'held', 0, '[]');",
+        )
+        .unwrap();
+        apply(&mut conn).unwrap();
+        let (keep, path, evidence): (bool, String, String) = conn
+            .query_row(
+                "SELECT keep, original_path, evidence FROM quarantine_items WHERE id='dev'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert!(keep);
+        assert_eq!(path, "/project/target");
+        assert_eq!(evidence, r#"[{"legacy":true}]"#);
+        let cache_keep: bool = conn
+            .query_row(
+                "SELECT keep FROM quarantine_items WHERE id='cache'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!cache_keep);
     }
 
     #[test]

@@ -6,7 +6,7 @@
 
 use serde::Serialize;
 
-use crate::model::{human_bytes, Category, Confidence, RecommendedAction, Risk};
+use crate::model::{Category, Confidence, RecommendedAction, Risk};
 use crate::scanning::{ScanContext, ScanOptions, ScanOutcome};
 
 #[derive(Debug, Clone, Serialize)]
@@ -60,7 +60,7 @@ pub(crate) fn build(
             path: candidate.path.display().to_string(),
             display_name: candidate.display_name.clone(),
             size: candidate.size,
-            size_human: human_bytes(candidate.size),
+            size_human: candidate.size_human(),
             confidence: candidate.confidence,
             risk: candidate.risk,
             action: candidate.recommended_action,
@@ -112,7 +112,7 @@ pub(crate) fn build(
 
     DryRunReport {
         roots: options
-            .roots
+            .all_roots()
             .iter()
             .map(|r| r.display().to_string())
             .collect(),

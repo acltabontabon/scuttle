@@ -70,6 +70,7 @@ impl Bench {
             bidding: scuttle_core::safety::Bidding::User,
             acknowledged: &scuttle_core::safety::assess::CautionKind::ALL,
             installs: &scuttle_core::platform::installations::NO_INSTALL_AREAS,
+            developer_platform: None,
         }
     }
 

@@ -49,6 +49,7 @@ pub fn run() {
             window::reveal(app);
         }))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         // Driven from Rust only. The webview has no updater permission in its
         // capability, so it cannot check, download or install on its own; it
         // asks the commands in `commands::updates`, which go through the same

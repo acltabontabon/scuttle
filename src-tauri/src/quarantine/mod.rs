@@ -623,6 +623,7 @@ mod tests {
                 bidding: crate::safety::Bidding::User,
                 acknowledged: &crate::safety::assess::CautionKind::ALL,
                 installs: &crate::platform::installations::NO_INSTALL_AREAS,
+                developer_platform: None,
             }
         }
 

@@ -158,6 +158,7 @@ pub(crate) fn walk_with_skips<E, H, S>(
 {
     let mut it = WalkDir::new(root)
         .follow_links(false)
+        .follow_root_links(false)
         .max_depth(options.max_depth)
         .same_file_system(true)
         .into_iter();

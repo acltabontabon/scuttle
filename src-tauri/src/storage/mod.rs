@@ -36,6 +36,9 @@ pub struct Settings {
     /// look when Scuttle does not do what you expected.
     pub scan_roots: Vec<PathBuf>,
     pub include_developer_debris: bool,
+    /// Empty selects common workspace locations.
+    pub developer_roots: Vec<PathBuf>,
+    pub developer_stale_days: u32,
     /// 7, 14 or 30.
     pub quarantine_retention_days: u32,
     pub heavy_threshold: u64,
@@ -90,6 +93,8 @@ impl Default for Settings {
         Settings {
             scan_roots: Vec::new(),
             include_developer_debris: false,
+            developer_roots: Vec::new(),
+            developer_stale_days: 14,
             quarantine_retention_days: 14,
             heavy_threshold: 1024 * 1024 * 1024,
             appearance: "system".into(),
@@ -319,6 +324,15 @@ pub struct Store {
 }
 
 impl Store {
+    /// A dry run may read preferences but must never create or migrate storage.
+    pub fn open_read_only(path: &Path) -> Result<Store> {
+        Ok(Store {
+            conn: Mutex::new(Connection::open_with_flags(
+                path,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )?),
+        })
+    }
     pub fn open(path: &Path) -> Result<Store> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -371,7 +385,7 @@ impl Store {
                 scan_id,
                 kind.as_str(),
                 started_unix,
-                serde_json::to_string(&options.roots)?
+                serde_json::to_string(&options.all_roots())?
             ],
         )?;
         Ok(())
@@ -408,7 +422,7 @@ impl Store {
                         candidates_found, reclaimable_bytes, duration_ms, cancelled, hiccups,
                         kind
                  FROM scan_runs WHERE finished_unix IS NOT NULL
-                 ORDER BY started_unix DESC LIMIT 1",
+                 ORDER BY started_unix DESC, rowid DESC LIMIT 1",
                 [],
                 |row| {
                     Ok(ScanRecord {

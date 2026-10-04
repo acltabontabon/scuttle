@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager, State};
 
 use crate::model::{human_bytes, Category, CleanupCandidate, RecommendedAction};
-use crate::scanning::{HiccupSummary, Phase, Progress, ScanOptions, ScanSummary};
+use crate::scanning::{HiccupSummary, Phase, Progress, ScanSummary};
 use crate::space::SpaceOverview;
 use crate::storage::{HistoryEntry, QuarantineRecord, Settings};
 use crate::{Result, ScuttleError};
@@ -54,6 +54,7 @@ pub mod events {
 /// One pile on the floor.
 #[derive(Debug, Clone, Serialize)]
 pub struct Pile {
+    pub bytes_is_lower_bound: bool,
     pub category: Category,
     pub title: String,
     pub bytes: u64,
@@ -151,57 +152,32 @@ pub fn rummage(
 ) -> Result<RummageStarted> {
     let settings = state.store().settings()?;
 
-    let roots: Vec<RootDescription> = match request.roots.filter(|r| !r.is_empty()) {
-        Some(roots) => roots
-            .into_iter()
-            .map(|path| RootDescription {
-                label: path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.display().to_string()),
-                path,
-            })
-            .collect(),
-        None if !settings.scan_roots.is_empty() => settings
-            .scan_roots
-            .iter()
-            .map(|path| RootDescription {
-                label: path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.display().to_string()),
-                path: path.clone(),
-            })
-            .collect(),
-        None => state
-            .platform()
-            .default_scan_roots()
-            .into_iter()
-            .map(|known| RootDescription {
-                label: known.label,
-                path: known.path,
-            })
-            .collect(),
-    };
-
+    let options = crate::scanning::roots::resolve(
+        state.platform().as_ref(),
+        &settings,
+        request.roots,
+        request.include_developer_debris,
+    );
+    let roots: Vec<RootDescription> = options
+        .all_roots()
+        .into_iter()
+        .map(|path| RootDescription {
+            label: path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            path,
+        })
+        .collect();
     if roots.is_empty() {
         return Err(ScuttleError::Refused(
-            "There is nowhere to look. Choose at least one folder in Settings.".into(),
+            "There is nowhere to look. Choose a folder in Settings.".into(),
         ));
     }
     let protected = state.protected_paths();
     for root in &roots {
         check_scan_root(&root.path, &protected)?;
     }
-
-    let options = ScanOptions {
-        roots: roots.iter().map(|r| r.path.clone()).collect(),
-        include_developer_debris: request
-            .include_developer_debris
-            .unwrap_or(settings.include_developer_debris),
-        heavy_threshold: settings.heavy_threshold,
-        ..Default::default()
-    };
 
     let scan_id = state.start_scan(&options)?;
     let started = RummageStarted {
@@ -282,6 +258,9 @@ pub fn findings(state: State<'_, AppState>) -> Result<Findings> {
             continue;
         }
         piles.push(Pile {
+            bytes_is_lower_bound: matching
+                .iter()
+                .any(|c| c.developer_artifact().is_some_and(|s| !s.output.complete)),
             category,
             title: category.title().to_string(),
             bytes: matching.iter().map(|c| c.size).sum(),
@@ -865,7 +844,10 @@ pub fn save_settings(
     // A folder to look in is also, after a scan, the boundary of what may be
     // moved — so the same rules apply to it as to anything Scuttle moves.
     let protected = state.protected_paths();
-    for root in &settings.scan_roots {
+    if ![14, 30, 60].contains(&settings.developer_stale_days) {
+        settings.developer_stale_days = 14;
+    }
+    for root in settings.scan_roots.iter().chain(&settings.developer_roots) {
         check_scan_root(root, &protected)?;
     }
 
@@ -912,6 +894,12 @@ pub(crate) fn check_scan_root(
             root.display()
         )));
     }
+    let base = crate::safety::paths::link_check_base(&normalized, Some(protected.home()));
+    if crate::safety::paths::first_link_below(&normalized, &base).is_some() {
+        return Err(ScuttleError::Refused(
+            "Choose a real folder, not a link to another location.".into(),
+        ));
+    }
     if let Some(rule) = protected.rule_for(&normalized) {
         return Err(ScuttleError::Refused(format!(
             "{} is protected ({}). Scuttle does not look there.",
@@ -935,6 +923,28 @@ pub fn suggested_roots(state: State<'_, AppState>) -> Vec<RootDescription> {
             path: known.path,
         })
         .collect()
+}
+
+/// Common developer workspaces, separate from ordinary scan locations.
+#[tauri::command]
+pub fn developer_roots(state: State<'_, AppState>) -> Vec<PathBuf> {
+    crate::scanning::roots::common(state.platform().as_ref())
+}
+
+/// The native picker is exposed only through this narrow Rust command.
+#[tauri::command]
+pub async fn choose_developer_root(app: tauri::AppHandle) -> Result<Option<PathBuf>> {
+    use tauri_plugin_dialog::DialogExt;
+    let picked =
+        tauri::async_runtime::spawn_blocking(move || app.dialog().file().blocking_pick_folder())
+            .await
+            .map_err(|_| ScuttleError::Refused("Could not open the folder picker.".into()))?;
+    picked
+        .map(|p| {
+            p.into_path()
+                .map_err(|_| ScuttleError::Refused("Choose a local folder.".into()))
+        })
+        .transpose()
 }
 
 #[tauri::command]
@@ -1266,6 +1276,8 @@ pub fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static
         settings,
         save_settings,
         suggested_roots,
+        developer_roots,
+        choose_developer_root,
         history,
         dry_run,
         about,

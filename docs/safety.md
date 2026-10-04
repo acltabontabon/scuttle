@@ -358,3 +358,50 @@ Scuttle will miss things. A cache with no rule written for it, a leftover
 folder with an unrecognisable name, a duplicate below the size threshold. Those
 are the right failures. The alternative — a heuristic broad enough to catch
 them — is the heuristic that eventually deletes something that mattered.
+
+## Developer build output
+
+Developer mode is opt-in. Additional project locations are scanned only for
+this category; ordinary detectors do not inspect their source files. Empty
+`developer_roots` selects existing Code, Projects, Workspace, Developer and
+source/repos directories under home. Explicit scan roots override discovery.
+The exact authorized roots are saved with the scan and restored after restart.
+
+A sibling manifest nominates a folder; it does not authorize cleanup. Suggested
+output currently requires tool-specific verification for Cargo target, Next.js
+.next, or .NET obj, complete metadata measurements, source and output unchanged
+for 14 days (configurable to 30 or 60), and a readable process list with no
+relevant tool running. The minimum finding size remains 100 MiB. File
+modification times are observations, not proof that a person has not used a
+project. Access times and commit dates are not used.
+
+Source activity includes nested source/configuration files across the enclosing
+repository, or the project for non-Git code. Verified output and dependency
+folders are excluded from source measurements; each candidate output is measured
+separately. Directory identities and paths participate in change detection,
+while source age comes from file modification times. This allows moving one
+build folder without making all its siblings appear recently edited.
+
+Git inspection uses gix in an isolated configuration, without invoking Git,
+hooks, build tools, package scripts or network operations. It checks both the
+index and HEAD for tracked paths, including staged deletions, and requires
+suggested output to be ignored. Worktree and submodule Git files are supported.
+Unreadable metadata, unsupported VCS, nested repository uncertainty, or a
+repository extending outside the scan boundary prevents suggestions. Repository
+internals remain excluded from ordinary traversal and can never be moved.
+
+Metadata inspections are bounded to 200,000 entries, depth 64, and five seconds
+per tree, checking cancellation between entries. A filesystem call may take
+longer. Protected entries, links, unknown timestamps and incomplete inspections
+prevent suggestions. Partial sizes are lower bounds. Authored-looking files in
+output also require manual review. Markers are bounded to 4 MiB and read through
+an identity-checked, no-follow handle.
+
+The move gate repeats developer inspection and refuses changes in output,
+source, markers, repository ownership/tracking or relevant running tools.
+Dependencies, generic build/dist, CMake output and old findings without complete
+verification never gain automatic expiry merely from their category. They stay
+in the drawer until explicitly removed. Upgrading also disables automatic expiry
+for developer items already in the drawer, whose old evidence cannot establish
+the new verification requirements. Nothing is moved without the existing
+review, and moving into the drawer does not free space.

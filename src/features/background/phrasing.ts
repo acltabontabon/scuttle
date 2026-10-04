@@ -150,7 +150,7 @@ export function whenish(secondsAgo: number): string {
 export const GLANCE_CAVEAT =
   'This was a background check. It read names, sizes and dates without opening ' +
   'anything, so duplicates and near-identical screenshots are not in here — a ' +
-  'rummage you start will look for those.'
+  'rummage you start will look for those and verify preliminary developer findings.'
 
 export const CANCELLED_CAVEAT =
   'This look was stopped part-way. What turned up is real; what is missing was ' +

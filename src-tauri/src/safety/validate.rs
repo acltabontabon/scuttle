@@ -68,6 +68,8 @@ pub struct ActionContext<'a> {
     pub acknowledged: &'a [CautionKind],
     /// Where applications live, to recognise one the stored finding did not.
     pub installs: &'a InstallAreas,
+    /// Live process checks for developer output; absent means unknown.
+    pub developer_platform: Option<&'a dyn crate::platform::PlatformService>,
 }
 
 /// Re-check a stored finding against the world as it is *now*.
@@ -83,6 +85,9 @@ pub fn authorize(
     permit(candidate, &assessment, ctx)?;
 
     authorize_path(&path, candidate.target_kind, ctx)?;
+    if candidate.category == crate::model::Category::DeveloperDebris {
+        crate::detectors::developer::revalidate(candidate, ctx)?;
+    }
 
     // 5b. A folder moves with everything in it, so a folder holding something
     //     protected is as off limits as the protected thing.
@@ -397,6 +402,7 @@ mod tests {
                 bidding: Bidding::User,
                 acknowledged: &CautionKind::ALL,
                 installs: &crate::platform::installations::NO_INSTALL_AREAS,
+                developer_platform: None,
             }
         }
         fn file(&self, rel: &str, contents: &str) -> PathBuf {

@@ -136,6 +136,22 @@ individual filesystem call can take longer. Choose **Measure again** for a
 fresh look. Moving something into the drawer keeps it on disk; only permanent
 removal gives space back.
 
+## Developer build output
+
+Enable **Developer build artefacts** in Settings to find old build folders.
+Scuttle discovers common project locations (Code, Projects, Workspace, Developer
+and source/repos) and lets you add your own. Additional locations are checked
+only for developer debris. The default inactivity window is 14 days, with 30
+and 60 day choices.
+
+Verified Cargo `target`, Next.js `.next`, and .NET `obj` output can be suggested
+when both source and output are old enough, repository checks pass, and no
+relevant running tool is found. Dependencies and ambiguous build folders remain
+manual choices and never expire automatically. A full rummage verifies build
+markers and Git metadata; background findings are preliminary. Rebuilding can
+take time. Review still comes first, and space is reclaimed only after items
+leave the drawer permanently.
+
 ## The drawer
 
 Nothing is ever deleted as a side effect of anything else.
@@ -177,8 +193,9 @@ them.
 - It won't delete anything as a side effect. Things move into a drawer first,
   and stay recoverable.
 - It won't go near your keys, your password vault, your browser profiles, your
-  mail, your repositories or your cloud-sync folders. Those directories aren't
-  just excluded from results — they're never walked at all.
+  mail or your cloud-sync folders. Those directories are never walked.
+  Repository internals are excluded from traversal and cleanup; opt-in developer
+  verification reads only the Git metadata needed to protect tracked files.
 - It won't treat an installed application as a leftover. Anything shaped like
   an application — an updater beside versioned folders, a program beside its
   libraries, a `.app` bundle — is never suggested and never swept, whatever a

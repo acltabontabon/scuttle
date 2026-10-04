@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { useStore } from '@/app/store'
-import { bytes, shortPath, whenish } from '@/lib/format'
+import { findingBytes, shortPath, whenish } from '@/lib/format'
 import type { Candidate } from '@/lib/types'
 import {
   ACTION_MEANING,
@@ -206,7 +206,7 @@ export function Detail() {
             <h3 className={styles.sectionTitle}>Facts</h3>
             <div className={styles.facts}>
               <span className={styles.factKey}>Size</span>
-              <span className={styles.factValue}>{bytes(detail.size)}</span>
+              <span className={styles.factValue}>{findingBytes(detail)}</span>
 
               <span className={styles.factKey}>Changed</span>
               <span className={styles.factValue}>{whenish(detail.modified_unix)}</span>

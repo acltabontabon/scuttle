@@ -36,9 +36,14 @@ semver = "1"
 tokio = { version = "1", default-features = false, features = ["time", "sync"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.9"
 thiserror = "2"
 rusqlite = { version = "0.37", features = ["bundled"] }
 walkdir = "2"
+# Read-only repository discovery, tracked paths and ignore rules. No transports,
+# credential helpers, command execution or worktree mutation features.
+gix = { version = "0.88", default-features = false, features = ["index", "excludes", "sha1", "sha256"] }
+tauri-plugin-dialog = "2"
 blake3 = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 dirs = "6"
@@ -69,6 +74,7 @@ windows-sys = { version = "0.61", features = [
 
 [dev-dependencies]
 tempfile = "3"
+filetime = "0.2"
 
 [features]
 default = ["custom-protocol"]

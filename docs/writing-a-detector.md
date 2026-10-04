@@ -86,7 +86,9 @@ A few patterns worth copying:
 **A name is not evidence.** A directory called `target`, `build` or `dist`
 proves nothing — there are photographers with a folder called `build`. The
 developer-debris detector requires a project manifest beside the directory
-before it believes the name.
+before it nominates a folder. Suggestions additionally require verified tool
+markers, complete activity measurements and repository checks. See the developer
+section of [safety.md](safety.md).
 
 **Back off when someone is using it.** If the owning process is running, or the
 project was touched recently, say so as evidence and let the arithmetic do the

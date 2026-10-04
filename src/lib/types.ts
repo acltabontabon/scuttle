@@ -25,6 +25,29 @@ export type RecommendedAction = 'quarantine' | 'review' | 'inspect_only'
 
 export type TargetKind = 'file' | 'directory'
 
+export interface DeveloperTreeState {
+  digest: string
+  bytes: number
+  newest_unix: number | null
+  complete: boolean
+  user_content: boolean
+}
+
+export interface DeveloperArtifact {
+  version: number
+  project: string
+  boundary: string
+  artifact_kind: 'cargo' | 'next' | 'dotnet' | 'dependency' | 'ambiguous'
+  manifest: string
+  marker_digest: string | null
+  source: DeveloperTreeState
+  output: DeveloperTreeState
+  repository: 'not_repository' | 'ignored' | 'not_ignored' | 'tracked' | 'unknown'
+  processes_clear: boolean
+  stale_days: number
+  preliminary: boolean
+}
+
 /** The structured observation behind a piece of evidence. */
 export interface EvidenceKind {
   kind: string
@@ -117,6 +140,7 @@ export interface Candidate {
 }
 
 export interface Pile {
+  bytes_is_lower_bound?: boolean
   category: Category
   title: string
   bytes: number
@@ -394,6 +418,7 @@ export interface PlannedItem {
   path: string
   shape: PlannedShape
   size: number
+  size_is_lower_bound?: boolean
   /** Files and folders a folder takes with it; null for a file. */
   contains: number | null
   confidence: Confidence
@@ -460,6 +485,8 @@ export interface IgnoredEntry {
 export interface Settings {
   scan_roots: string[]
   include_developer_debris: boolean
+  developer_roots: string[]
+  developer_stale_days: 14 | 30 | 60
   quarantine_retention_days: number
   heavy_threshold: number
   appearance: 'system' | 'light' | 'dark'

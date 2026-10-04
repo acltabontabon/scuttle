@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { bytes, bytesParts, daysUntil, scatter, shortPath, whenish } from './format'
+import { bytes, bytesParts, daysUntil, findingBytes, scatter, shortPath, whenish } from './format'
 
 /**
  * `bytes` intentionally duplicates `human_bytes` in the Rust core. These tests
@@ -8,6 +8,19 @@ import { bytes, bytesParts, daysUntil, scatter, shortPath, whenish } from './for
  * two different sizes depending on which screen you are looking at.
  */
 describe('bytes', () => {
+  it('distinguishes partial developer sizes from complete and legacy measurements', () => {
+    const finding = (complete: boolean) => ({
+      size: 1024 ** 2 * 110,
+      evidence: [{
+        kind: { kind: 'DEVELOPER_ARTIFACT', state: { output: { complete } } },
+        summary: '', weight: 0, negative: false, risk_floor: null,
+      }],
+    })
+    expect(findingBytes(finding(false))).toBe('at least 110 MB')
+    expect(findingBytes(finding(true))).toBe('110 MB')
+    expect(findingBytes({ size: 1024, evidence: [] })).toBe('1.00 KB')
+  })
+
   it('matches the core rounding rules', () => {
     expect(bytes(0)).toBe('0 B')
     expect(bytes(999)).toBe('999 B')

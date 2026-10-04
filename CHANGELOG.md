@@ -8,7 +8,12 @@ major version is 0, a minor bump may change behaviour.
 
 ## [Unreleased]
 
-Nothing yet.
+- Opt-in developer cleanup discovers common workspaces and custom folders, with
+  14, 30, or 60 days of inactivity before verified build output is suggested.
+- Cargo, Next.js, and .NET output now requires project, repository, activity,
+  and running-tool checks, repeated before moving to the drawer. Dependencies
+  and uncertain output remain manual choices without automatic expiry.
+- Existing developer items in the drawer are kept until manually removed.
 
 ## [0.1.1] - 2026-10-05
 

@@ -19,6 +19,7 @@
 //! Detectors never delete anything and never decide their own confidence.
 
 pub mod contents;
+pub mod roots;
 pub mod snapshot;
 pub mod walk;
 
@@ -48,6 +49,11 @@ pub struct ScanOptions {
     /// Build output and package caches are off by default: they belong to
     /// work in progress more often than not.
     pub include_developer_debris: bool,
+    /// Additional roots visited only by the developer detector.
+    #[serde(default)]
+    pub developer_roots: Vec<PathBuf>,
+    #[serde(default = "roots::default_stale_days")]
+    pub developer_stale_days: u32,
     /// Files at or above this size are worth mentioning on their own.
     pub heavy_threshold: u64,
     pub max_depth: usize,
@@ -61,6 +67,8 @@ impl Default for ScanOptions {
         ScanOptions {
             roots: Vec::new(),
             include_developer_debris: false,
+            developer_roots: Vec::new(),
+            developer_stale_days: 14,
             heavy_threshold: 1024 * 1024 * 1024, // 1 GB
             max_depth: 12,
             duplicate_min_size: 1024 * 1024, // 1 MB
@@ -216,6 +224,7 @@ impl ScanContext {
         self.options
             .roots
             .iter()
+            .chain(&self.options.developer_roots)
             .filter(|root| paths::is_within(path, root))
             .max_by_key(|root| root.components().count())
             .map(PathBuf::as_path)
@@ -677,7 +686,24 @@ pub fn run(
     let walk_started = std::time::Instant::now();
 
     // ---- one streaming pass per root -------------------------------------
-    'roots: for root in &ctx.options.roots {
+    let ordinary_roots = roots::deduplicate(ctx.options.roots.clone());
+    let developer_roots = if ctx.options.include_developer_debris {
+        roots::deduplicate(ctx.options.developer_roots.clone())
+    } else {
+        Vec::new()
+    };
+    let mut visited_roots: Vec<PathBuf> = Vec::new();
+    'roots: for (root, developer_only) in ordinary_roots
+        .iter()
+        .map(|r| (r, false))
+        .chain(developer_roots.iter().map(|r| (r, true)))
+    {
+        if visited_roots
+            .iter()
+            .any(|prior| paths::is_within(root, prior))
+        {
+            continue;
+        }
         if ctx.cancelled() {
             cancelled = true;
             break;
@@ -698,12 +724,20 @@ pub fn run(
                 report_dirs: true,
             },
             |entry| {
+                if visited_roots
+                    .iter()
+                    .any(|prior| paths::is_within(&entry.path, prior))
+                {
+                    return Step::Continue;
+                }
                 progress.files_seen += 1;
                 progress.bytes_seen += entry.size;
 
                 directories.observe(&entry);
                 for detector in detectors.iter_mut() {
-                    detector.observe(&entry, ctx);
+                    if !developer_only || detector.category() == Category::DeveloperDebris {
+                        detector.observe(&entry, ctx);
+                    }
                 }
 
                 // Time-based rather than count-based: a progress line that
@@ -722,6 +756,7 @@ pub fn run(
             |hiccup| hiccups.record(&hiccup),
         );
 
+        visited_roots.push(root.clone());
         observer.progress(&progress);
         if ctx.cancelled() {
             cancelled = true;

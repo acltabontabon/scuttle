@@ -248,6 +248,28 @@ pub struct StateFingerprint {
 }
 
 impl CleanupCandidate {
+    pub fn size_human(&self) -> String {
+        format!(
+            "{}{}",
+            if self
+                .developer_artifact()
+                .is_some_and(|s| !s.output.complete)
+            {
+                "at least "
+            } else {
+                ""
+            },
+            human_bytes(self.size)
+        )
+    }
+
+    pub fn developer_artifact(&self) -> Option<&crate::detectors::developer::DeveloperArtifact> {
+        self.evidence.iter().find_map(|e| match &e.kind {
+            crate::evidence::EvidenceKind::DeveloperArtifact { state } => Some(state.as_ref()),
+            _ => None,
+        })
+    }
+
     /// A shared folder whose *contents* are what get cleaned: a cache root
     /// that some other program owns and recreates, like the temp directory or
     /// a graphics shader cache.

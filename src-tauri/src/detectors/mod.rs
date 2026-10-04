@@ -10,6 +10,7 @@
 
 pub mod caches;
 pub mod devdebris;
+pub mod developer;
 pub mod duplicates;
 pub mod ghosts;
 pub mod heavy;
@@ -40,9 +41,10 @@ pub fn default_set(options: &ScanOptions) -> Vec<Box<dyn Detector>> {
 /// The detectors a background check runs: everything that works from names,
 /// sizes, dates and what the platform already publishes.
 ///
-/// Exactly two detectors read file contents — `duplicates` hashes them and
-/// `screenshots` decodes them (see `docs/privacy.md`) — and both are left out
-/// here. That is what makes a check cheap enough to run unattended, and it is
+/// `duplicates` and `screenshots` read file contents and are left out here.
+/// Developer detection uses a preliminary variant that reads neither build
+/// markers nor Git metadata (see `docs/privacy.md`). That keeps checks cheap
+/// enough to run unattended, and
 /// also what makes it incomplete: a background check cannot find duplicates or
 /// near-identical screenshots, and the interface says so rather than letting
 /// the absence read as "there are none".
@@ -54,7 +56,7 @@ pub fn glance_set(options: &ScanOptions) -> Vec<Box<dyn Detector>> {
         Box::new(heavy::HeavyStrayDetector::new()),
     ];
     if options.include_developer_debris {
-        set.push(Box::new(devdebris::DeveloperDebrisDetector::new()));
+        set.push(Box::new(devdebris::DeveloperDebrisDetector::preliminary()));
     }
     set
 }
@@ -65,7 +67,8 @@ mod set_tests {
 
     #[test]
     fn a_background_check_never_reads_a_file() {
-        // The two detectors that open files are the two that must not be in
+        // The full developer verifier is replaced with metadata-only discovery.
+        // The two other detectors that open files must not be in
         // the unattended set. Naming them here means adding a third
         // content-reading detector without thinking about this list will
         // leave the test passing for the wrong reason — so the assertion is

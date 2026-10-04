@@ -1,3 +1,5 @@
+import type { Evidence } from './types'
+
 /**
  * Presentation helpers.
  *
@@ -78,4 +80,17 @@ export function scatter(seed: string, salt = 0): number {
     hash = Math.imul(hash, 16777619)
   }
   return ((hash >>> 0) % 100000) / 100000
+}
+
+/** Developer sizes may be lower bounds when a protected or unreadable entry was skipped. */
+export function hasPartialSize(item: { evidence: Evidence[] }): boolean {
+  const state = item.evidence.find((e) => e.kind.kind === 'DEVELOPER_ARTIFACT')?.kind.state
+  const partial = state && typeof state === 'object' && 'output' in state
+    && state.output && typeof state.output === 'object' && 'complete' in state.output
+    && state.output.complete === false
+  return Boolean(partial)
+}
+
+export function findingBytes(item: { size: number; evidence: Evidence[] }): string {
+  return `${hasPartialSize(item) ? 'at least ' : ''}${bytes(item.size)}`
 }

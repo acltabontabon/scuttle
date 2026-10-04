@@ -9,7 +9,7 @@ use std::io::Write;
 
 use crate::model::{human_bytes, RecommendedAction};
 use crate::platform;
-use crate::scanning::{self, IgnoreSet, ScanContext, ScanOptions, SilentObserver};
+use crate::scanning::{self, IgnoreSet, ScanContext, SilentObserver};
 
 /// Passed by the login item, so that starting with the machine does not throw
 /// a window at whoever just logged in.
@@ -176,22 +176,18 @@ fn drawer_report() {
 
 fn dry_run(developer_debris: bool) {
     let platform = platform::current();
-    let roots: Vec<_> = platform
-        .default_scan_roots()
-        .into_iter()
-        .map(|known| known.path)
-        .collect();
-
-    if roots.is_empty() {
+    // Read preferences without creating storage during a dry run.
+    let settings = crate::storage::Store::open_read_only(&platform.data_dir().join("scuttle.db"));
+    let settings = settings
+        .ok()
+        .and_then(|s| s.settings().ok())
+        .unwrap_or_default();
+    let options =
+        scanning::roots::resolve(platform.as_ref(), &settings, None, Some(developer_debris));
+    if options.all_roots().is_empty() {
         eprintln!("Scuttle found nowhere to look on this machine.");
         return;
     }
-
-    let options = ScanOptions {
-        roots,
-        include_developer_debris: developer_debris,
-        ..Default::default()
-    };
 
     let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let ctx = ScanContext::new(
@@ -202,7 +198,7 @@ fn dry_run(developer_debris: bool) {
     );
 
     println!("Rummaging through:");
-    for root in &options.roots {
+    for root in &options.all_roots() {
         println!("  {}", root.display());
     }
     println!("\nNothing will be modified.\n");
@@ -232,7 +228,7 @@ fn dry_run(developer_debris: bool) {
             println!(
                 "\n  {}  ({})  [{}]",
                 candidate.display_name,
-                human_bytes(candidate.size),
+                candidate.size_human(),
                 candidate.category.slug()
             );
             println!("    {}", candidate.path.display());

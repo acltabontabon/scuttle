@@ -114,6 +114,7 @@ impl World {
             bidding: Bidding::User,
             acknowledged: &CautionKind::ALL,
             installs: &NO_INSTALL_AREAS,
+            developer_platform: None,
         }
     }
 
@@ -1335,6 +1336,7 @@ fn real_second_volume_a_whole_folder_is_refused_and_nothing_is_lost() {
         bidding: Bidding::User,
         acknowledged: &CautionKind::ALL,
         installs: &NO_INSTALL_AREAS,
+        developer_platform: None,
     };
     let fingerprint = safety::observe(&dir).unwrap();
     let candidate = CleanupCandidate {

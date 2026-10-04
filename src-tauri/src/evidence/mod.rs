@@ -63,6 +63,10 @@ pub enum EvidenceKind {
     GeneratedContent { reason: String },
     /// A build directory with a project manifest beside it.
     BuildOutputOfProject { manifest: String },
+    /// Full read-only developer verification; absent on older findings.
+    DeveloperArtifact {
+        state: Box<crate::detectors::developer::DeveloperArtifact>,
+    },
     /// The project was worked on recently. Negative for developer debris.
     ProjectRecentlyActive { days: u32 },
     /// A version control directory is at or above this path.
@@ -204,6 +208,38 @@ fn describe(kind: &EvidenceKind) -> (String, i32, Option<Risk>) {
             (format!("{owner} rebuilds this when it needs it"), 30, None)
         }
         GeneratedContent { reason } => (format!("Contents look generated — {reason}"), 25, None),
+        DeveloperArtifact { state } => {
+            let now = chrono::Utc::now().timestamp();
+            let source_age = state
+                .source
+                .age(now)
+                .map(|d| format!("{d} days"))
+                .unwrap_or_else(|| "unknown".into());
+            let output_age = state
+                .output
+                .age(now)
+                .map(|d| format!("{d} days"))
+                .unwrap_or_else(|| "unknown".into());
+            let verified = state.verified(now);
+            (
+                format!(
+                    "{} for {}. Project last modified: {source_age}; output: {output_age}. {}",
+                    state.artifact_kind.label(),
+                    state
+                        .project
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy(),
+                    if verified {
+                        "Build markers and repository safety checked. No relevant running tool was found.".into()
+                    } else {
+                        state.caution(now)
+                    }
+                ),
+                if verified { 80 } else { 0 },
+                if verified { None } else { Some(Risk::Moderate) },
+            )
+        }
         BuildOutputOfProject { manifest } => (
             format!("Build output for the project described by {manifest}"),
             30,

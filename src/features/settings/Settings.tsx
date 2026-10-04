@@ -58,6 +58,8 @@ export function Settings() {
     setLaunchAtLogin,
   } = useStore()
   const [roots, setRoots] = useState<RootDescription[]>([])
+  const [developerRoots, setDeveloperRoots] = useState<string[]>([])
+  const [developerRootsFailed, setDeveloperRootsFailed] = useState(false)
   const [ignored, setIgnored] = useState<IgnoredEntry[] | null>(null)
   const [ignoredFailed, setIgnoredFailed] = useState(false)
   const [rootsFailed, setRootsFailed] = useState(false)
@@ -85,6 +87,7 @@ export function Settings() {
 
   useEffect(() => {
     loadRoots()
+    void api.developerRoots().then(setDeveloperRoots).catch(() => setDeveloperRootsFailed(true))
     void api.about().then(setAbout).catch(() => {
       say('Could not load information about this build.', { tone: 'warn' })
     })
@@ -171,14 +174,65 @@ export function Settings() {
               <Toggle
                 label="Developer build artefacts"
                 hint={
-                  'Finds build output, package caches and dependency folders — node_modules, ' +
-                  'target, .gradle and the like. Off by default because they usually belong ' +
-                  'to something you are still working on. Turning this on only surfaces them ' +
-                  'for review; nothing is removed.'
+                  'Finds build output and dependency folders in your projects. Verified stale ' +
+                  'output is suggested for review. You choose what moves to the recoverable drawer.'
                 }
                 checked={settings.include_developer_debris}
                 onChange={(value) => void patch({ include_developer_debris: value })}
               />
+
+              {settings.include_developer_debris && (
+                <>
+                  <Choice
+                    label="Suggest build output after"
+                    hint="Both the project and its output must be unchanged this long. A later build may take longer. Moving output to the drawer does not free space until it is removed."
+                    options={[14, 30, 60].map((days) => ({ value: days, label: `${days} days` }))}
+                    current={settings.developer_stale_days}
+                    onPick={(days) => void patch({ developer_stale_days: days as 14 | 30 | 60 })}
+                  />
+                  <div className={styles.developerPlaces}>
+                    <h4 className={styles.groupTitle}>Project folders</h4>
+                    <p className={styles.groupNote}>
+                      These additional folders are checked only for developer debris.
+                      {settings.developer_roots.length === 0 && ' Using common workspace locations.'}
+                    </p>
+                    {developerRootsFailed && <p role="alert">Could not discover common project folders. You can still add a folder.</p>}
+                    <ul className={styles.places}>
+                      {(settings.developer_roots.length ? settings.developer_roots : developerRoots).map((path) => (
+                        <li key={path} className={styles.developerPlace}>
+                          <span className={styles.aboutPath} title={path}>{shortPath(path)}</span>
+                          <button className={styles.link} aria-label={`Remove ${path}`}
+                            onClick={() => void patch((latest) => {
+                              const current = latest.developer_roots.length ? latest.developer_roots : developerRoots
+                              if (current.length === 1) {
+                                say('Turn developer build artefacts off to stop checking project folders.', { tone: 'warn' })
+                                return {}
+                              }
+                              return { developer_roots: current.filter((root) => root !== path) }
+                            })}>Remove</button>
+                        </li>
+                      ))}
+                    </ul>
+                    {!settings.developer_roots.length && !developerRoots.length && !developerRootsFailed && (
+                      <p className={styles.groupNote}>No common project folders found. Add one to look there.</p>
+                    )}
+                    <div className={styles.developerActions}>
+                      <button className={styles.link} onClick={() => {
+                        void api.chooseDeveloperRoot().then((path) => {
+                          if (path) void patch((latest) => ({ developer_roots: [...new Set([
+                            ...(latest.developer_roots.length ? latest.developer_roots : developerRoots), path,
+                          ])] }))
+                        }).catch(() => say('Could not open the folder picker.', { tone: 'warn' }))
+                      }}>Add folder</button>
+                      {settings.developer_roots.length > 0 && (
+                        <button className={styles.link} onClick={() => void patch({ developer_roots: [] })}>
+                          Use common folders
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
 
               <Choice
                 label="Large files start at"

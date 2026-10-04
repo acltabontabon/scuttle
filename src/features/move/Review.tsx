@@ -178,7 +178,7 @@ function Item({ item }: { item: PlannedItem }) {
     <li className={styles.item} data-status={item.status}>
       <div className={styles.itemHead}>
         <span className={styles.itemName}>{item.display_name}</span>
-        <span className={styles.itemSize}>{bytes(item.size)}</span>
+        <span className={styles.itemSize}>{item.size_is_lower_bound ? 'at least ' : ''}{bytes(item.size)}</span>
       </div>
       {item.path && <p className={`${styles.path} selectable`}>{item.path}</p>}
       <p className={styles.shape}>

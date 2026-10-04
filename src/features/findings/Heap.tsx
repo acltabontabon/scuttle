@@ -35,6 +35,7 @@ interface HeapProps {
 }
 
 function HeapImpl({ pile, index, weight, onOpen }: HeapProps) {
+  const sizeLabel = `${pile.bytes_is_lower_bound ? 'at least ' : ''}${bytes(pile.bytes)}`
   const hint = CATEGORY_HINT[pile.category]
   const objects = useMemo(() => {
     const total = heapSize(pile.count)
@@ -67,7 +68,7 @@ function HeapImpl({ pile, index, weight, onOpen }: HeapProps) {
       data-actionable={pile.actionable}
       aria-label={`${pile.title} — ${CATEGORY_PLAIN[pile.category]}. ${pile.count} ${
         pile.count === 1 ? 'thing' : 'things'
-      }, ${bytes(pile.bytes)} worth reviewing.`}
+      }, ${sizeLabel} worth reviewing.`}
     >
       <div className={styles.objects}>
         <span className={styles.shadow} />
@@ -98,7 +99,7 @@ function HeapImpl({ pile, index, weight, onOpen }: HeapProps) {
 
       <span className={styles.label}>
         <span className={styles.name}>{pile.title}</span>
-        <span className={styles.size}>{bytes(pile.bytes)}</span>
+        <span className={styles.size}>{sizeLabel}</span>
         <span className={styles.count}>
           {pile.count} {pile.count === 1 ? 'thing' : 'things'}
           {/*

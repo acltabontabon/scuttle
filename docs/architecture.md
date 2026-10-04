@@ -295,8 +295,8 @@ gate, obeys the same ignore lists, and every candidate passes the same safety
 guard. Two differences:
 
 - **It reads no file contents.** `detectors::glance_set` is `default_set`
-  minus `duplicates` (BLAKE3) and `screenshots` (image decode) — the only two
-  detectors that open files. That is what makes it cheap enough to run
+  minus `duplicates` (BLAKE3) and `screenshots` (image decode), with developer
+  verification replaced by metadata-only preliminary discovery. That is what makes it cheap enough to run
   unattended, and it is also what makes it incomplete.
 - **It is bounded in time.** A watchdog sets the same flag the Stop button
   does after ten minutes, so it unwinds through the ordinary cancellation path

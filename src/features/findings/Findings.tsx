@@ -96,6 +96,7 @@ export function Findings() {
       <header className={styles.mast}>
         <div className={styles.poleLeft}>
           <p className={styles.total}>
+            {findings.piles.some((pile) => pile.bytes_is_lower_bound) && <span className={styles.totalUnit}>at least </span>}
             {total.value}
             <span className={styles.totalUnit}>{total.unit}</span>
           </p>

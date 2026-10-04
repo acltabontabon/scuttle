@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { useStore } from '@/app/store'
-import { bytes } from '@/lib/format'
+import { bytes, findingBytes } from '@/lib/format'
 import { Glyph } from '@/visuals/Glyph'
 import { Scuttle, type Mood } from '@/visuals/Scuttle'
 import { outcomeAside, outcomeLine, phaseLine } from './phrasing'
@@ -199,7 +199,7 @@ function LatestCatch() {
     <p className={styles.catch} key={latest.id}>
       <Glyph category={latest.category} size={19} />
       <span className={styles.catchName}>{latest.display_name}</span>
-      <span className={styles.catchSize}>{bytes(latest.size)}</span>
+      <span className={styles.catchSize}>{findingBytes(latest)}</span>
     </p>
   )
 }

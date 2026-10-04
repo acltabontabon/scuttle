@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useStore } from '@/app/store'
 import { MoveControls, MoveLine, MoveTrack } from '@/features/move/MoveStatus'
-import { bytes, bytesParts } from '@/lib/format'
+import { bytes, findingBytes, hasPartialSize, bytesParts } from '@/lib/format'
 import { CAUTION_LABEL, IMPACT_WORDS } from '@/features/move/reviewing'
 import type { Candidate, Category, Eligibility, Risk } from '@/lib/types'
 import { CATEGORY_BLURB, RISK_WORD } from '@/visuals/CategoryMeta'
@@ -152,7 +152,7 @@ export function PileView({
           </h2>
           <p className={styles.blurb}>{CATEGORY_BLURB[pile.category]}</p>
           <p className={styles.tally}>
-            {pile.count} {pile.count === 1 ? 'thing' : 'things'} · {bytes(pile.bytes)} worth
+            {pile.count} {pile.count === 1 ? 'thing' : 'things'} · {pile.bytes_is_lower_bound ? 'at least ' : ''}{bytes(pile.bytes)} worth
             reviewing
           </p>
 
@@ -166,6 +166,7 @@ export function PileView({
           */}
           <div className={styles.meter}>
             <p className={styles.meterValue} data-live={chosen.length > 0 || undefined}>
+              {chosen.some(hasPartialSize) && <span className={styles.meterUnit}>at least </span>}
               {tally.value}
               <span className={styles.meterUnit}>{tally.unit}</span>
             </p>
@@ -208,7 +209,7 @@ export function PileView({
             >
               {chosen.length === 0
                 ? 'Pick something first'
-                : sweepLabel(chosen.length, chosenBytes)}
+                : sweepLabel(chosen.length, chosenBytes, chosen.some(hasPartialSize))}
             </button>
           )}
 
@@ -269,7 +270,7 @@ export function PileView({
                       ? `${item.display_name} — part of an application; open it to decide`
                       : locked
                         ? `${item.display_name} — protected, Scuttle will not move it`
-                        : `Select ${item.display_name}, ${bytes(item.size)}`
+                        : `Select ${item.display_name}, ${findingBytes(item)}`
                   }
                   title={
                     application
@@ -285,7 +286,7 @@ export function PileView({
                   </span>
                   <span className={styles.itemName}>{item.display_name}</span>
                   <span className={styles.itemSize}>
-                    {bytes(item.size)}
+                    {findingBytes(item)}
                     {item.group.length > 1 && (
                       <span className={styles.itemWhole}>
                         of {bytes(item.group_bytes)}
@@ -320,10 +321,11 @@ export function PileView({
  * surprise — "put all 6 in the drawer" is a different decision from "put it
  * in the drawer".
  */
-export function sweepLabel(count: number, size: number): string {
-  if (count === 1) return `Put it in the drawer · ${bytes(size)}`
-  if (count === 2) return `Put both in the drawer · ${bytes(size)}`
-  return `Put all ${count} in the drawer · ${bytes(size)}`
+export function sweepLabel(count: number, size: number, partial = false): string {
+  const sizeLabel = `${partial ? 'at least ' : ''}${bytes(size)}`
+  if (count === 1) return `Put it in the drawer · ${sizeLabel}`
+  if (count === 2) return `Put both in the drawer · ${sizeLabel}`
+  return `Put all ${count} in the drawer · ${sizeLabel}`
 }
 
 /**

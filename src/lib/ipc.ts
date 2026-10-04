@@ -51,6 +51,8 @@ export const EVENTS = {
 type WithScan<T> = T & { scan_id: string }
 
 export const api = {
+  developerRoots: () => invoke<string[]>('developer_roots'),
+  chooseDeveloperRoot: () => invoke<string | null>('choose_developer_root'),
   rummage: (options: { roots?: string[]; includeDeveloperDebris?: boolean } = {}) =>
     invoke<RummageStarted>('rummage', {
       request: {

@@ -28,7 +28,7 @@ against a signature before it is used.
 directory structure, and information the platform already publishes about
 installed applications and running processes.
 
-**Contents, in three specific cases:**
+**Contents, in these specific cases:**
 
 1. **Duplicate detection** hashes file contents (BLAKE3) to confirm that two
    same-size files really are identical. The hash is compared and, for
@@ -37,6 +37,11 @@ installed applications and running processes.
    to find near-identical captures. The image is decoded, hashed and dropped.
 3. **Application metadata** — `Info.plist` on macOS, the uninstall registry on
    Windows — is read to find out what is installed.
+4. **Opt-in developer verification** reads bounded build markers/manifests and
+   the Git metadata needed for repository ownership, index/HEAD tracked paths
+   and ignore rules. It never executes project scripts or Git commands. Source
+   files are measured through metadata, not opened. Background checks skip these
+   content reads and show only preliminary developer findings.
 
 Scuttle does not read documents to classify them. A folder is judged by the
 shape of what is in it — extensions, names, counts — not by opening the files.
@@ -51,7 +56,8 @@ results. These are never opened, never measured, never counted:
 - SSH and GPG keys, cloud credentials, password stores
 - Password vaults (`.kdbx`, `.opvault`, `.keychain`, …)
 - Browser profiles
-- Version-control internals
+- Version-control internals during ordinary traversal; full opt-in developer
+  verification makes the narrow read-only metadata exception described above
 - Cloud-sync folders (Dropbox, OneDrive, iCloud Drive, Google Drive, …)
 - Device backups
 - Sandboxed application containers
@@ -69,6 +75,9 @@ A single SQLite database:
 It holds scan runs, findings, evidence, ignore lists, quarantine records,
 cleanup history and settings. Findings include full paths — they have to, since
 that's what the actions operate on.
+
+Developer evidence stores aggregate metadata fingerprints, modification times,
+project paths and verification results, not source contents or Git history.
 
 It does **not** hold an index of your filesystem. Scuttle is not Spotlight.
 Only files that became findings are recorded, and old scans are pruned on
@@ -120,7 +129,8 @@ first one. When it is on, Scuttle looks around at most once a day.
 **What a background check looks at is deliberately less than a rummage.** It
 uses the same folders, the same ignore lists and the same safety rules, but it
 reads no file contents at all — so it cannot find duplicates or near-identical
-screenshots, both of which need hashing or decoding. The findings screen says
+screenshots, both of which need hashing or decoding. Developer findings are
+preliminary: build markers and Git metadata are not read in background checks. The findings screen says
 so, because an empty pile should not be mistaken for a pile that was searched.
 
 It never moves, deletes or selects anything. Discovery and modification stay
