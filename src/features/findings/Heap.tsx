@@ -2,8 +2,9 @@ import { memo, useMemo } from 'react'
 
 import { bytes, scatter } from '@/lib/format'
 import type { Pile } from '@/lib/types'
-import { CATEGORY_HINT, CATEGORY_PLAIN } from '@/visuals/CategoryMeta'
+import { CATEGORY_BLURB, CATEGORY_HINT, CATEGORY_PLAIN } from '@/visuals/CategoryMeta'
 import { Glyph } from '@/visuals/Glyph'
+import { Icon } from '@/visuals/Icon'
 
 import styles from './Heap.module.css'
 
@@ -36,7 +37,7 @@ interface HeapProps {
 
 function HeapImpl({ pile, index, weight, onOpen }: HeapProps) {
   const sizeLabel = `${pile.bytes_is_lower_bound ? 'at least ' : ''}${bytes(pile.bytes)}`
-  const hint = CATEGORY_HINT[pile.category]
+  const hint = CATEGORY_HINT[pile.category] ?? CATEGORY_BLURB[pile.category]
   const objects = useMemo(() => {
     const total = heapSize(pile.count)
     return Array.from({ length: total }, (_, i) => {
@@ -66,11 +67,14 @@ function HeapImpl({ pile, index, weight, onOpen }: HeapProps) {
       style={{ '--heap-scale': scale.toFixed(3) } as React.CSSProperties}
       onClick={onOpen}
       data-actionable={pile.actionable}
+      data-category={pile.category}
       aria-label={`${pile.title} — ${CATEGORY_PLAIN[pile.category]}. ${pile.count} ${
         pile.count === 1 ? 'thing' : 'things'
       }, ${sizeLabel} worth reviewing.`}
     >
-      <div className={styles.objects}>
+      <span className={styles.index} aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+      <span className={styles.openArrow}><Icon name="arrow" size={17} /></span>
+      <div className={styles.objects} aria-hidden="true">
         <span className={styles.shadow} />
         {objects.map((object) => (
           <span
@@ -84,7 +88,7 @@ function HeapImpl({ pile, index, weight, onOpen }: HeapProps) {
                 '--y': `${-object.y}px`,
                 '--r': `${object.rotate}deg`,
                 transform: `translate(calc(-50% + ${object.x}px), ${-object.y}px) rotate(${object.rotate}deg)`,
-                animation: `settle 620ms cubic-bezier(0.22, 1.2, 0.36, 1) ${object.delay}ms backwards`,
+                animationDelay: `${object.delay}ms`,
               } as React.CSSProperties
             }
           >
@@ -101,7 +105,7 @@ function HeapImpl({ pile, index, weight, onOpen }: HeapProps) {
         <span className={styles.name}>{pile.title}</span>
         <span className={styles.size}>{sizeLabel}</span>
         <span className={styles.count}>
-          {pile.count} {pile.count === 1 ? 'thing' : 'things'}
+          {pile.count} {pile.count === 1 ? 'item' : 'items'}
           {/*
             A mark only where there is something to mark. "you decide" sat
             under almost every pile, which made it wallpaper rather than

@@ -8,8 +8,8 @@ import styles from './DryRun.module.css'
 /**
  * Developer mode: classify everything, change nothing.
  *
- * This is the one screen in Scuttle that shows full filesystem paths, and it
- * shows them because you explicitly asked what the detectors would do on
+ * Like dependency cache preview, this shows full filesystem paths because
+ * you explicitly asked what the detectors would do on
  * *this* machine. It is the tool for answering "why did it say that" without
  * having to trust a screenshot.
  */
@@ -58,6 +58,17 @@ export function DryRun() {
           <Group title="Would put in front of you" rows={report.would_review} />
           <Group title="Would only point at" rows={report.would_surface} />
 
+          {report.dependency_caches && <section className={styles.group}>
+            <h4 className={styles.groupTitle}>Dependency cache preview</h4>
+            <p>{report.dependency_caches.complete ? '' : 'Partial inventory · '}{report.dependency_caches.kept} kept · {report.dependency_caches.insufficient_evidence} with insufficient evidence. Nothing is moved.</p>
+            {report.dependency_caches.notes.map((note) => <p key={note}>{note}</p>)}
+            {report.dependency_caches.entries.slice(0, 40).map((entry) => <div key={entry.id} className={styles.row}>
+              <p>{entry.kind} · {entry.artifact}{entry.version && ` @ ${entry.version}`} · {entry.decision === 'kept' ? 'Kept' : 'Insufficient evidence'}</p>
+              <p className={styles.rowPath}>{entry.path}</p>
+              {entry.explanations.map((explanation) => <p key={explanation}>{explanation}</p>)}
+            </div>)}
+            {report.dependency_caches.entries.length > 40 && <p>Showing 40 entries. Use Dependency caches in Settings to browse all reported entries.</p>}
+          </section>}
           <div className={styles.notes}>
             {report.notes.map((note) => (
               <div key={note}>{note}</div>

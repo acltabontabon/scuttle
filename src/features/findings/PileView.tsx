@@ -1,3 +1,4 @@
+import { OrganizationOffers } from '@/features/organization/Organization'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useStore } from '@/app/store'
@@ -8,7 +9,9 @@ import type { Candidate, Category, Eligibility, Risk } from '@/lib/types'
 import { CATEGORY_BLURB, RISK_WORD } from '@/visuals/CategoryMeta'
 import { Glyph } from '@/visuals/Glyph'
 import { Scuttle } from '@/visuals/Scuttle'
+import { Icon } from '@/visuals/Icon'
 import { applyPick } from './selection'
+import { browse, type SortOrder } from './browse'
 
 import shared from './Findings.module.css'
 import styles from './PileView.module.css'
@@ -42,6 +45,8 @@ export function PileView({
 }) {
   const { findings, go, openDetail, quarantineMany, move, moving, cancelMove } = useStore()
   const pile = findings?.piles.find((p) => p.category === category)
+  const [query, setQuery] = useState('')
+  const [sort, setSort] = useState<SortOrder>('scan')
   // Arriving from "Review suggestion" starts with Scuttle's picks ticked, so
   // the first thing shown is what it would act on — not a blank list and a
   // separate button to find out.
@@ -60,7 +65,8 @@ export function PileView({
   const controls = useRef<HTMLDivElement>(null)
   const title = useRef<HTMLHeadingElement>(null)
 
-  const shown = useMemo(() => pile?.items ?? [], [pile])
+  const items = useMemo(() => pile?.items ?? [], [pile])
+  const shown = useMemo(() => browse(items, query, sort), [items, query, sort])
 
   // The selection stays exactly as it was while work runs — the meter and the
   // list keep telling the truth about what was asked for. Nothing needs
@@ -89,7 +95,8 @@ export function PileView({
    */
   // Protected things never; application folders not in a batch either — they
   // are moved, if at all, one at a time from their own detail sheet.
-  const selectable = useMemo(() => shown.filter((item) => batchable(item)), [shown])
+  const selectable = useMemo(() => items.filter((item) => batchable(item)), [items])
+  const visibleSelectable = useMemo(() => shown.filter((item) => batchable(item)), [shown])
 
   if (!pile) {
     return (
@@ -108,8 +115,9 @@ export function PileView({
 
   const chosen = selectable.filter((item) => picked.has(item.id))
   const chosenBytes = chosen.reduce((total, item) => total + item.size, 0)
-  const allPicked = selectable.length > 0 && chosen.length === selectable.length
-  const suggested = selectable.filter((item) => item.assessment?.eligibility === 'suggested')
+  const allPicked = visibleSelectable.length > 0 && visibleSelectable.every((item) => picked.has(item.id))
+  const suggested = visibleSelectable.filter((item) => item.assessment?.eligibility === 'suggested')
+  const hiddenPicked = chosen.filter((item) => !shown.some((visible) => visible.id === item.id)).length
   const tally = bytesParts(chosenBytes)
   const share = pile.bytes > 0 ? Math.min(1, chosenBytes / pile.bytes) : 0
 
@@ -127,7 +135,7 @@ export function PileView({
   const click = (id: string, extend: boolean) => {
     const from = extend ? anchor.current : null
     anchor.current = id
-    setPicked((current) => applyPick(selectable, current, id, from))
+    setPicked((current) => applyPick(visibleSelectable, current, id, from))
   }
 
   return (
@@ -140,7 +148,7 @@ export function PileView({
         */}
         <aside className={styles.plate}>
           <button className={styles.back} onClick={() => go({ name: 'findings' })}>
-            ← Everything
+            ← All findings
           </button>
 
           <span className={styles.crest} aria-hidden="true">
@@ -151,6 +159,7 @@ export function PileView({
             {pile.title}
           </h2>
           <p className={styles.blurb}>{CATEGORY_BLURB[pile.category]}</p>
+          {(category === 'screenshots' || category === 'installers') && <OrganizationOffers kind={category} />}
           <p className={styles.tally}>
             {pile.count} {pile.count === 1 ? 'thing' : 'things'} · {pile.bytes_is_lower_bound ? 'at least ' : ''}{bytes(pile.bytes)} worth
             reviewing
@@ -221,15 +230,22 @@ export function PileView({
             <div className={styles.picker}>
               <button
                 className={styles.pickAll}
-                disabled={moving}
+                disabled={moving || visibleSelectable.length === 0}
                 onClick={() => {
-                  setPicked(allPicked ? new Set() : new Set(selectable.map((i) => i.id)))
+                  setPicked((current) => {
+                    const next = new Set(current)
+                    for (const item of visibleSelectable) {
+                      if (allPicked) next.delete(item.id)
+                      else next.add(item.id)
+                    }
+                    return next
+                  })
                   anchor.current = null
                 }}
               >
-                {allPicked ? 'Clear' : `All ${selectable.length}`}
+                {allPicked ? 'Deselect shown' : `Select ${visibleSelectable.length} shown`}
               </button>
-              {suggested.length > 0 && suggested.length < selectable.length && (
+              {suggested.length > 0 && suggested.length < visibleSelectable.length && (
                 <button
                   className={styles.pickAll}
                   disabled={moving}
@@ -238,7 +254,7 @@ export function PileView({
                     anchor.current = null
                   }}
                 >
-                  Scuttle&rsquo;s {suggested.length}
+                  {suggested.length} suggested
                 </button>
               )}
               <span className={styles.pickTip}>Shift-click for a run</span>
@@ -251,7 +267,23 @@ export function PileView({
           four hundred is a field to sweep through, not a four-hundred-row
           scroll down one narrow channel.
         */}
-        <ul className={styles.items}>
+        <div className={styles.field}>
+          <div className={styles.toolbar}>
+            <label className={styles.search}>
+              <Icon name="search" size={16} />
+              <input type="search" aria-label="Search this category" placeholder="Find a file or folder…" value={query} onChange={(event) => setQuery(event.target.value)} />
+            </label>
+            <select aria-label="Sort findings" value={sort} onChange={(event) => setSort(event.target.value as SortOrder)}>
+              <option value="scan">Scan order</option>
+              <option value="largest">Largest first</option>
+              <option value="name">Name A–Z</option>
+            </select>
+          </div>
+          <div className={styles.browseStatus} role="status">
+            <span>{shown.length} of {items.length} shown{hiddenPicked > 0 ? ` · ${hiddenPicked} selected outside this search` : ''}</span>
+            {chosen.length > 0 && <button disabled={moving} onClick={() => { setPicked(new Set()); anchor.current = null }}>Clear selection</button>}
+          </div>
+        <ul className={styles.items} aria-label={`${pile.title} findings`}>
           {shown.map((item) => {
             const locked = !batchable(item)
             const application = item.assessment?.eligibility === 'explicit_only'
@@ -304,13 +336,20 @@ export function PileView({
             )
           })}
 
-          {pile.count > shown.length && (
+          {shown.length === 0 && (
+            <li className={styles.noMatches}>
+              <p>No files match &ldquo;{query}&rdquo;.</p>
+              <button onClick={() => setQuery('')}>Clear search</button>
+            </li>
+          )}
+          {pile.count > items.length && (
             <li className={styles.more}>
-              Showing {shown.length} of {pile.count}. Deal with these and the rest come up
+              Loaded {items.length} of {pile.count}. Deal with these and the rest come up
               next time.
             </li>
           )}
         </ul>
+        </div>
       </div>
     </div>
   )

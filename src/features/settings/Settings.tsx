@@ -32,6 +32,7 @@ import { useUpdates } from '@/features/updates/UpdateProvider'
 import { describe as describeUpdate } from '@/features/updates/view'
 import updateStyles from '@/features/updates/Updates.module.css'
 import { DryRun } from './DryRun'
+import { DependencyCaches } from './DependencyCaches'
 import { Ignored } from './Ignored'
 
 import styles from './Settings.module.css'
@@ -166,6 +167,8 @@ export function Settings() {
                 </p>
               )}
             </section>
+
+            <DependencyCaches settings={settings} patch={patch} commonProjects={developerRoots} />
 
             <section className={styles.group}>
               <h3 className={styles.groupTitle}>What Scuttle looks for</h3>

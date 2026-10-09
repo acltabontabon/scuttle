@@ -80,11 +80,16 @@ Settings → Diagnostics → Open diagnostics
 
 Classifies everything and changes nothing. Prints what would be quarantined,
 what would be reviewed, what would merely be surfaced, and the evidence behind
-each — with full paths, which is the only place they appear.
+each, with full paths shown because the report was explicitly requested.
+The dependency cache preview in Settings also shows full paths.
 
 From a terminal, use `scuttle --dry-run`, or
 `scuttle --dry-run --developer-debris` to include build output. These commands
 classify files and print a report; they do not move files or save a scan.
+Both desktop and terminal dry runs include the dependency cache preview when
+its separate setting is enabled, and honor saved Keep/ignore decisions.
+The desktop command runs on a blocking worker while holding the operation gate,
+so cache inspection cannot freeze the window or overlap a move.
 
 The browser workbench uses sample data. Its controls verify presentation;
 filesystem operations, operating-system permissions and updater installation
@@ -93,6 +98,26 @@ need a native build. See [releasing.md](releasing.md) for the release checks.
 It also tells you when the ground truth was missing: an unreadable process
 list, or no installed applications discovered. In that state ghost detection
 cannot be trusted, and knowing that up front saves debugging the wrong thing.
+
+## Dependency cache preview
+
+Settings → Dependency caches → Preview dependency caches → Inspect dependency
+caches starts a foreground, read-only inspection. Enable it separately from
+Developer build artefacts. It uses the shared project-folder preferences, plus
+known cache locations and explicitly added custom locations. It never runs in
+background checks, executes project scripts or downloads dependencies.
+
+Regression fixtures cover queued cancellation and retry, disappearing entries,
+Keep decisions inside version directories, plugin/dependency nesting, shared
+lockfile references, pnpm executable blobs and recovery of legacy drawer items.
+Reference indexes are built once per inspection; matching each cache entry does
+not walk every project lockfile again. Metadata classification uses the existing
+stat result rather than reopening each entry for its identity.
+
+Current adapters produce kept or insufficient-evidence results only. Do not
+turn incomplete coverage or modification dates into unused-dependency evidence.
+Supported layouts and remaining limits are described in
+[README](../README.md#dependency-cache-preview) and [safety.md](safety.md).
 
 ## Logging
 
@@ -136,8 +161,10 @@ Three layers:
   every text colour clears WCAG AA against its surface in both themes — the
   light palette once shipped small text at 2.76:1.
 
-No test touches a real home directory. If you need a new tree, extend
-`src-tauri/tests/fixtures.rs`.
+File-changing tests use temporary fixture trees, never real user files.
+If you need a new tree, extend `src-tauri/tests/fixtures.rs` or the dependency
+cache fixture harness. The platform smoke tests make the narrow read-only
+host checks described above.
 
 ## Testing platform assumptions
 
@@ -174,6 +201,7 @@ src-tauri/src/           Rust
   commands/              IPC surface, app state, dry run
   scanning/              traversal and orchestration
   detectors/             one file per detector
+  dependency_cache/      bounded Maven/Gradle/Node inventory and retention policy
   evidence/              observations → verdicts
   safety/                paths, protected table, action gate
   quarantine/            move, restore, remove

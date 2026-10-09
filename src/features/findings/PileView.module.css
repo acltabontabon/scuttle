@@ -521,3 +521,31 @@
     padding-inline: var(--room);
   }
 }
+
+/* Tools sit on a quiet rule, leaving the findings as objects on the paper. */
+.inner { gap: 40px; }
+.field { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.toolbar { display: flex; align-items: center; gap: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--rule); }
+.search { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; color: var(--ink-soft); }
+.search input { width: 100%; min-width: 0; border: 0; border-bottom: 1px solid transparent; background: transparent; padding: 8px 4px; user-select: text; }
+.search input::placeholder { color: var(--ink-faint); }
+.toolbar select { max-width: 150px; padding: 8px; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper-raised); font-size: var(--type-small); }
+.browseStatus { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 12px; font-size: var(--type-small); color: var(--ink-soft); }
+.browseStatus button, .noMatches button { text-decoration: underline; text-underline-offset: 4px; padding-block: 5px; }
+.items { grid-template-columns: 1fr; flex: 1; margin-bottom: 0; gap: 0; padding-right: 8px; }
+.item { gap: 10px 14px; }
+.itemVerdict { grid-column: 2 / -1; justify-content: flex-start; flex-wrap: wrap; }
+.itemRemark { grid-column: 2 / -1; }
+.pickTip { color: var(--ink-faint); }
+.noMatches { padding: 40px 12px; text-align: center; color: var(--ink-soft); }
+.noMatches p { margin-bottom: 10px; }
+@media (max-width: 900px) {
+  .pile { overflow-y: auto; padding: 24px 20px; }
+  .inner { display: flex; flex-direction: column; gap: 24px; height: auto; }
+  .plate { overflow: visible; }
+  .crest { display: none; }
+  .meter { margin-top: 16px; }
+  .field { min-height: 300px; }
+  .items { overflow: visible; mask-image: none; }
+}
+@media (max-width: 480px) { .toolbar { flex-wrap: wrap; } .search { flex-basis: 100%; } }

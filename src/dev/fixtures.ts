@@ -400,6 +400,7 @@ export const SETTINGS: Settings = {
   include_developer_debris: false,
   developer_roots: [],
   developer_stale_days: 14,
+  dependency_caches: { enabled: false, retention_days: 90, locations: [] },
   quarantine_retention_days: 14,
   heavy_threshold: 1024 ** 3,
   appearance: 'system',

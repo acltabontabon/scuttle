@@ -39,6 +39,7 @@ pub struct Settings {
     /// Empty selects common workspace locations.
     pub developer_roots: Vec<PathBuf>,
     pub developer_stale_days: u32,
+    pub dependency_caches: crate::dependency_cache::Preferences,
     /// 7, 14 or 30.
     pub quarantine_retention_days: u32,
     pub heavy_threshold: u64,
@@ -95,6 +96,7 @@ impl Default for Settings {
             include_developer_debris: false,
             developer_roots: Vec::new(),
             developer_stale_days: 14,
+            dependency_caches: Default::default(),
             quarantine_retention_days: 14,
             heavy_threshold: 1024 * 1024 * 1024,
             appearance: "system".into(),
@@ -324,6 +326,53 @@ pub struct Store {
 }
 
 impl Store {
+    pub fn organization_get<T: serde::de::DeserializeOwned>(
+        &self,
+        kind: &str,
+        id: &str,
+    ) -> Result<Option<T>> {
+        let raw: Option<String> = self
+            .lock()
+            .query_row(
+                "SELECT payload FROM organization_documents WHERE kind=?1 AND id=?2",
+                params![kind, id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        raw.map(|raw| serde_json::from_str(&raw).map_err(Into::into))
+            .transpose()
+    }
+
+    pub fn organization_put<T: Serialize>(&self, kind: &str, id: &str, value: &T) -> Result<()> {
+        let raw = serde_json::to_string(value)?;
+        let conn = self.lock();
+        // A filesystem journal must survive a power loss before a move starts.
+        conn.execute_batch("PRAGMA synchronous = FULL")?;
+        let result = conn.execute(
+            "INSERT INTO organization_documents(kind,id,payload,updated_unix) VALUES(?1,?2,?3,?4)
+             ON CONFLICT(kind,id) DO UPDATE SET payload=excluded.payload,updated_unix=excluded.updated_unix",
+            params![kind, id, raw, chrono::Utc::now().timestamp()],
+        );
+        let reset = conn.execute_batch("PRAGMA synchronous = NORMAL");
+        result?;
+        reset?;
+        Ok(())
+    }
+
+    pub fn organization_list<T: serde::de::DeserializeOwned>(
+        &self,
+        kind: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<T>> {
+        let conn = self.lock();
+        let mut stmt = conn.prepare("SELECT payload FROM organization_documents WHERE kind=?1 ORDER BY updated_unix DESC,id DESC LIMIT ?2 OFFSET ?3")?;
+        let rows = stmt.query_map(params![kind, limit as i64, offset as i64], |r| {
+            r.get::<_, String>(0)
+        })?;
+        rows.map(|r| Ok(serde_json::from_str(&r?)?)).collect()
+    }
+
     /// A dry run may read preferences but must never create or migrate storage.
     pub fn open_read_only(path: &Path) -> Result<Store> {
         Ok(Store {

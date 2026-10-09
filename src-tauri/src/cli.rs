@@ -9,7 +9,7 @@ use std::io::Write;
 
 use crate::model::{human_bytes, RecommendedAction};
 use crate::platform;
-use crate::scanning::{self, IgnoreSet, ScanContext, SilentObserver};
+use crate::scanning::{self, ScanContext, SilentObserver};
 
 /// Passed by the login item, so that starting with the machine does not throw
 /// a window at whoever just logged in.
@@ -177,15 +177,33 @@ fn drawer_report() {
 fn dry_run(developer_debris: bool) {
     let platform = platform::current();
     // Read preferences without creating storage during a dry run.
-    let settings = crate::storage::Store::open_read_only(&platform.data_dir().join("scuttle.db"));
-    let settings = settings
-        .ok()
+    let store = crate::storage::Store::open_read_only(&platform.data_dir().join("scuttle.db")).ok();
+    let settings = store
+        .as_ref()
         .and_then(|s| s.settings().ok())
+        .unwrap_or_default();
+    let ignores = store
+        .as_ref()
+        .and_then(|s| s.ignore_set().ok())
         .unwrap_or_default();
     let options =
         scanning::roots::resolve(platform.as_ref(), &settings, None, Some(developer_debris));
     if options.all_roots().is_empty() {
-        eprintln!("Scuttle found nowhere to look on this machine.");
+        if settings.dependency_caches.enabled {
+            // Cache locations have their own explicit boundary. An empty
+            // ordinary root list must not suppress a cache-only preview or
+            // start unrelated detector probes outside the requested roots.
+            let report = crate::dependency_cache::inspect_configured(
+                platform.as_ref(),
+                &settings,
+                &ignores,
+                chrono::Utc::now().timestamp(),
+                &|| false,
+            );
+            let _ = write_cache_report(&mut std::io::stdout().lock(), &report);
+        } else {
+            eprintln!("Scuttle found nowhere to look on this machine.");
+        }
         return;
     }
 
@@ -193,7 +211,7 @@ fn dry_run(developer_debris: bool) {
     let ctx = ScanContext::new(
         options.clone(),
         std::sync::Arc::clone(&platform),
-        IgnoreSet::default(),
+        ignores,
         cancel,
     );
 
@@ -252,6 +270,17 @@ fn dry_run(developer_debris: bool) {
         println!();
     }
 
+    if settings.dependency_caches.enabled {
+        let report = crate::dependency_cache::inspect_configured(
+            platform.as_ref(),
+            &settings,
+            &ctx.ignores,
+            ctx.now_unix,
+            &|| false,
+        );
+        let _ = write_cache_report(&mut std::io::stdout().lock(), &report);
+    }
+
     let summary = &outcome.summary;
     println!(
         "{} files looked at in {} ms. {} findings. Nothing modified.",
@@ -280,5 +309,105 @@ fn dry_run(developer_debris: bool) {
         println!("No installed applications discovered — ghost detection is untrustworthy here.");
     } else {
         println!("{} installed applications known.", ctx.apps.len());
+    }
+}
+
+/// CLI output is bounded just like the desktop page. Full paths are printed
+/// only because the person explicitly requested a dry run.
+fn write_cache_report(
+    out: &mut impl Write,
+    report: &crate::dependency_cache::CacheReport,
+) -> std::io::Result<()> {
+    use crate::dependency_cache::policy::Decision;
+    writeln!(out, "Dependency cache preview: {}{} across {} recognized entries; {} kept, {} with insufficient evidence. Nothing moved.",
+        if report.complete { "" } else { "Partial inventory · at least " }, human_bytes(report.bytes),
+        report.entries.len(), report.kept, report.insufficient_evidence)?;
+    writeln!(out, "  Retention: {} days", report.retention_days)?;
+    for entry in report.entries.iter().take(40) {
+        writeln!(
+            out,
+            "  {} · {}{} · {}{} · {}",
+            entry.kind.label(),
+            entry.artifact,
+            entry
+                .version
+                .as_ref()
+                .map(|v| format!(" @ {v}"))
+                .unwrap_or_default(),
+            if entry.complete { "" } else { "at least " },
+            human_bytes(entry.bytes),
+            match entry.decision {
+                Decision::Kept => "Kept",
+                Decision::InsufficientEvidence => "Insufficient evidence",
+                Decision::Eligible => "Eligible for review",
+            }
+        )?;
+        writeln!(out, "    {}", entry.path.display())?;
+        for reason in &entry.explanations {
+            writeln!(out, "    {reason}")?;
+        }
+    }
+    if report.entries.len() > 40 {
+        writeln!(
+            out,
+            "  … and {} more; inspect the full report in Settings → Dependency caches.",
+            report.entries.len() - 40
+        )?;
+    }
+    for note in &report.notes {
+        writeln!(out, "  {note}")?;
+    }
+    writeln!(out)
+}
+
+#[cfg(test)]
+mod cache_report_tests {
+    use super::*;
+    #[test]
+    fn terminal_preview_reports_partial_data_and_bounds_its_output() {
+        use crate::dependency_cache::{
+            policy::{Decision, Origin},
+            CacheEntry, CacheKind,
+        };
+        let mut report = crate::dependency_cache::inspect(
+            &[],
+            &[],
+            &crate::safety::ProtectedPaths::for_home("/fixture"),
+            &crate::scanning::IgnoreSet::default(),
+            90,
+            2_000_000_000,
+            &|| false,
+        );
+        report.complete = false;
+        report.insufficient_evidence = 45;
+        report.entries = (0..45)
+            .map(|i| CacheEntry {
+                id: format!("{i}"),
+                kind: CacheKind::Maven,
+                repository: "/fixture/repository".into(),
+                path: format!("/fixture/repository/entry-{i}").into(),
+                artifact: format!("entry-{i}"),
+                version: Some("1.0".into()),
+                bytes: 0,
+                complete: false,
+                metadata_fingerprint: String::new(),
+                newest_modified_unix: None,
+                last_used_unix: None,
+                origin: Origin::Unknown,
+                projects: vec![],
+                decision: Decision::InsufficientEvidence,
+                reasons: vec![],
+                explanations: vec!["Last use is unknown.".into()],
+            })
+            .collect();
+        let mut output = Vec::new();
+        write_cache_report(&mut output, &report).unwrap();
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.contains("Partial inventory · at least"));
+        assert!(text.contains("entry-39"));
+        assert!(!text.contains("entry-40"));
+        assert!(text.contains("5 more"));
+        assert!(text.contains("Nothing moved"));
+        assert!(text.contains("Last use is unknown."));
     }
 }

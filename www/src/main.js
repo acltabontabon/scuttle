@@ -133,8 +133,8 @@ function setUpTitle() {
             const ch = document.createElement('span');
             ch.className = 'ch';
             ch.textContent = letter;
-            ch.style.setProperty('--d', `${120 + n * 28 + rand(n) * 80}ms`);
-            ch.style.setProperty('--r', `${(rand(n + 9) - 0.5) * 50}deg`);
+            ch.style.setProperty('--d', `${n * 12 + rand(n) * 35}ms`);
+            ch.style.setProperty('--r', `${(rand(n + 9) - 0.5) * 12}deg`);
             n += 1;
             word.append(ch);
           }
@@ -205,7 +205,7 @@ const LINES = [
   'Nothing moved. I’m a crab, not a landlord.',
   'Filed under: future you’s problem.',
   'I only take what you’ve looked at.',
-  'Everything comes back. That’s the rule.',
+  'You choose what stays. I just find it.',
   'Eleven screenshots of the same thing? Bold.',
 ];
 
@@ -422,7 +422,7 @@ function setUpReview() {
     move.disabled = true;
     box.disabled = true;
     if (flyer && !still) flyer.dataset.go = 'true';
-    if (done) done.textContent = 'In the Drawer. Nothing deleted — put it back any time.';
+    if (done) done.textContent = 'In the Drawer. Nothing deleted — restore it while it is still there.';
     setTimeout(() => {
       if (flyer) flyer.dataset.go = 'false';
       box.checked = false;
@@ -622,8 +622,35 @@ function setUpDemo() {
   let video = null;
   const show = (playing) => {
     play.dataset.playing = String(playing);
-    if (label) label.textContent = playing ? 'Pause' : 'Play the demo';
+    if (label) label.textContent = playing ? 'Pause walkthrough' : 'Play recorded walkthrough';
   };
+  const previews = {
+    findings: {
+      src: './media/ui-findings.jpg',
+      alt: 'Updated interface preview with sample findings: illustrated categories, clear review actions, and help with skipped places.',
+    },
+    home: {
+      src: './media/ui-home.jpg',
+      alt: 'Updated Scuttle home preview: Less clutter, More possibility, a Rummage button, and an illustrated little helper.',
+    },
+  };
+  const choices = [...document.querySelectorAll('[data-preview]')];
+  for (const choice of choices) {
+    choice.disabled = false;
+    choice.addEventListener('click', () => {
+      const preview = previews[choice.dataset.preview];
+      if (!preview || !poster) return;
+      video?.pause();
+      video?.remove();
+      video = null;
+      if (!poster.isConnected) figure.insertBefore(poster, play);
+      poster.src = preview.src;
+      poster.alt = preview.alt;
+      choices.forEach((button) => button.setAttribute('aria-pressed', String(button === choice)));
+      show(false);
+      if (caption) caption.textContent = 'Updated interface preview with sample data. The recorded walkthrough shows the previous interface.';
+    });
+  }
   play.addEventListener('click', () => {
     if (!video) {
       video = document.createElement('video');
@@ -631,12 +658,13 @@ function setUpDemo() {
       video.muted = true;
       video.loop = true;
       video.playsInline = true;
-      video.setAttribute('aria-label', poster?.alt ?? 'A run through Scuttle');
+      video.setAttribute('aria-label', 'Recorded walkthrough of the previous Scuttle interface, using demonstration files');
       video.addEventListener('play', () => show(true));
       video.addEventListener('pause', () => show(false));
       figure.insertBefore(video, play);
       poster?.remove();
-      if (caption) caption.textContent = 'Recorded from the running app against invented demonstration files. No real file was touched.';
+      choices.forEach((button) => button.setAttribute('aria-pressed', 'false'));
+      if (caption) caption.textContent = 'Recorded walkthrough of the previous interface, using invented demonstration files. No real file was touched.';
     }
     if (video.paused) video.play().catch(() => show(false));
     else video.pause();
@@ -721,7 +749,7 @@ function setUpMagnets() {
 
 function setUpReveals() {
   const targets = [...document.querySelectorAll('.reveal')];
-  document.querySelectorAll('.hero .reveal').forEach((el, i) => el.style.setProperty('--delay', `${900 + i * 140}ms`));
+  document.querySelectorAll('.hero .reveal').forEach((el, i) => el.style.setProperty('--delay', `${120 + i * 90}ms`));
   document.querySelectorAll('.reasons li').forEach((li, i) => li.style.setProperty('--i', String(i)));
   if (still || !('IntersectionObserver' in window)) {
     targets.forEach((t) => t.classList.add('revealed'));
@@ -737,6 +765,7 @@ function setUpReveals() {
     },
     { rootMargin: '0px 0px -8% 0px', threshold: 0 },
   );
+  document.documentElement.classList.add('js-reveals');
   targets.forEach((t) => watcher.observe(t));
   // The hero is above the fold: readable now, whatever the observer does.
   setTimeout(() => document.querySelectorAll('.hero .reveal').forEach((t) => t.classList.add('revealed')), 50);

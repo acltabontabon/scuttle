@@ -94,9 +94,13 @@ time. One copy, one place to update.
 driving the real application against an invented home directory: `demo.gif`
 and `demo.mp4` are the same recording, and `findings.png` and `drawer.png`
 are frames of it, so a screenshot cannot drift from the run it came from.
-Nothing on the site is a mock-up.
+The refreshed interface previews, `ui-home.jpg` and `ui-findings.jpg`, are captured
+from the real frontend at 1180 × 800 using the design workbench and invented
+fixture data. The site labels them as interface previews. The original recording
+is retained and labelled as showing the previous interface.
 
-The hero shows `findings.png` and offers the recording behind a button, so
+The showcase lets visitors switch between the updated home and findings previews
+and offers the original recording behind a button, so
 nobody downloads a video to read a paragraph. The offer stands under reduced
 motion — nothing plays until it is pressed.
 

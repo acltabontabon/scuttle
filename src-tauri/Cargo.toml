@@ -1,6 +1,6 @@
 [package]
 name = "scuttle"
-version = "0.1.1"
+version = "0.2.0"
 description = "Your computer leaves stuff everywhere. Scuttle finds it."
 authors = ["Scuttle contributors"]
 license = "Apache-2.0"
@@ -37,6 +37,10 @@ tokio = { version = "1", default-features = false, features = ["time", "sync"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.9"
+# Bounded, non-executing POM inspection; external entities are rejected.
+quick-xml = "0.42"
+# Match npm lockfile integrity to content-addressed cache entries.
+base64 = "0.22"
 thiserror = "2"
 rusqlite = { version = "0.37", features = ["bundled"] }
 walkdir = "2"

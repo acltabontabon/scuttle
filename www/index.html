@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Scuttle — a little creature for the files you forgot about</title>
+    <title>Scuttle — less clutter, more possibility</title>
     <meta
       name="description"
       content="A desktop app for macOS and Windows that rummages through the forgotten corners of your computer — old installers, screenshots, duplicates, large files, leftovers from software you removed — shows you why it noticed each one, and never moves anything you have not seen."
@@ -14,10 +14,10 @@
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Scuttle" />
     <meta property="og:url" content="https://acltabontabon.com/scuttle/" />
-    <meta property="og:title" content="Scuttle — a little creature for the files you forgot about" />
+    <meta property="og:title" content="Scuttle — less clutter, more possibility" />
     <meta
       property="og:description"
-      content="Rummage through the forgotten corners of your Mac or PC. See what turned up, and why. Nothing moves without you, and everything comes back."
+      content="Rummage through the forgotten corners of your Mac or PC. See what turned up, and why. See the reasons, choose what moves, and restore it while it is still in the drawer."
     />
     <meta property="og:image" content="https://acltabontabon.com/scuttle/social.png" />
     <meta property="og:image:alt" content="Scuttle, a small round crab-like creature, sitting on warm paper beside the word Scuttle." />
@@ -25,7 +25,7 @@
 
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./icon-180.png" />
-    <meta name="theme-color" content="#f3ece0" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#f5f2eb" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#1d1916" media="(prefers-color-scheme: dark)" />
 
     <link rel="stylesheet" href="./src/styles.css" />
@@ -67,9 +67,9 @@
         <div class="hero-strewn" id="strewn" aria-hidden="true"></div>
 
         <div class="hero-words">
-          <p class="overline reveal">macOS &amp; Windows · free &amp; open source · 0.1</p>
+          <p class="overline reveal">A little room to breathe · macOS &amp; Windows</p>
           <h1 class="hero-title" id="hero-title">
-            A little creature for the files <em>you forgot about.</em>
+            Less clutter. <br /><em>More possibility.</em>
           </h1>
 
           <p class="lede reveal">
@@ -97,7 +97,7 @@
               <p class="picker-foot">Not sure which Mac? Apple menu → About This Mac. “Apple M1” or later means Apple silicon.</p>
             </details>
           </div>
-          <p class="promise reveal">Nothing moves until you've seen it. Everything can come back.</p>
+          <p class="promise reveal">Free &amp; open source. Your files stay put until you decide.</p>
         </div>
 
         <!-- Scuttle, on the floor. Decorative: everything it says is also
@@ -146,8 +146,8 @@
           <div class="rummage-floor" id="rummage-floor">
             <!-- Without scripting, the real findings screen stands in for
                  the animated floor. -->
-            <img class="rummage-still" src="./media/findings.png" width="1180" height="800" loading="lazy"
-                 alt="Scuttle's findings screen: four hand-drawn piles labelled Installers, Ghosts, Copies and Screenshots with their sizes." />
+            <img class="rummage-still" src="./media/ui-findings.jpg" width="1180" height="800" loading="lazy"
+                 alt="Updated Scuttle interface preview: seven illustrated categories, review suggestions, and help with skipped scan locations." />
             <div class="sweep" id="sweep" aria-hidden="true"></div>
             <div class="pile-labels" aria-hidden="true">
               <span data-pile="0"><b>Installers</b><i>2.1 GB</i></span>
@@ -214,7 +214,7 @@
               <span><b>Changed 2 days ago.</b> You may still be using it. <i>I understand, move it anyway.</i></span>
             </label>
             <div class="sheet-foot">
-              <p class="sheet-where">Nothing is deleted. Put it back any time — it returns to where it was, and never over anything newer.</p>
+              <p class="sheet-where">Nothing is deleted. Restore it while it is still in the drawer — to where it was, never over anything newer.</p>
               <button type="button" class="button primary" id="sheet-move" disabled>Move it to the Drawer</button>
             </div>
             <div class="sheet-done" id="sheet-done" role="status" aria-live="polite"></div>
@@ -336,19 +336,25 @@
            it arrives.
       ================================================================== -->
       <section class="showcase" id="showcase" aria-labelledby="showcase-title">
-        <h2 class="showcase-title reveal" id="showcase-title">The real thing, <em>start to finish.</em></h2>
+        <h2 class="showcase-title reveal" id="showcase-title">A little space.<br /><em>A clearer view.</em></h2>
+        <p class="showcase-lede reveal">Start with one clear action. Browse illustrated categories, search for a file,
+          or sort by size. The drawer keeps a way back while your files are still there.</p>
+        <div class="preview-switch" role="group" aria-label="Interface preview">
+          <button type="button" data-preview="findings" aria-pressed="true" disabled>What turned up</button>
+          <button type="button" data-preview="home" aria-pressed="false" disabled>Where it begins</button>
+        </div>
         <div class="window3d" id="window3d">
           <div class="window-bar" aria-hidden="true"><i></i><i></i><i></i></div>
           <figure class="window-body" id="hero-figure">
-            <img id="hero-media" src="./media/findings.png" width="1180" height="800" loading="lazy"
-                 alt="Scuttle's findings screen: 1.21 GB in large serif type, four loose hand-drawn heaps labelled Installers, Ghosts, Copies and Screenshots with their sizes, and 301,264 files examined along the bottom." />
+            <img id="hero-media" src="./media/ui-findings.jpg" width="1180" height="800" loading="lazy"
+                 alt="Updated interface preview with sample findings: illustrated categories, clear review actions, and help with skipped places." />
             <button type="button" class="play" id="hero-play" hidden>
               <span class="play-icon" aria-hidden="true"></span>
-              <span id="hero-play-label">Play the demo</span>
+              <span id="hero-play-label">Play recorded walkthrough</span>
             </button>
           </figure>
         </div>
-        <p class="frame-caption" id="hero-caption">Scuttle on macOS, rummaging through a folder of invented demonstration files.</p>
+        <p class="frame-caption" id="hero-caption">Updated interface preview with sample data. The recorded walkthrough shows the previous interface.</p>
       </section>
 
       <!-- =================================================================
@@ -364,11 +370,12 @@
           <details class="q reveal" open>
             <summary>Does it delete anything by itself?</summary>
             <div><p>
-              No. Picking something moves it to the drawer, after a review of
-              exactly what will move. Emptying the drawer is a separate action
-              you confirm. Keys, password vaults, browser profiles, mail,
-              repositories and cloud-sync folders are refused outright — never
-              even walked.
+              A scan never moves or deletes your files. Moving something to the
+              drawer follows your review; emptying it is a separate action you
+              confirm. Only eligible files that can be rebuilt or downloaded
+              again expire automatically, after the retention period you choose.
+              Your own files, application data, and items moved past a caution
+              stay until you remove them.
             </p></div>
           </details>
           <details class="q reveal">
@@ -398,6 +405,20 @@
               Not yet. The drawer is a folder on the same disk, so a held file
               takes up what it did before. The space comes back when you empty
               the drawer — and not a moment earlier.
+            </p></div>
+          </details>
+          <details class="q reveal">
+            <summary>What if some places couldn’t be scanned?</summary>
+            <div><p>
+              The findings are from the areas Scuttle could check. Open “What can I do?”
+              beside the skipped count for help. Permission issues may need folder access;
+              files that disappeared during the scan may simply have moved or finished
+              downloading. You can review scan folders, retry, or keep browsing the findings.
+              Scuttle reports counts rather than a list of skipped paths.
+            </p><p>
+              On a Mac, check Scuttle in System Settings → Privacy &amp; Security →
+              Files &amp; Folders. Allow only folders you want scanned. Some system folders
+              remain restricted. <a href="https://support.apple.com/guide/security/secddd1d86a6/web">Apple’s guide to folder access</a> explains the controls.
             </p></div>
           </details>
           <details class="q reveal">

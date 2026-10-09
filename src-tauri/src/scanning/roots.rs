@@ -41,6 +41,7 @@ pub fn resolve(
 ) -> ScanOptions {
     let enabled = include.unwrap_or(settings.include_developer_debris);
     let explicit = explicit.filter(|r| !r.is_empty());
+    let default_locations = explicit.is_none() && settings.scan_roots.is_empty();
     let developer_roots = if enabled && explicit.is_none() {
         if settings.developer_roots.is_empty() {
             common(platform)
@@ -61,7 +62,13 @@ pub fn resolve(
             settings.scan_roots.clone()
         }
     });
+    let organization_roots = platform
+        .organization_roots()
+        .into_iter()
+        .filter(|p| default_locations || roots.iter().any(|r| paths::is_within(p, r)))
+        .collect();
     ScanOptions {
+        organization_roots,
         roots: deduplicate(roots),
         developer_roots: deduplicate(developer_roots),
         include_developer_debris: enabled,
@@ -69,6 +76,7 @@ pub fn resolve(
             14 | 30 | 60 => settings.developer_stale_days,
             _ => 14,
         },
+        dependency_cache_locations: settings.dependency_caches.locations.clone(),
         heavy_threshold: settings.heavy_threshold,
         ..Default::default()
     }

@@ -1,413 +1,81 @@
-/*
- * The floor fills the window exactly.
- *
- * Three bands: the masthead, the scatter, and the quiet footer. The middle
- * band takes whatever is left over and centres the heaps inside it, so the
- * air in this composition sits *around* the objects rather than collecting in
- * a dead strip under the rule while the footer falls off the bottom — which
- * is what a single scrolling column did with the same content.
- */
 .floor {
-  /*
-   * One measure for the whole screen.
-   *
-   * The masthead used to run to 1500px while the heaps sat in a 700px island,
-   * which left two disconnected margins and made the header and the
-   * collection look like parts of different pages. Every band below now
-   * shares `--measure`, so they line up at the same two edges.
-   *
-   * 1080px is what the fixed 1180px window leaves after its side room, and it
-   * is also exactly four slots wide — see `.scatter`.
-   */
-  --measure: 1080px;
-
   height: 100%;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-  padding: var(--step) var(--room);
-}
-
-/* ---- the masthead --------------------------------------------------------
- *
- * Two poles, the full width of the room apart. A number this size wants
- * somewhere to be looked at *from*, and the sentence that says what to do
- * about it is the natural counterweight — so it goes to the far side and sets
- * flush right, closing the composition instead of trailing off.
- */
-.mast {
-  display: grid;
-  grid-template-columns: auto minmax(0, 34ch);
-  justify-content: space-between;
-  align-items: end;
-  gap: var(--room) var(--air);
-  width: 100%;
-  max-width: var(--measure);
+  padding: 28px var(--room) 20px;
+  max-width: 1300px;
   margin: 0 auto;
-  padding-bottom: var(--close);
-  border-bottom: var(--hair) solid var(--rule);
+  gap: 16px;
 }
+.mast { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: center; }
+.poleLeft { display: flex; flex-direction: column; gap: 8px; }
+.eyebrow { font-family: var(--sans); font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); }
+.headline { font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3vw, 40px); letter-spacing: -.04em; line-height: 1.15; }
+.total { font-family: var(--serif); font-size: clamp(48px, 5vw, 68px); letter-spacing: -.045em; line-height: 1; }
+.totalUnit { font-size: .43em; letter-spacing: -.01em; margin-left: .16em; color: var(--ink-soft); }
+.aside { font-size: var(--type-body); color: var(--ink-soft); }
+.safety { display: flex; align-items: center; gap: 6px; color: var(--moss-ink); font-size: var(--type-small); }
+.poleRight { min-width: 0; }
+.offer { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 8px 0 8px 28px; border-left: 1px solid var(--rule); }
+.offerLine { font-size: var(--type-body); color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.offerAction { display: flex; align-items: center; gap: 20px; font-size: var(--type-body); font-weight: 600; padding: 10px 14px; border-radius: 8px; background: var(--ink); color: var(--paper); transition: box-shadow var(--quick); }
+.offerAction:hover { box-shadow: var(--lift-hover); }
+.offerNote { font-size: var(--type-small); color: var(--ink-faint); max-width: 30ch; }
+.lede { flex: none; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; padding-top: 18px; border-top: 1px solid var(--rule); }
+.lede h2 { font-family: var(--serif); font-size: 21px; font-weight: 400; letter-spacing: -.02em; }
+.lede p { color: var(--ink-soft); font-size: var(--type-small); }
+.scatter { flex: 1; min-height: 0; display: flex; flex-wrap: wrap; justify-content: center; align-content: center; gap: 16px 24px; overflow-y: auto; padding: 18px 4px; background: radial-gradient(ellipse at 24% 26%, color-mix(in srgb, var(--honey-soft) 35%, transparent), transparent 48%), radial-gradient(ellipse at 78% 85%, color-mix(in srgb, var(--moss-soft) 45%, transparent), transparent 46%); }
+.slot { min-width: 0; width: calc((100% - 72px) / 4); display: flex; }
+.foot { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding-top: 12px; border-top: 1px solid var(--rule); }
+.footRow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px 20px; width: 100%; font-size: var(--type-small); }
+.footFact { color: var(--ink-soft); margin-right: auto; font-variant-numeric: tabular-nums; }
+.footAction, .againLink, .noticeToggle { color: var(--ink-soft); border-bottom: 1px solid var(--rule); padding-bottom: 2px; font-size: var(--type-small); }
+.footAction:hover, .againLink:hover, .noticeToggle:hover { color: var(--ink); border-color: var(--honey); }
+.notice { color: var(--ink-faint); font-size: var(--type-small); }
+.noticeToggle { margin-left: 8px; }
+.noticeList { margin: 8px 0 0; padding-left: 20px; }
+.caveat { flex: none; padding: 10px 14px; border: 1px solid var(--rule); border-left: 3px solid var(--honey); border-radius: 8px; background: var(--honey-soft); color: var(--ink); font-size: var(--type-small); }
+.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; height: 100%; padding: 32px; text-align: center; }
+.emptyTitle { font-family: var(--serif); font-size: 30px; font-weight: 400; }
+.emptyLine { font-size: 16px; color: var(--ink-soft); max-width: 38ch; line-height: 1.6; }
+.sock { font-size: var(--type-small); color: var(--ink-faint); }
+@media (max-width: 1000px) { .slot { width: calc((100% - 48px) / 3); } }
+@media (max-width: 760px) {
+  .floor { padding: 24px 20px 16px; overflow-y: auto; }
+  .mast { grid-template-columns: 1fr; }
+  .offer { flex-direction: row; align-items: center; flex-wrap: wrap; padding: 4px 0; border-left: none; }
+  .offerNote { width: 100%; }
+  .scatter { flex: none; overflow: visible; align-content: flex-start; }
+  .slot { width: calc((100% - 24px) / 2); }
+}
+@media (max-width: 460px) { .slot { width: 100%; } }
 
-.poleLeft {
-  display: flex;
-  flex-direction: column;
-  gap: var(--tight);
-}
+/* Keep both rows of illustrations visible in the standard desktop window. */
+.poleLeft { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 20px; align-items: center; }
+.eyebrow, .headline, .aside { grid-column: 1; }
+.total { grid-column: 2; grid-row: 1 / span 3; }
+.safety { grid-column: 1 / -1; }
+.scatter { align-content: flex-start; }
+@media (max-width: 1000px) { .poleLeft { display: flex; align-items: flex-start; } }
+.scatter { padding-block: 12px; }
 
-.poleRight {
-  display: flex;
-  flex-direction: column;
-  gap: var(--snug);
-  text-align: right;
-}
+.notice { width: 100%; }
+.noticeSummary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 18px; }
+.noticeSummary strong { font-weight: 500; color: var(--ink-soft); }
+.noticeToggle { margin-left: 0; white-space: nowrap; }
+.noticeHelp { margin-top: 12px; padding: 4px 0 4px 16px; border-left: 2px solid var(--honey); max-height: 250px; overflow-y: auto; }
+.noticeReasons { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.noticeReasons h3 { font-size: var(--type-body); font-weight: 600; color: var(--ink); margin-bottom: 4px; }
+.noticeReasons p { color: var(--ink-soft); line-height: 1.6; max-width: 80ch; }
+.noticeLimit { font-size: var(--type-whisper); color: var(--ink-faint); margin-top: 12px; }
+.noticeActions { display: flex; flex-wrap: wrap; align-items: center; gap: 20px; padding-top: 12px; }
+.noticeActions button { font-size: var(--type-small); color: var(--ink); padding-block: 4px; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: var(--rule); }
+.noticeActions button:hover { text-decoration-color: var(--honey); }
+.noticeActions button:disabled { color: var(--ink-faint); cursor: default; }
+.incompleteEmpty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; height: 100%; overflow-y: auto; padding: 32px; text-align: center; }
+.incompleteEmpty .notice { max-width: 720px; text-align: left; padding-top: 16px; border-top: 1px solid var(--rule); }
 
-/*
- * Set against the viewport rather than a fixed size. This is the one thing on
- * the screen that should be visible from across a room, and on a wide window
- * a 46px number is just a label.
- */
-.total {
-  font-family: var(--serif);
-  font-size: clamp(var(--type-shout), 8.5vw, 132px);
-  font-weight: 400;
-  letter-spacing: -0.035em;
-  line-height: 0.88;
-}
-
-.totalUnit {
-  color: var(--ink-faint);
-  font-size: 0.42em;
-  letter-spacing: -0.01em;
-  margin-left: 0.14em;
-}
-
-.aside {
-  font-size: var(--type-read);
-  color: var(--ink-soft);
-}
-
-.hiccups {
-  font-size: var(--type-small);
-  color: var(--ink-faint);
-  text-wrap: pretty;
-}
-
-/* ---- the route out of here ----------------------------------------------- */
-.route {
-  font-size: var(--type-read);
-  color: var(--ink-soft);
-  line-height: 1.6;
-  text-wrap: pretty;
-}
-
-/*
- * Marked the way a selected row in a pile is marked: a honey rule, and a
- * honey wash that arrives on hover like a highlighter pass. The same gesture
- * in both places, so the application holds one idea about what "chosen" looks
- * like rather than two.
- */
-.clear {
-  font-family: var(--serif);
-  font-size: 1.1em;
-  color: var(--ink);
-  padding: 1px 4px;
-  margin: 0 -2px;
-  border-bottom: 2px solid var(--honey);
-  border-radius: 2px;
-  font-variant-numeric: tabular-nums;
-  transition:
-    background var(--quick) var(--ease),
-    border-color var(--quick) var(--ease);
-}
-
-.clear:hover {
-  background: var(--honey-soft);
-  border-bottom-color: var(--honey-ink);
-}
-
-.clear:active {
-  background: var(--honey);
-}
-
-/*
- * The scatter.
- *
- * A grid supplies the bones so the layout survives any number of piles and any
- * window size; per-pile offsets and alternating vertical rhythm break the grid
- * up again so it never reads as one.
- */
-/*
- * The scatter.
- *
- * Rows that wrap and centre, rather than a column grid. A grid left the last
- * row hanging off to one side and, once the heaviest pile was given a double
- * cell, a hole in the middle of the floor — the look of a layout that had
- * gone wrong rather than one that had been arranged.
- *
- * Every heap sits on one baseline per row. These are objects poured onto a
- * floor, and objects on a floor share a groundline; the random vertical
- * offsets that used to sit here fought that idea and left six labels at six
- * different heights. What varies instead is the size of each heap, which
- * varies because the piles do.
- */
-/*
- * The collection.
- *
- * Four to a row at desktop width, so seven categories read as 4 + 3 with the
- * short row centred, instead of 3 + 3 + 1 leaving one pile stranded on its
- * own line. Rows wrap down to three, two and one as the window narrows —
- * nothing here is hardcoded to seven, and eight piles simply fill two rows.
- *
- * The measure carries slack on purpose: four slots and three gaps come to
- * 1048px inside 1080. Sized exactly, a scrollbar appearing would steal enough
- * width to drop the row to three, which makes another row, which guarantees
- * the scrollbar. Five slots need 1310px and can never fit.
- */
-.scatter {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-content: center;
-  gap: var(--step) var(--gap);
-  width: 100%;
-  max-width: var(--measure);
-  margin: 0 auto;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-}
-
-.slot {
-  flex: 0 0 auto;
-  width: 238px;
-  display: flex;
-  justify-content: center;
-}
-
-.again {
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: var(--close) var(--step);
-  margin-top: var(--close);
-  padding-top: var(--close);
-  font-size: var(--type-small);
-  color: var(--ink-faint);
-}
-
-.againLink {
-  color: var(--ink-soft);
-  border-bottom: var(--hair) solid var(--ink-ghost);
-  padding-bottom: 1px;
-}
-.againLink:hover {
-  color: var(--ink);
-  border-bottom-color: var(--honey);
-}
-
-/* ---- nothing found ------------------------------------------------------ */
-.empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--step);
-  height: 100%;
-  text-align: center;
-  padding-bottom: var(--air);
-}
-
-.emptyTitle {
-  font-family: var(--serif);
-  font-size: var(--type-loud);
-  font-weight: 400;
-}
-
-.emptyLine {
-  font-size: var(--type-read);
-  color: var(--ink-soft);
-  max-width: 34ch;
-  font-family: var(--serif);
-}
-
-.sock {
-  display: flex;
-  align-items: center;
-  gap: var(--snug);
-  margin-top: var(--step);
-  font-size: var(--type-small);
-  color: var(--ink-faint);
-  animation: offer 900ms var(--settle) 400ms backwards;
-}
-
-@keyframes offer {
-  from {
-    opacity: 0;
-    transform: translateY(14px) rotate(-8deg);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) rotate(0);
-  }
-}
-
-/* ---- one instruction ------------------------------------------------------ */
-.lede {
-  width: 100%;
-  max-width: var(--measure);
-  margin: 0 auto;
-  padding-top: var(--close);
-  font-size: var(--type-small);
-  color: var(--ink-faint);
-  text-align: center;
-}
-
-/* ---- the offer -----------------------------------------------------------
- *
- * Two short lines where three sentences of instruction used to be. The action
- * opens a review; it does not move anything, and it does not say it will.
- */
-.offer {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--tight);
-}
-
-.offerLine {
-  font-size: var(--type-body);
-  color: var(--ink-soft);
-  font-variant-numeric: tabular-nums;
-}
-
-.offerAction {
-  font-family: var(--serif);
-  font-size: var(--type-read);
-  color: var(--ink);
-  padding: 2px 4px;
-  margin-right: -4px;
-  border-bottom: 2px solid var(--honey);
-  border-radius: 2px;
-  transition:
-    background var(--quick) var(--ease),
-    border-color var(--quick) var(--ease);
-}
-
-.offerAction:hover {
-  background: var(--honey-soft);
-  border-bottom-color: var(--honey-ink);
-}
-
-.offerAction:active {
-  background: var(--honey);
-}
-
-.offerNote {
-  font-size: var(--type-small);
-  color: var(--ink-faint);
-  text-align: right;
-  max-width: 30ch;
-}
-
-/* ---- the footer ----------------------------------------------------------
- *
- * Normal flow, wraps, never overlaps. The drawer reads as an action rather
- * than a word in a sentence, because that is what it is.
- */
-.foot {
-  width: 100%;
-  max-width: var(--measure);
-  margin: 0 auto;
-  padding-top: var(--close);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--tight);
-}
-
-.footRow {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: baseline;
-  gap: var(--close) var(--step);
-  font-size: var(--type-small);
-}
-
-.footFact {
-  color: var(--ink-faint);
-  font-variant-numeric: tabular-nums;
-}
-
-.footAction {
-  font-size: var(--type-small);
-  color: var(--ink-soft);
-  border-bottom: var(--hair) solid var(--ink-ghost);
-  padding-bottom: 1px;
-  transition:
-    color var(--quick) var(--ease),
-    border-color var(--quick) var(--ease);
-}
-
-.footAction:hover {
-  color: var(--ink);
-  border-bottom-color: var(--honey);
-}
-
-/* ---- what the scan could not reach --------------------------------------- */
-.notice {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--tight);
-  text-align: center;
-}
-
-.noticeLine {
-  font-size: var(--type-small);
-  color: var(--ink-faint);
-  text-wrap: pretty;
-}
-
-.noticeToggle {
-  margin-left: var(--snug);
-  font-size: var(--type-small);
-  color: var(--ink-soft);
-  border-bottom: var(--hair) solid var(--ink-ghost);
-}
-
-.noticeToggle:hover {
-  color: var(--ink);
-  border-bottom-color: var(--honey);
-}
-
-.noticeList {
-  list-style: none;
-  padding: 0;
-  font-size: var(--type-whisper);
-  color: var(--ink-faint);
-}
-
-/*
- * What produced these findings, when it was not an ordinary rummage.
- *
- * Deliberately quiet — honey rather than clay, because nothing is wrong. It
- * is telling the reader what was *not* looked at, so that a missing pile is
- * not mistaken for an empty one.
- */
-.caveat {
-  max-width: 62ch;
-  margin: 0 auto var(--close);
-  padding: var(--snug) var(--close);
-  border-radius: var(--round);
-  background: var(--honey-soft);
-  /*
-   * Ordinary ink, not honey ink. Honey on honey-soft is 3.99:1 in the light
-   * palette, which is below AA for text this size; the accent does its job as
-   * the fill and the border instead, where contrast rules do not apply.
-   */
-  color: var(--ink);
-  border-left: 3px solid var(--honey);
-  font-size: var(--type-small);
-  line-height: var(--leading-normal);
-  text-align: left;
-}
+.withOrganization { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+.organization { padding: 14px var(--room) 0; flex: none; }
+.findingsBody { flex: 1; min-height: 0; }

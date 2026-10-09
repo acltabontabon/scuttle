@@ -15,7 +15,7 @@ use crate::scanning::{
     self, CleanupObserver, Phase, Progress, ScanContext, ScanObserver, ScanOptions, ScanSummary,
 };
 use crate::space::SpaceOverview;
-use crate::storage::{QuarantineRecord, ScanKind, Store};
+use crate::storage::{QuarantineRecord, ScanKind, Settings, Store};
 use crate::{Result, ScuttleError};
 
 /// What the safety gate needs, gathered once. Building the protected-path table
@@ -57,10 +57,12 @@ struct Inner {
     running: Mutex<Option<RunningScan>>,
     /// The roots of the most recent scan. Nothing outside them can be acted on.
     allowed_roots: Mutex<Vec<PathBuf>>,
+    dependency_cache_cancel: Mutex<Option<Arc<AtomicBool>>>,
     /// Who, if anyone, is changing files or the Drawer right now.
     gate: Mutex<Option<GateHold>>,
     /// The move in progress, and the last one's outcome.
     jobs: Mutex<super::moves::JobBook>,
+    organization: crate::organization::Runtime,
     /// Whether a window is on screen. Kept here rather than asked of Tauri on
     /// demand so the background scheduler — which has no window handle and
     /// must not touch the main thread — can read it.
@@ -122,6 +124,7 @@ pub enum Priority {
 pub enum Operation {
     Scan,
     Move,
+    Organize,
     Restore,
     EmptyDrawer,
     RemoveItem,
@@ -140,6 +143,7 @@ impl Operation {
     pub(crate) fn doing(&self) -> &'static str {
         match self {
             Operation::Scan => "looking around",
+            Operation::Organize => "organizing files",
             Operation::Move => "moving files into the Drawer",
             Operation::Restore => "putting something back",
             Operation::EmptyDrawer => "emptying the Drawer",
@@ -169,6 +173,35 @@ impl Drop for OperationGuard {
         let mut gate = self.state.lock_gate();
         if gate.as_ref().is_some_and(|hold| hold.id == self.id) {
             *gate = None;
+        }
+    }
+}
+
+/// A registered inspection owns its immutable preferences and cancellation
+/// token while queued and running. Dropping it releases both registration and
+/// the operation gate, including after a worker panic or failed dispatch.
+pub struct DependencyCacheInspection {
+    state: AppState,
+    settings: Settings,
+    cancel: Arc<AtomicBool>,
+    _guard: OperationGuard,
+}
+impl DependencyCacheInspection {
+    pub fn run(self) -> Result<crate::dependency_cache::CacheReport> {
+        self.state
+            .dependency_cache_report(&self.settings, super::now_unix(), &|| {
+                self.cancel.load(Ordering::SeqCst)
+            })
+    }
+}
+impl Drop for DependencyCacheInspection {
+    fn drop(&mut self) {
+        let mut active = self.state.lock_dependency_cache_cancel();
+        if active
+            .as_ref()
+            .is_some_and(|cancel| Arc::ptr_eq(cancel, &self.cancel))
+        {
+            *active = None;
         }
     }
 }
@@ -231,8 +264,10 @@ impl AppState {
                 platform,
                 running: Mutex::new(None),
                 allowed_roots: Mutex::new(roots),
+                dependency_cache_cancel: Mutex::new(None),
                 gate: Mutex::new(None),
                 jobs: Mutex::new(super::moves::JobBook::default()),
+                organization: Default::default(),
                 window_visible: AtomicBool::new(false),
                 tray_alive: AtomicBool::new(false),
                 startup_done: AtomicBool::new(false),
@@ -361,6 +396,10 @@ impl AppState {
         self.clone()
     }
 
+    pub fn organization(&self) -> &crate::organization::Runtime {
+        &self.inner.organization
+    }
+
     pub fn store(&self) -> &Store {
         &self.inner.store
     }
@@ -376,7 +415,10 @@ impl AppState {
             Arc::clone(&self.inner.store),
             retention,
         )
-        .with_protected(self.protected_paths()))
+        // Managed-cache protection prevents new evictions, not recovery of
+        // items already held by an older release. Holds still use the full
+        // ActionContext guard; restore retains credentials/link protections.
+        .with_protected(self.base_protected_paths()))
     }
 
     /// Register a new scan, refusing if one is already running.
@@ -753,6 +795,15 @@ impl AppState {
                 ScanKind::Full => crate::detectors::default_set(&options),
                 ScanKind::Glance => crate::detectors::glance_set(&options),
             };
+            let organization_inventory = if kind == ScanKind::Full {
+                Some(crate::organization::discover(
+                    self,
+                    &ctx,
+                    &options.organization_roots,
+                )?)
+            } else {
+                None
+            };
             let outcome = scanning::run(scan_id, &ctx, detectors, observer);
 
             // Displaced part-way? Then these findings belong to a scan nobody
@@ -762,6 +813,10 @@ impl AppState {
                 return Err(ScuttleError::ScanBusy);
             }
 
+            if let Some(inventory) = organization_inventory {
+                self.store()
+                    .organization_put("inventory", "latest", &inventory)?;
+            }
             self.store().save_candidates(scan_id, &outcome.candidates)?;
             self.record_reviewed_sets(&outcome.candidates, &ctx);
             self.store()
@@ -1023,11 +1078,82 @@ impl AppState {
         );
         let detectors = crate::detectors::default_set(&options);
         let outcome = scanning::run("dry-run", &ctx, detectors, &CleanupObserver);
-        Ok(super::dry_run::build(&options, &outcome, &ctx))
+        let mut report = super::dry_run::build(&options, &outcome, &ctx);
+        if settings.dependency_caches.enabled {
+            report.dependency_caches =
+                Some(self.dependency_cache_report(&settings, ctx.now_unix, &|| false)?);
+        }
+        Ok(report)
+    }
+
+    /// Register the gate and cancellation token BEFORE queueing the worker.
+    /// A queued inspection must not erase a Stop request when it starts.
+    pub fn prepare_dependency_cache_inspection(&self) -> Result<DependencyCacheInspection> {
+        let guard = self.begin_operation(Operation::Scan)?;
+        let settings = self.store().settings()?;
+        if !settings.dependency_caches.enabled {
+            return Err(ScuttleError::Refused(
+                "Enable dependency cache preview in Settings first.".into(),
+            ));
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        *self.lock_dependency_cache_cancel() = Some(Arc::clone(&cancel));
+        Ok(DependencyCacheInspection {
+            state: self.clone_handle(),
+            settings,
+            cancel,
+            _guard: guard,
+        })
+    }
+
+    pub fn inspect_dependency_caches(&self) -> Result<crate::dependency_cache::CacheReport> {
+        self.prepare_dependency_cache_inspection()?.run()
+    }
+
+    fn dependency_cache_report(
+        &self,
+        settings: &Settings,
+        now: i64,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<crate::dependency_cache::CacheReport> {
+        Ok(crate::dependency_cache::inspect_configured(
+            self.platform().as_ref(),
+            settings,
+            &self.store().ignore_set()?,
+            now,
+            &|| self.quitting() || cancelled(),
+        ))
+    }
+
+    pub fn cancel_dependency_cache_preview(&self) {
+        if let Some(cancel) = self.lock_dependency_cache_cancel().as_ref() {
+            cancel.store(true, Ordering::SeqCst);
+        }
+    }
+
+    fn lock_dependency_cache_cancel(&self) -> std::sync::MutexGuard<'_, Option<Arc<AtomicBool>>> {
+        self.inner
+            .dependency_cache_cancel
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn protected_paths(&self) -> ProtectedPaths {
-        let mut protected = ProtectedPaths::for_current_user();
+        let mut protected = self.base_protected_paths();
+        let extra = self
+            .store()
+            .settings()
+            .map(|s| s.dependency_caches.locations)
+            .unwrap_or_default();
+        crate::dependency_cache::protect_managed(
+            &mut protected,
+            &crate::dependency_cache::locations(&self.platform().home_dir(), &extra),
+        );
+        protected
+    }
+
+    pub fn base_protected_paths(&self) -> ProtectedPaths {
+        let mut protected = ProtectedPaths::for_home(self.platform().home_dir());
         crate::platform::protect_own_files(&mut protected, self.inner.platform.as_ref());
         protected
     }

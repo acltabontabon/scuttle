@@ -132,7 +132,13 @@ pub fn busy_with_files(state: &AppState) -> bool {
     use crate::commands::Operation;
     matches!(
         state.current_operation(),
-        Some(Operation::Move | Operation::Restore | Operation::EmptyDrawer | Operation::RemoveItem)
+        Some(
+            Operation::Move
+                | Operation::Restore
+                | Operation::EmptyDrawer
+                | Operation::RemoveItem
+                | Operation::Organize
+        )
     )
 }
 
@@ -143,6 +149,7 @@ pub fn finish_before_quitting<R: Runtime>(app: &AppHandle<R>, state: &AppState) 
         return false;
     }
     state.cancel_move();
+    state.organization().cancel();
     reveal(app);
     ask_frontend_to(app, "quitting");
 

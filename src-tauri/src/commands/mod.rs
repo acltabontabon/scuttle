@@ -12,6 +12,7 @@
 
 mod dry_run;
 mod moves;
+mod organization;
 mod state;
 mod updates;
 
@@ -20,7 +21,9 @@ pub use moves::{
     CautionGroup, FindingResult, FindingStatus, MovePhase, MovePlan, MoveReport, MoveRequest,
     MoveSink, MoveSnapshot, PlannedItem, PlannedShape, PlannedStatus, Refusal, Unit,
 };
-pub use state::{AppState, InstallLease, Operation, OperationGuard, Priority};
+pub use state::{
+    AppState, DependencyCacheInspection, InstallLease, Operation, OperationGuard, Priority,
+};
 
 use std::path::PathBuf;
 
@@ -843,13 +846,15 @@ pub fn save_settings(
 
     // A folder to look in is also, after a scan, the boundary of what may be
     // moved — so the same rules apply to it as to anything Scuttle moves.
-    let protected = state.protected_paths();
+    let protected = state.base_protected_paths();
     if ![14, 30, 60].contains(&settings.developer_stale_days) {
         settings.developer_stale_days = 14;
     }
     for root in settings.scan_roots.iter().chain(&settings.developer_roots) {
         check_scan_root(root, &protected)?;
     }
+
+    crate::dependency_cache::validate_preferences(&mut settings.dependency_caches, &protected)?;
 
     let previous = state.store().settings()?;
     state.store().save_settings(&settings)?;
@@ -954,8 +959,11 @@ pub fn history(state: State<'_, AppState>) -> Result<Vec<HistoryEntry>> {
 
 /// Developer mode: classify everything and change nothing.
 #[tauri::command]
-pub fn dry_run(state: State<'_, AppState>, request: RummageRequest) -> Result<DryRunReport> {
-    state.dry_run(request)
+pub async fn dry_run(state: State<'_, AppState>, request: RummageRequest) -> Result<DryRunReport> {
+    gated(state.inner(), Operation::Scan, move |state| {
+        state.dry_run(request)
+    })
+    .await
 }
 
 /// Where things stand, for the burrow. Reads only.
@@ -1247,9 +1255,40 @@ pub fn format_bytes(bytes: u64) -> String {
     human_bytes(bytes)
 }
 
+/// Read-only preview runs on a worker; it cannot freeze the webview.
+#[tauri::command]
+pub async fn dependency_cache_preview(
+    state: State<'_, AppState>,
+) -> Result<crate::dependency_cache::CacheReport> {
+    let inspection = state.prepare_dependency_cache_inspection()?;
+    tauri::async_runtime::spawn_blocking(move || inspection.run())
+        .await
+        .map_err(|_| {
+            ScuttleError::Internal(
+                "Dependency cache inspection stopped unexpectedly. Nothing was changed.".into(),
+            )
+        })?
+}
+
+#[tauri::command]
+pub fn cancel_dependency_cache_preview(state: State<'_, AppState>) {
+    state.cancel_dependency_cache_preview();
+}
+
 /// The full command list, in one place.
 pub fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
+        organization::organization_inventory,
+        organization::organization_preference,
+        organization::choose_organization_destination,
+        organization::plan_organization,
+        organization::start_organization,
+        organization::undo_organization,
+        organization::organization_history,
+        organization::organization_status,
+        organization::cancel_organization,
+        organization::organization_thumbnail,
+        organization::reveal_organization,
         rummage,
         cancel_rummage,
         findings,
@@ -1280,6 +1319,8 @@ pub fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static
         choose_developer_root,
         history,
         dry_run,
+        dependency_cache_preview,
+        cancel_dependency_cache_preview,
         about,
         burrow_status,
         burrow_act,
@@ -1326,6 +1367,7 @@ pub fn init(app: &tauri::App) -> std::result::Result<(), Box<dyn std::error::Err
             Err(err) => tracing::warn!(error = %err, "could not settle interrupted moves"),
         }
     }
+    crate::organization::reconcile(&state)?;
     // Anything past its retention window goes on launch, quietly.
     if let Ok(quarantine) = state.quarantine() {
         match quarantine.sweep_expired(now_unix()) {

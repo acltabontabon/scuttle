@@ -39,6 +39,50 @@ impl InstallerDetector {
     }
 }
 
+/// Identification only: shared with organizing, independently of cleanup evidence.
+pub fn is_installer(entry: &FileEntry, ctx: &ScanContext) -> bool {
+    if entry.is_dir {
+        return false;
+    }
+    let Some(ext) = entry.extension() else {
+        return false;
+    };
+    if !ctx.platform.installer_extensions().contains(&ext) {
+        return false;
+    }
+    // A 40 KB ".exe" is a helper tool, not an installer.
+    if entry.size < 1024 * 512 {
+        return false;
+    }
+    // Applications' own territory. Whatever sits in there with an
+    // installer's extension is an application's business — its updater,
+    // its program, its cached packages — never a download of the user's.
+    if ctx.is_application_managed(&entry.path) {
+        return false;
+    }
+    // Part of an application wherever it is: a portable app unpacked in
+    // Downloads, an install folder a person chose to scan.
+    if ctx
+        .installs
+        .enclosing(&entry.path, ctx.root_of(&entry.path))
+        .is_some()
+    {
+        return false;
+    }
+    let stem = entry
+        .path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    // A package format (`.dmg`, `.msi`, `.pkg`) is an installer by
+    // construction. A bare program is not: `.exe` is also how portable
+    // tools and games arrive, so it needs a name that says "installer".
+    if ext == "exe" && !named_like_installer(&stem) {
+        return false;
+    }
+    true
+}
+
 impl Default for InstallerDetector {
     fn default() -> Self {
         Self::new()
@@ -59,30 +103,7 @@ impl Detector for InstallerDetector {
     }
 
     fn observe(&mut self, entry: &FileEntry, ctx: &ScanContext) {
-        if entry.is_dir {
-            return;
-        }
-        let Some(ext) = entry.extension() else { return };
-        if !ctx.platform.installer_extensions().contains(&ext) {
-            return;
-        }
-        // A 40 KB ".exe" is a helper tool, not an installer.
-        if entry.size < 1024 * 512 {
-            return;
-        }
-        // Applications' own territory. Whatever sits in there with an
-        // installer's extension is an application's business — its updater,
-        // its program, its cached packages — never a download of the user's.
-        if ctx.is_application_managed(&entry.path) {
-            return;
-        }
-        // Part of an application wherever it is: a portable app unpacked in
-        // Downloads, an install folder a person chose to scan.
-        if ctx
-            .installs
-            .enclosing(&entry.path, ctx.root_of(&entry.path))
-            .is_some()
-        {
+        if !is_installer(entry, ctx) {
             return;
         }
         let stem = entry
@@ -90,12 +111,6 @@ impl Detector for InstallerDetector {
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
-        // A package format (`.dmg`, `.msi`, `.pkg`) is an installer by
-        // construction. A bare program is not: `.exe` is also how portable
-        // tools and games arrive, so it needs a name that says "installer".
-        if ext == "exe" && !named_like_installer(&stem) {
-            return;
-        }
         self.by_product
             .entry(product_key(&stem))
             .or_default()

@@ -8,12 +8,100 @@ major version is 0, a minor bump may change behaviour.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-10
+
+**Give things a home.**
+
+A clearer desktop starts with deciding where things belong. Scuttle 0.2.0 adds
+organization for the files you want to keep, a refreshed way to browse findings,
+and more visibility into a developer’s disk.
+
+### Highlights
+
+- **Screenshots, gathered.** Collect loose screenshots from Desktop, Downloads
+  and Documents into monthly folders—or keep them together. See thumbnails,
+  choose a destination, and review every before-and-after path.
+- **Installers with a home.** Bring scattered installers into one folder while
+  preserving their names. Existing files are never overwritten; any numbered
+  suffix is shown before you confirm.
+- **A way back, even after a restart.** Organization history keeps each result
+  and its Undo action. Changed files and occupied original paths are left alone.
+  Organizing keeps your files; it does not reclaim storage.
+- **A clearer rummage.** Browse illustrated categories, search and sort files,
+  and get practical guidance when some locations could not be scanned.
+- **See what development leaves behind.** Opt in to verified stale build-output
+  suggestions and inspect Maven, Gradle, npm, pnpm and Yarn dependency caches.
+  Dependency cache previews are read-only and explain why entries are preserved.
+
+![Review screenshot thumbnails and exact monthly destinations before organizing. Sample files in the design preview.](https://raw.githubusercontent.com/acltabontabon/scuttle/v0.2.0/docs/media/organization-review.jpg)
+
+**Try it:** Rummage → **Organize…** → choose files and a destination → review →
+**Organize**. Find **Organization history** in Findings whenever you need Undo.
+
+### Added
+
+- Screenshot and installer organization: shallow discovery of loose files in
+  Desktop, Downloads and Documents, local thumbnail previews, configurable
+  destinations, monthly screenshot grouping, and exact before/after review.
+- Persistent organization history with per-file outcomes, cancellation, safe
+  retries and content-verified Undo. Organization moves never expire or enter
+  the Drawer; interrupted moves are reconciled on startup.
+
 - Opt-in developer cleanup discovers common workspaces and custom folders, with
   14, 30, or 60 days of inactivity before verified build output is suggested.
+- Opt-in, read-only dependency cache preview for Maven, Gradle, npm, pnpm and
+  Yarn, with custom cache locations, project references, preservation reasons
+  and paginated entries in Settings.
+- Dependency cache retention choices of 90, 180 or 365 days, independent of
+  build output. Recent changes, local Maven installs, snapshots and Keep
+  decisions preserve entries; old modification dates never establish last use.
+
+### Changed
+
+- Refreshed home and Findings screens, searchable and sortable pile browsing,
+  and actionable notices for skipped scan locations.
+- Updated website previews and device-aware downloads; mobile visitors get the
+  release page instead of an arbitrary desktop installer.
+- README now leads with the product experience, key features and downloads;
+  detailed installation and usage instructions live in linked guides.
+
 - Cargo, Next.js, and .NET output now requires project, repository, activity,
   and running-tool checks, repeated before moving to the drawer. Dependencies
   and uncertain output remain manual choices without automatic expiry.
 - Existing developer items in the drawer are kept until manually removed.
+- Managed dependency stores are protected from generic cache and parent-folder
+  moves even when preview is off. Previously held cache items remain restorable.
+- Dependency references and npm integrity hashes are indexed once per
+  inspection, avoiding repeated lockfile scans. Metadata classification reuses
+  its stat result instead of performing redundant filesystem reads.
+- Desktop dry runs run on a worker under the operation gate. Desktop and
+  command-line dry runs include the enabled cache preview and honor saved
+  Keep/ignore decisions; cache-only terminal previews work without ordinary
+  scan roots.
+- Developer, architecture, privacy and safety documentation describes the cache
+  preview, its supported layouts and its limits.
+
+### Fixed
+
+- Missing entries, unknown modification times and manifests removed during
+  inspection mark aggregate totals partial rather than presenting exact sizes.
+- Keeping a file inside an inventoried version preserves the whole version.
+- Cancellation issued while a cache inspection is queued survives worker
+  startup, without cancelling a later retry.
+- Nested Maven plugin dependencies no longer replace the plugin's own
+  dependency coordinates during POM inspection.
+- pnpm executable content blobs are included in recognized cache sizes.
+
+### Known limitations
+
+- Organization has been tested on macOS, including simulated cross-drive
+  transfers. Manual Windows interaction testing is pending; native filesystem tests run in CI.
+
+- Dependency cache entries remain inspection-only. Cleanup requires verified
+  usage tracking, dependency coverage, tool coordination and recovery. Maven
+  resolution, pnpm/Yarn lockfile references and other branches remain partial.
+- Dependency cache preview has been validated on macOS; manual Windows interaction
+  testing is pending; native tests run in CI.
 
 ## [0.1.1] - 2026-10-05
 
@@ -241,7 +329,8 @@ be undone.
   because it also holds logins, cookies and history. Firefox, which keeps its
   cache somewhere else, is covered.
 
-[Unreleased]: https://github.com/acltabontabon/scuttle/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/acltabontabon/scuttle/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/acltabontabon/scuttle/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/acltabontabon/scuttle/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/acltabontabon/scuttle/compare/v0.1.0-alpha.2...v0.1.0
 [0.1.0-alpha.2]: https://github.com/acltabontabon/scuttle/compare/v0.1.0-alpha.1...v0.1.0-alpha.2

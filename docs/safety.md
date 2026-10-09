@@ -405,3 +405,67 @@ in the drawer until explicitly removed. Upgrading also disables automatic expiry
 for developer items already in the drawer, whose old evidence cannot establish
 the new verification requirements. Nothing is moved without the existing
 review, and moving into the drawer does not free space.
+
+
+## Managed dependency caches
+
+Maven repositories, Gradle user homes and recognized npm, pnpm and Yarn stores
+are protected from generic quarantine, including parent-folder moves. Configured
+custom locations receive the same protection independently of preview opt-in.
+This also prevents old whole-cache findings from bypassing the new policy.
+Restoration of existing drawer records retains the base credential, system and
+link protections; the new eviction-only restrictions do not prevent putting
+previously held cache data back. Holds still pass the complete action gate.
+The read-only preview uses the ordinary protection table for credentials and
+system data; it makes a narrow metadata/manifest inspection exception for the
+managed stores themselves. It never creates actionable findings.
+
+The versioned policy engine makes eligibility a conjunction: downloaded origin,
+complete inventory and project coverage, trustworthy last use outside retention,
+verified recovery and compatible coordination. A missing signal never means
+unused. A Keep decision on either an entry or a file inside it preserves the
+entire inventory unit. Keep decisions, project references, local Maven installs, snapshots and
+recent use or modification preserve an entry. Comparisons include the retention
+boundary and future timestamps. The same facts, policy and evaluation time give
+the same decision; filesystem enumeration is sorted. Truncated inventories are
+marked partial and never establish absence of references. A disappearing entry
+or unknown modification time also marks aggregate totals partial, not just the
+individual row.
+
+Current adapters do not establish trustworthy last use, complete dependency
+coverage, recovery or coordination. Their output is therefore kept or
+insufficient evidence, never permission to move. Maven origin markers are hints,
+not proof that a remote repository remains reachable. npm lockfile integrity can
+protect a content-addressed blob even when its filename has no package identity.
+An artifact's metadata fingerprint describes file identities and modification
+state; it is not a content hash and cannot authorize a future eviction.
+
+Reads reject linked paths and cap each manifest at 1 MiB and total manifest
+content at 8 MiB. On Unix, manifest ancestors are pinned through no-follow
+handles; opened-file identity is checked before and after the bounded read.
+Cancellation tokens are registered before worker dispatch, so stopping a queued
+preview is retained and cannot cancel a later retry. Reference-index construction
+also checks cancellation and the deadline. Inspection stops between calls after
+five seconds or 50,000 metadata/listing
+steps, with 5,000 children per directory, 1,000 cache rows, 500 projects and depth
+limits. Individual filesystem calls can take longer. No cleanup command exists
+for preview rows, and no native pruning command is launched.
+
+## Organization
+
+Organizing is separate from cleanup eligibility and quarantine. Only supported,
+recognized loose screenshots and installers are inventoried. Keep decisions,
+protected paths, managed application/cache areas and links remain excluded.
+The native picker registers destinations; reviews contain exact generated paths
+and execution accepts a plan ID, not webview-supplied paths.
+
+Execution rechecks source identity, current exclusions, destination ancestors
+and the registered ancestor identity. Existing names receive suffixes at review;
+new collisions at execution are skipped. The existing no-replace transfer
+primitive verifies cross-volume copies before removing originals. Batch rows
+are durably journaled before each move and settled afterward. Recovering an
+ambiguous move never removes either copy. Undo verifies identity and content and
+never overwrites an occupied original path. Organization records do not expire.
+
+The [organization guide](organizing.md) explains bounded discovery, partial
+results, cancellation, retries, and cross-volume metadata limitations.

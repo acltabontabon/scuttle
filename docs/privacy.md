@@ -1,6 +1,6 @@
 # Privacy
 
-Scuttle looks at everything on your computer. This document is about what it
+Scuttle checks selected locations on your computer. This document is about what it
 does with that.
 
 ## The short version
@@ -42,6 +42,20 @@ installed applications and running processes.
    and ignore rules. It never executes project scripts or Git commands. Source
    files are measured through metadata, not opened. Background checks skip these
    content reads and show only preliminary developer findings.
+5. **Opt-in dependency cache preview** reads bounded Maven POMs and
+   `_remote.repositories` origin markers, Gradle dependency lockfiles and wrapper
+   properties, Node `package.json`, npm lockfiles/shrinkwrap and selected Yarn
+   package manifests. It does not execute tools or scripts, read Maven/npm/Gradle
+   credential settings, contact registries or inspect project `node_modules`.
+   Background checks do not run it. Its report stays in memory; only preferences
+   and custom locations are saved. OS-managed access timestamps may change when
+   manifests are read; Scuttle never treats them as last-use evidence.
+
+6. **Organization** uses filenames and metadata to find loose screenshots and
+   installers. Opening the review decodes bounded local screenshot thumbnails;
+   moving and undoing read file contents to verify integrity with BLAKE3.
+   Thumbnails are not persisted or uploaded. No OCR or content classification
+   is performed, and background checks never run organization.
 
 Scuttle does not read documents to classify them. A folder is judged by the
 shape of what is in it — extensions, names, counts — not by opening the files.
@@ -100,8 +114,8 @@ So:
 - Non-fatal traversal errors keep only the final path component, never the
   full path.
 - File contents are never logged.
-- Detailed paths appear only in the dry-run report, which you have to ask for
-  explicitly, and in `SCUTTLE_LOG=debug` output.
+- Detailed paths appear in the dry-run and dependency cache preview reports,
+  which you have to ask for explicitly, and in `SCUTTLE_LOG=debug` output.
 
 Logs go to stderr. Scuttle does not write a log file.
 
@@ -183,3 +197,12 @@ report the places it could not read rather than failing.
 On Windows, Scuttle reads the uninstall registry hives under `HKLM` and `HKCU`
 for installed-application names, and runs `tasklist` to see what is running. It
 requires no elevation.
+
+## Organization records
+
+The local SQLite database also stores organization opportunities, registered
+destinations, successful grouping preferences, and a separate durable move
+journal. The journal contains original and destination paths, file identities,
+content hashes, timestamps and per-file outcomes. It supports recovery and Undo
+after a restart and is not pruned with scans or expired with the Drawer. Review
+plans stay in memory and must be rebuilt after restarting.

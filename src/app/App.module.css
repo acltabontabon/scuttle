@@ -7,86 +7,72 @@
   overflow: hidden;
 }
 
-/*
- * The window's own title bar is hidden, so this strip both stands in for it
- * and provides the drag region. It is not a toolbar and does not gain buttons.
- *
- * The dragging itself comes from `data-tauri-drag-region` on the element, not
- * from here. `app-region` below is a Chromium extension — the `-webkit-`
- * prefix is misleading, WebKit never implemented it — so it does nothing in
- * the WKWebView that runs this application on macOS. It is kept only because
- * it is real on Windows' Chromium-based WebView2, and it must never be the
- * only mechanism: relying on it alone is what left the window unmovable.
- */
+/* Keep a generous native drag strip around the navigation controls. */
 .bar {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--gap);
-  padding: 14px var(--room) 0 var(--room);
-  height: 52px;
+  gap: var(--step);
+  padding: 0 var(--room);
+  min-height: 76px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper-raised);
   -webkit-app-region: drag;
   app-region: drag;
 }
-
-/* Room for the traffic lights on macOS. */
-.bar[data-platform='macos'] {
-  padding-left: 92px;
-}
-
+.bar[data-platform='macos'] { padding-left: 92px; }
 .wordmark {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   font-family: var(--serif);
-  font-size: var(--type-read);
-  letter-spacing: 0.01em;
-  color: var(--ink);
+  font-size: 24px;
+  letter-spacing: -0.04em;
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
-
-.wordmarkDot {
-  color: var(--ink-faint);
-}
-
-.barRight {
-  display: flex;
-  align-items: baseline;
-  gap: var(--gap);
-}
-
+.barRight { display: flex; align-items: center; gap: var(--step); }
 .nav {
   display: flex;
-  align-items: baseline;
-  gap: var(--step);
+  align-items: center;
+  gap: 4px;
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
-
 .navLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 13px;
+  border: 1px solid transparent;
+  border-radius: var(--round-soft);
   font-size: var(--type-small);
-  color: var(--ink-faint);
-  letter-spacing: 0.02em;
-  padding-bottom: 2px;
-  border-bottom: var(--hair) solid transparent;
-  transition: color var(--quick) var(--ease), border-color var(--quick) var(--ease);
-}
-
-.navLink:hover {
+  font-weight: 500;
   color: var(--ink-soft);
+  transition: background var(--quick), color var(--quick);
 }
-
+.navLink:hover { background: var(--paper-deep); color: var(--ink); }
 .navLink[aria-current='page'] {
   color: var(--ink);
-  border-bottom-color: var(--honey);
+  background: var(--paper-deep);
+  border-color: var(--rule);
 }
-
 .navCount {
-  display: inline-block;
-  margin-left: 5px;
+  display: inline-grid;
+  place-items: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 4px;
+  border-radius: 5px;
   font-size: var(--type-whisper);
-  color: var(--honey-ink);
+  background: var(--honey-soft);
+  color: var(--ink);
+}
+@media (max-width: 760px) {
+  .bar { padding-inline: var(--step); flex-wrap: wrap; gap: 8px; padding-block: 12px; }
+  .bar[data-platform='macos'] { padding-left: 92px; }
+  .barRight { flex-wrap: wrap; gap: 8px; }
+  .navLink { padding: 8px 10px; }
 }
 
 .stage {

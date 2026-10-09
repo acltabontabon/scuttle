@@ -227,3 +227,8 @@ desktop* with `updater` ticked); ordinary CI never sees it.
 
 Scuttle publishes no Docker image, and there is no Docker Hub account to set
 up. [`docker.md`](docker.md) says why.
+
+Release pages lead with the changelog’s feature highlights, a tagged interface
+preview, and platform download buttons. Keep screenshots pinned to the release
+tag and put limitations in the changelog alongside the detailed changes. Update
+the release title in `release.yml` when the release theme changes.

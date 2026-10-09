@@ -46,6 +46,9 @@ pub use walk::{FileEntry, Step, WalkOptions};
 pub struct ScanOptions {
     /// Absolute directories to rummage through.
     pub roots: Vec<PathBuf>,
+    /// Shallow loose-file inventory, only during user-started scans.
+    #[serde(default)]
+    pub organization_roots: Vec<PathBuf>,
     /// Build output and package caches are off by default: they belong to
     /// work in progress more often than not.
     pub include_developer_debris: bool,
@@ -54,6 +57,9 @@ pub struct ScanOptions {
     pub developer_roots: Vec<PathBuf>,
     #[serde(default = "roots::default_stale_days")]
     pub developer_stale_days: u32,
+    /// Managed caches are protected independently of whether preview is enabled.
+    #[serde(default)]
+    pub dependency_cache_locations: Vec<crate::dependency_cache::CacheLocation>,
     /// Files at or above this size are worth mentioning on their own.
     pub heavy_threshold: u64,
     pub max_depth: usize,
@@ -66,9 +72,11 @@ impl Default for ScanOptions {
     fn default() -> Self {
         ScanOptions {
             roots: Vec::new(),
+            organization_roots: Vec::new(),
             include_developer_debris: false,
             developer_roots: Vec::new(),
             developer_stale_days: 14,
+            dependency_cache_locations: Vec::new(),
             heavy_threshold: 1024 * 1024 * 1024, // 1 GB
             max_depth: 12,
             duplicate_min_size: 1024 * 1024, // 1 MB
@@ -148,6 +156,13 @@ impl ScanContext {
         // directory Scuttle scans. Finding its own held items and offering to
         // quarantine them again would be absurd.
         crate::platform::protect_own_files(&mut protected_paths, platform.as_ref());
+        crate::dependency_cache::protect_managed(
+            &mut protected_paths,
+            &crate::dependency_cache::locations(
+                &platform.home_dir(),
+                &options.dependency_cache_locations,
+            ),
+        );
         let protected = Arc::new(protected_paths);
         let apps = AppIndex::new(platform.installed_apps());
         let libraries = platform.game_libraries();

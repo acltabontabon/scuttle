@@ -11,11 +11,11 @@
  */
 
 :root {
-  --paper: #f3ece0;
-  --paper-deep: #ebe2d3;
-  --paper-raised: #f8f3e9;
+  --paper: #f5f2eb;
+  --paper-deep: #eae5da;
+  --paper-raised: #fcfaf5;
   --hollow: #e2d7c4;
-  --rule: #d8cdb9;
+  --rule: #d2cabc;
 
   --ink: #2b2520;
   --ink-soft: #6b6055;
@@ -28,7 +28,7 @@
   --clay: #b0543a;
   --honey-ink: #8c6319;
   --clay-ink: #aa5138;
-  --moss-ink: #4a6a50;
+  --moss-ink: #54715a;
 
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
@@ -97,6 +97,7 @@ body[data-tone='night'] {
 html {
   -webkit-text-size-adjust: 100%;
   scroll-behavior: smooth;
+  overflow-x: clip;
 }
 
 body {
@@ -117,7 +118,7 @@ body::before {
   inset: 0;
   z-index: 100;
   pointer-events: none;
-  opacity: 0.5;
+  opacity: 0.18;
   background-image: radial-gradient(rgba(120, 96, 64, 0.07) 1px, transparent 1px);
   background-size: 3px 3px;
   mix-blend-mode: multiply;
@@ -126,7 +127,7 @@ body::before {
 
 h1, h2, h3 {
   font-family: var(--serif);
-  font-weight: 600;
+  font-weight: 400;
   margin: 0;
   text-wrap: balance;
   letter-spacing: -0.02em;
@@ -299,7 +300,7 @@ section { position: relative; }
 .magnetic { will-change: transform; }
 
 /* Things that arrive. */
-.reveal {
+.js-reveals .reveal {
   opacity: 0;
   transform: translateY(28px);
   filter: blur(6px);
@@ -354,18 +355,18 @@ section { position: relative; }
   margin-bottom: 18px;
 }
 .hero-title {
-  font-size: clamp(2.8rem, min(7vw, 11vh), 6.4rem);
+  font-size: clamp(3.2rem, min(7.8vw, 12vh), 7rem);
   line-height: 0.95;
   letter-spacing: -0.035em;
   margin-bottom: 24px;
 }
-.hero-title em { display: inline; }
+.hero-title em { display: inline; color: var(--moss-ink); }
 /* Letters, dropped onto the floor one at a time. */
 .hero-title .word { display: inline-block; white-space: nowrap; }
 .hero-title .ch {
   display: inline-block;
-  transform: translateY(-1.2em) rotate(var(--r, 0deg));
-  opacity: 0;
+  transform: translateY(-0.25em) rotate(var(--r, 0deg));
+  opacity: 0.7;
   animation: land 900ms var(--settle) forwards;
   animation-delay: var(--d, 0ms);
 }
@@ -684,11 +685,12 @@ section { position: relative; }
   position: relative;
   padding: 6px 0 6px 28px;
   border-bottom: 1px dashed var(--rule);
-  opacity: 0;
-  transform: translateX(-10px);
+  opacity: 1;
+  transform: none;
   transition: opacity 500ms var(--ease), transform 600ms var(--out);
   transition-delay: calc(300ms + var(--i, 0) * 180ms);
 }
+.js-reveals .reasons li { opacity: 0; transform: translateX(-10px); }
 .reasons li::before {
   content: '✓';
   position: absolute;
@@ -1049,7 +1051,7 @@ section { position: relative; }
 /* THE REAL THING                                                            */
 /* ======================================================================== */
 .showcase { padding: 12vh var(--edge) 16vh; text-align: center; perspective: 1600px; }
-.showcase-title { margin-bottom: 60px; }
+.showcase-title { margin-bottom: 22px; }
 .window3d {
   max-width: 1100px;
   margin: 0 auto;
@@ -1204,4 +1206,41 @@ section { position: relative; }
   .rummage-stage, .drawer-stage { position: relative; height: auto; min-height: 80vh; }
   .window3d { transform: none; }
   .tray::after { display: none; }
+}
+
+/* Open illustrations and editorial labels, in the same room as the app. */
+.hero-strewn::before {
+  content: '';
+  position: absolute;
+  width: min(38vw, 480px);
+  aspect-ratio: 1;
+  right: 1%;
+  top: 6%;
+  border: 1px dashed var(--rule);
+  border-radius: 46% 54% 64% 36% / 43% 41% 59% 57%;
+  background: radial-gradient(ellipse, color-mix(in srgb, var(--honey-soft) 50%, transparent), transparent 70%);
+  transform: rotate(-18deg);
+}
+.hero-strewn::after {
+  content: 'Small creature. Big curiosity.';
+  position: absolute;
+  right: 6%;
+  top: 65%;
+  font-family: var(--serif);
+  font-size: 1rem;
+  font-style: italic;
+  color: var(--ink-soft);
+  transform: rotate(-8deg);
+}
+.hero .lede { max-width: 35rem; }
+.showcase-lede { max-width: 56ch; margin: 0 auto 24px; color: var(--ink-soft); }
+.preview-switch { display: flex; justify-content: center; flex-wrap: wrap; gap: 24px; margin-bottom: 36px; }
+.preview-switch button { font: inherit; background: none; border: 0; border-bottom: 1px solid var(--rule); padding: 8px 2px; color: var(--ink-soft); cursor: pointer; }
+.preview-switch button[aria-pressed='true'] { color: var(--ink); border-bottom-color: var(--honey-ink); }
+.preview-switch button:hover { color: var(--ink); }
+.preview-switch button:disabled { cursor: default; opacity: .5; }
+@media (max-width: 760px) {
+  .hero { min-height: 700px; }
+  .hero-title { font-size: clamp(3.2rem, 10vw, 5rem); }
+  .showcase-lede { font-size: 1rem; }
 }

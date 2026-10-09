@@ -289,6 +289,11 @@ impl PlatformService for WindowsPlatformService {
         Ok(())
     }
 
+    fn open_folder(&self, path: &Path) -> Result<()> {
+        std::process::Command::new("explorer").arg(path).spawn()?;
+        Ok(())
+    }
+
     fn quarantine_root(&self) -> PathBuf {
         self.data_dir().join("Quarantine")
     }

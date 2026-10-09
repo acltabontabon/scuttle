@@ -15,11 +15,13 @@
 │  commands/   the IPC surface and app state           │
 │  scanning/   traversal, orchestration, the safety net│
 │  detectors/  one question each, evidence only        │
+│  dependency_cache/ inventory, references and policy  │
 │  evidence/   observations → confidence, risk, action │
 │  safety/     path arithmetic, protected paths, gate  │
+│  organization/ inventory, reviewed moves, undo        │
 │  quarantine/ move, restore, remove                   │
 │  storage/    SQLite behind a repository boundary     │
-│  platform/   the only place cfg(target_os) appears   │
+│  platform/   OS discovery and the fixture platform  │
 │  space/      the storage explanation                 │
 └──────────────────────────────────────────────────────┘
 ```
@@ -98,6 +100,28 @@ Permission errors, files that vanish mid-walk and unreadable directories are
 **hiccups**: counted, reported as totals, and stepped over. None of them abort
 a scan. They're also counted rather than logged, because a log of every
 unreadable path is a map of someone's home directory.
+
+## Dependency cache inspection
+
+Dependency cache preview is separate from the ordinary detector pipeline. It
+has its own bounded metadata/manifest reader and deterministic policy engine;
+its rows are inspection data, never cleanup candidates. Managed stores are
+pruned from ordinary scans and protected at the move gate even when preview is
+off. Existing drawer restores keep their original credential/link protection
+rules, without the new restrictions on evicting managed stores.
+
+Desktop and terminal dry runs share the configured inspection entry point.
+The desktop preview registers its operation gate, immutable preferences and
+per-run cancellation token before dispatching a blocking worker. A Stop request
+while the task is queued survives until execution; a dropped or panicking task
+releases its registration and gate. The desktop dry run also runs off the main
+thread and holds the operation gate.
+
+Project coordinates and npm integrity hashes are indexed once with cancellation
+and deadline checks. Per-row matching uses those indexes instead of rescanning
+all lockfile entries. Filesystem enumeration remains sorted; disappearing or
+unmeasurable entries propagate partial status to row, repository and report.
+Sizes describe recognized logical bytes and never promise reclaimable space.
 
 ## Communication
 
@@ -424,3 +448,27 @@ Both Apache 2.0 and MIT would be reasonable. Apache 2.0 because:
   identifiable as a fork.
 
 The dependencies are MIT/Apache-2.0 dual-licensed, so there is no conflict.
+
+## Organization
+
+`organization/` owns a separate shallow inventory, registered destinations,
+review plans and durable batch journals. User-started scans inspect only loose
+files in the platform Desktop, Downloads and Documents directories; explicit
+scan roots constrain that probe. It shares screenshot naming and conservative
+installer identification with detectors but never emits cleanup findings.
+
+Rust commands accept opportunity, destination, plan and batch IDs. Native folder
+selection registers a validated destination; the frontend cannot submit paths
+to execution. Plans are bounded and kept in memory, invalidated by new scan
+inventories. Jobs share the global operation gate and safe transfer primitives,
+run on workers, and expose revisioned status snapshots for polling. Quitting
+cancels organization at safe checkpoints. Stale cleanup findings containing
+moved files are invalidated; a new scan rebuilds their evidence.
+
+SQLite migration 6 adds organization documents, independent of scan pruning and
+drawer expiry. Per-file checkpoints use FULL synchronous writes before movement.
+Startup reconciles in-flight records; ambiguous outcomes require inspection and
+never trigger deletion during recovery. Same-volume recovery requires both
+identity and content to match. An interrupted cross-volume move whose destination
+identity was not checkpointed remains flagged for inspection. See
+[organizing.md](organizing.md) for the user flow and transfer limits.

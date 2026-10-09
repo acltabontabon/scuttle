@@ -54,6 +54,8 @@ export type View =
    * would be a different promise entirely.
    */
   | { name: 'pile'; category: Category; preselect?: 'suggested' }
+  | { name: 'organize'; kind: 'screenshots' | 'installers' }
+  | { name: 'organization_history' }
   | { name: 'drawer' }
   | { name: 'space' }
   | { name: 'settings' }

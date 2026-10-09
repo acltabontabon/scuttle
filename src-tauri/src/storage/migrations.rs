@@ -188,6 +188,16 @@ pub const MIGRATIONS: &[&str] = &[
     r#"
     UPDATE quarantine_items SET keep = 1 WHERE category = 'developer_debris';
     "#,
+    // 6 — organization has its own durable inventory, preferences and journal.
+    r#"
+    CREATE TABLE organization_documents (
+        kind TEXT NOT NULL,
+        id TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        updated_unix INTEGER NOT NULL,
+        PRIMARY KEY (kind, id)
+    );
+    "#,
 ];
 
 /// Bring a connection up to the current schema.

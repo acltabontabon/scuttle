@@ -63,6 +63,7 @@
 }
 
 .rowHead {
+  overflow-wrap: anywhere;
   color: var(--ink);
   display: flex;
   gap: var(--snug);

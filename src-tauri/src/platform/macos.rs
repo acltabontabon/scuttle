@@ -243,6 +243,17 @@ impl PlatformService for MacPlatformService {
         }
     }
 
+    fn open_folder(&self, path: &Path) -> Result<()> {
+        let status = std::process::Command::new("open").arg(path).status()?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(ScuttleError::Refused(
+                "Finder could not open this folder.".into(),
+            ))
+        }
+    }
+
     fn quarantine_root(&self) -> PathBuf {
         self.data_dir().join("Quarantine")
     }

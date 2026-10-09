@@ -64,9 +64,13 @@ const DETAILS: { id: string; label: string }[] = [
 ]
 
 export function Preview() {
-  const [sceneId, setSceneId] = useState(SCENES[1]!.id)
+  const focused = new URLSearchParams(window.location.search).has('focus')
+  const [sceneId, setSceneId] = useState(SCENES[0]!.id)
+  const [navigation, setNavigation] = useState<View | null>(null)
   const [detailId, setDetailId] = useState<string | null>(null)
-  const [theme, setTheme] = useState<Settings['appearance']>('system')
+  const [previewSettings, setPreviewSettings] = useState<Settings>(SETTINGS)
+  const theme = previewSettings.appearance
+  const setTheme = (appearance: Settings['appearance']) => setPreviewSettings((current) => ({ ...current, appearance }))
   const [moveId, setMoveId] = useState('none')
   const [stream, setStream] = useState<{ running: boolean; result: string } | null>(null)
   const [streamed, setStreamed] = useState<number | null>(null)
@@ -158,12 +162,13 @@ export function Preview() {
     const noop = async () => {}
     const ok = async () => true
     return {
-      view: scene.view,
+      view: navigation ?? scene.view,
       go: (view) => {
         const match = SCENES.find(
-          (s) => s.view.name === view.name && (view.name !== 'pile' || s.view.name === 'pile'),
+          (s) => s.view.name === view.name && (view.name !== 'pile' || (s.view.name === 'pile' && s.view.category === view.category)),
         )
         if (match) setSceneId(match.id)
+        setNavigation(view)
         setDetailId(null)
       },
       scan: {
@@ -178,7 +183,7 @@ export function Preview() {
         summary: null,
         error: null,
       },
-      rummage: noop,
+      rummage: async () => { setSceneId('floor'); setNavigation({ name: 'findings' }) },
       cancel: noop,
       findings: scene.findings,
       refreshFindings: ok,
@@ -188,10 +193,9 @@ export function Preview() {
       refreshDrawer: ok,
       space: SPACE,
       refreshSpace: ok,
-      settings: { ...SETTINGS, appearance: theme },
+      settings: previewSettings,
       updateSettings: async (next) => {
-        const changes = typeof next === 'function' ? next({ ...SETTINGS, appearance: theme }) : next
-        if (changes.appearance) setTheme(changes.appearance)
+        setPreviewSettings((current) => ({ ...current, ...(typeof next === 'function' ? next(current) : next) }))
         return true
       },
       background: BACKGROUND_STATUS,
@@ -232,11 +236,11 @@ export function Preview() {
       removePermanently: ok,
       reveal: noop,
     }
-  }, [scene, detail, theme, moveScene, detailsOpen, reviewPlan])
+  }, [scene, navigation, detail, previewSettings, moveScene, detailsOpen, reviewPlan])
 
   return (
-    <div className={styles.workbench}>
-      <aside className={styles.rail}>
+    <div className={`${styles.workbench} ${focused ? styles.focused : ''}`}>
+      {!focused && <aside className={styles.rail}>
         <p className={styles.railTitle}>Scenes</p>
         {SCENES.map((s) => (
           <button
@@ -245,6 +249,7 @@ export function Preview() {
             aria-current={s.id === sceneId}
             onClick={() => {
               setSceneId(s.id)
+              setNavigation(null)
               setDetailId(null)
             }}
           >
@@ -357,7 +362,7 @@ export function Preview() {
             </button>
           ))}
         </div>
-      </aside>
+      </aside>}
 
       <div className={styles.window}>
         <StoreContext.Provider value={store}>

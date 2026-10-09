@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '@/app/store'
 import { bytes, findingBytes } from '@/lib/format'
 import { Glyph } from '@/visuals/Glyph'
+import { Icon } from '@/visuals/Icon'
 import { Scuttle, type Mood } from '@/visuals/Scuttle'
 import { outcomeAside, outcomeLine, phaseLine } from './phrasing'
 import { handOff } from './handoff'
@@ -59,27 +60,53 @@ export function Rummage() {
           ? 'shrug'
           : 'idle'
 
+  if (scan.status === 'idle') {
+    return (
+      <div className={styles.welcome}>
+        <div className={styles.hero}>
+          <div className={styles.heroCopy}>
+            <p className={styles.eyebrow}>A little room to breathe</p>
+            <h1 className={styles.heroTitle}>Less clutter.<br /><em>More possibility.</em></h1>
+            <p className={styles.heroLine}>Forgotten downloads, old caches, the leftovers of apps long gone. Let Scuttle find what&rsquo;s taking up space.</p>
+            <button className={styles.rummage} onClick={() => void rummage()}>
+              Rummage <Icon name="arrow" />
+            </button>
+            <p className={styles.promise}><Icon name="shield" size={16} /> Just a look. Your files stay put until you decide.</p>
+            {findings?.has_rummaged && (
+              <button className={styles.lastFindings} onClick={() => go({ name: 'findings' })}>
+                View your last findings <Icon name="arrow" size={15} />
+              </button>
+            )}
+          </div>
+          <div className={styles.heroArt} aria-hidden="true">
+            <div className={styles.orbit} />
+            <span className={styles.artGhost}><Glyph category="ghosts" size={49} /></span>
+            <span className={styles.artCopies}><Glyph category="copies" size={42} /></span>
+            <span className={styles.artCache}><Glyph category="caches" size={54} /></span>
+            <span className={styles.artShot}><Glyph category="screenshots" size={46} /></span>
+            <div className={styles.heroCreature}><Scuttle mood="idle" size={190} /></div>
+            <span className={styles.artCaption}>A curious little helper.<br />A tidier little corner of your world.</span>
+          </div>
+        </div>
+        <div className={styles.steps}>
+          {[
+            ['01', 'Find the forgotten', 'Scuttle looks through familiar folders for things worth a second look.'],
+            ['02', 'You make the call', 'See what turned up, why it was noticed, and choose what stays.'],
+            ['03', 'Keep a way back', 'Moved files wait in the drawer. Restore them while they’re still there.'],
+          ].map(([number, title, line]) => (
+            <div className={styles.step} key={number}>
+              <span className={styles.stepNumber}>{number}</span>
+              <div><h2>{title}</h2><p>{line}</p></div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className={styles.stage}>
       <div className={styles.centre}>
-        {scan.status === 'idle' && (
-          <>
-            <h1 className={styles.title}>Scuttle</h1>
-            <p className={styles.line}>Your computer leaves stuff everywhere.</p>
-            <button className={styles.rummage} onClick={() => void rummage()}>
-              Rummage
-            </button>
-            {findings?.has_rummaged && (
-              <button
-                className={styles.detailToggle}
-                onClick={() => go({ name: 'findings' })}
-              >
-                Or look at what turned up last time
-              </button>
-            )}
-          </>
-        )}
-
         {running && (
           <div className={styles.working}>
             <p className={styles.phase} key={phaseLine(scan.phase)}>

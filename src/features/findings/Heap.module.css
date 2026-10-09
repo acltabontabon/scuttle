@@ -1,202 +1,37 @@
-/*
- * A heap: several drawn objects resting on a surface, with a label under them.
- *
- * Not a card. There is no border, no background and no container — the objects
- * simply sit on the paper, and the only thing that appears on hover is a
- * shadow, because a shadow is what a thing you can pick up has.
- */
-.heap {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--snug);
-  padding: var(--snug);
-  border-radius: var(--round-soft);
-  transition:
-    transform var(--normal) var(--settle),
-    background var(--normal) var(--ease);
-}
-
-/*
- * Hover and press are colour and depth only — never size or position.
- * The old 4px lift moved the illustration out from under the cursor and
- * nudged the label, which reads as the layout twitching rather than as the
- * pile responding.
- */
-.heap:hover {
-  background: color-mix(in srgb, var(--paper-raised) 80%, transparent);
-}
-
-/*
- * The whole pile is one control, so it needs the three states a control has.
- * Focus is a ring rather than the hover lift: a keyboard user needs to see
- * where they are, and a silent 4px nudge is not that.
- */
-.heap:focus-visible {
-  outline: 2px solid var(--honey);
-  outline-offset: 2px;
-}
-
-.heap:active {
-  background: color-mix(in srgb, var(--honey-soft) 42%, transparent);
-}
-
-/*
- * The objects grow from their own groundline rather than from their centre,
- * so a big heap and a small one still rest on the same floor. The layout box
- * stays a constant 86px whatever the scale, which is what keeps every label
- * across a row sitting on one line.
- */
-.objects {
-  position: relative;
-  width: 138px;
-  /* Sized to the tallest heap this can draw: objects sit at `bottom: 10`,
-     rise about 25px across the stack and are at most 29px tall. Any less and
-     a full pile is clipped at the top. */
-  height: 84px;
-  color: var(--ink);
-  transform: scale(var(--heap-scale, 1));
-  transform-origin: bottom center;
-}
-
-.object {
-  position: absolute;
-  transition: transform var(--normal) var(--settle);
-}
-
-/* The topmost object lifts a little further, as though being picked out. */
-.heap:hover .object:last-child {
-  transform: translate(var(--x), calc(var(--y) - 7px)) rotate(var(--r));
-}
-
-/*
- * The ground the objects rest on. It sits directly beneath them and is blurred
- * hard: a crisp ellipse reads as a drawn shape, a diffuse one reads as light.
- */
-.shadow {
-  position: absolute;
-  left: 50%;
-  bottom: 6px;
-  width: 72px;
-  height: 12px;
-  transform: translateX(-50%);
-  border-radius: 50%;
-  background: var(--ground);
-  filter: blur(7px);
-  opacity: 0.55;
-  transition: opacity var(--normal) var(--ease), transform var(--normal) var(--ease);
-}
-
-.heap:hover .shadow {
-  opacity: 0.8;
-  transform: translateX(-50%) scale(1.14, 0.9);
-}
-
-.label {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  text-align: center;
-}
-
-.name {
-  font-family: var(--serif);
-  font-size: var(--type-read);
-  letter-spacing: 0.01em;
-  color: var(--ink);
-}
-
-.size {
-  font-size: var(--type-small);
-  color: var(--ink-soft);
-  font-variant-numeric: tabular-nums;
-}
-
-.count {
-  font-size: var(--type-whisper);
-  color: var(--ink-faint);
-  letter-spacing: 0.03em;
-}
-
-/*
- * Deliberately no dimming here any more.
- *
- * The name used to fade when Scuttle had nothing to recommend, which made the
- * largest pile on most machines — heavy strays, where Scuttle never
- * recommends anything — look switched off. Having no recommendation is not
- * the same as having nothing worth opening.
- */
-
-/* Each object settles into place when the pile first appears. */
+/* Open specimens on the paper. Type and a drawn object make the affordance. */
+.heap { position: relative; display: flex; flex-direction: column; align-items: center; width: 100%; padding: 8px 14px 12px; text-align: center; border-radius: 4px; transition: color var(--quick); }
+.heap:focus-visible { outline: 2px solid var(--honey); outline-offset: 2px; }
+.index { position: absolute; left: 14px; top: 10px; font-size: 10px; letter-spacing: .08em; color: var(--ink-faint); }
+.openArrow { position: absolute; top: 8px; right: 14px; color: var(--ink-faint); opacity: 0; transition: transform var(--quick), opacity var(--quick); }
+.heap:hover .openArrow, .heap:focus-visible .openArrow { transform: translateX(3px); opacity: 1; }
+.objects { position: relative; width: 138px; height: 82px; margin: 0 auto 10px; color: var(--ink); transform: scale(var(--heap-scale, 1)); transform-origin: bottom center; }
+.object { position: absolute; }
+.heap[data-category='ghosts'] .objects, .heap[data-category='installers'] .objects { color: var(--honey-ink); }
+.heap[data-category='screenshots'] .objects, .heap[data-category='caches'] .objects { color: var(--moss-ink); }
+.shadow { position: absolute; left: 50%; bottom: 6px; width: 72px; height: 12px; transform: translateX(-50%); border-radius: 50%; background: var(--ground); filter: blur(7px); opacity: .4; }
+.label { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; }
+.name { font-family: var(--serif); font-size: 23px; letter-spacing: -.025em; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 7px; text-decoration-thickness: 1px; transition: text-decoration-color var(--quick); }
+.heap:hover .name { text-decoration-color: var(--honey); }
+.size { font-size: 14px; color: var(--ink); font-variant-numeric: tabular-nums; margin-top: 6px; }
+.count { font-size: var(--type-whisper); color: var(--ink-faint); }
+.suggested { display: inline-flex; align-items: center; gap: 4px; color: var(--honey-ink); }
+.suggestedDot { width: 5px; height: 5px; border-radius: 50%; background: var(--honey); }
+.hint { font-family: var(--serif); font-size: 14px; font-style: italic; line-height: 1.45; color: var(--ink-soft); max-width: 24ch; margin-top: 2px; }
+.dust { display: none; }
 @keyframes settle {
-  from {
-    opacity: 0;
-    transform: translate(var(--x), calc(var(--y) - 22px)) rotate(0deg);
-  }
-  70% {
-    opacity: 1;
-  }
-  to {
-    opacity: 1;
-    transform: translate(var(--x), var(--y)) rotate(var(--r));
-  }
+  from { opacity: 0; transform: translate(var(--x), calc(var(--y) - 12px)) rotate(0deg); }
+  to { opacity: 1; transform: translate(var(--x), var(--y)) rotate(var(--r)); }
 }
 
-/* A small puff of dust as it lands. */
-.dust {
-  position: absolute;
-  left: 50%;
-  bottom: 4px;
-  width: 44px;
-  height: 44px;
-  transform: translateX(-50%);
-  border-radius: 50%;
-  border: var(--hair) solid var(--ink-ghost);
-  opacity: 0;
-  animation: puff 620ms var(--ease) forwards;
-  pointer-events: none;
-}
-
-@keyframes puff {
-  0% {
-    opacity: 0.5;
-    transform: translateX(-50%) scale(0.2);
-  }
-  100% {
-    opacity: 0;
-    transform: translateX(-50%) scale(1.5);
-  }
-}
-
-/* ---- a pile with suggestions in it ---------------------------------------
- *
- * Quiet on purpose: this connects the offer in the header to the pile it
- * lives in, and that is all it has to do.
- */
-.suggested {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--honey-ink);
-}
-
-.suggestedDot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--honey);
-}
-
-/*
- * The plain-language line, for the three names that are evocative rather than
- * descriptive. Always present, never a tooltip: an explanation somebody has
- * to hover to find is an explanation a first-time reader never sees.
- */
-.hint {
-  font-size: var(--type-whisper);
-  color: var(--ink-ghost);
-  max-width: 21ch;
-  text-wrap: pretty;
-}
+.objects { height: 66px; margin-bottom: 8px; }
+.heap { padding-block: 4px 8px; }
+.name { font-size: 22px; line-height: 1.2; }
+.label { gap: 3px; }
+.hint { font-size: 13px; line-height: 1.35; }
+.label { display: grid; grid-template-columns: auto auto; justify-content: center; align-items: baseline; gap: 4px 8px; }
+.name, .hint { grid-column: 1 / -1; }
+.size { margin-top: 4px; }
+.count { white-space: nowrap; }
+.hint { justify-self: center; }
+.objects { height: 60px; }
+.object { animation: settle 620ms var(--settle) backwards; }

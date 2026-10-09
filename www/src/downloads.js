@@ -41,8 +41,9 @@ const TARGETS = [
  */
 function likelyTarget() {
   const platform = `${navigator.userAgentData?.platform ?? ''} ${navigator.platform ?? ''} ${navigator.userAgent}`;
+  if (/iPhone|iPad|Android/i.test(platform)) return null;
   if (/Win/i.test(platform)) return 'windows-x64-setup';
-  if (/Mac|iPhone|iPad/i.test(platform)) return 'macos-apple-silicon';
+  if (/Mac/i.test(platform)) return 'macos-apple-silicon';
   return null;
 }
 
@@ -180,7 +181,20 @@ export async function setUpDownloads() {
   }
 
   const guess = likelyTarget();
-  const chosen = (guess && assets.get(guess)) || assets.values().next().value;
+  // Phones and unrecognised systems get the release page, not an arbitrary
+  // desktop installer presented as though it could run on this device.
+  if (!guess || !assets.has(guess)) {
+    root.dataset.state = early ? 'early' : 'ready';
+    primary.href = release.html_url ?? RELEASES;
+    say(label, early ? 'View early builds' : guess ? 'View available builds' : 'Get Scuttle');
+    say(note, guess ? 'Your suggested build is not in this release' : 'Desktop app · macOS & Windows');
+    if (secondary) {
+      secondary.href = primary.href;
+      secondary.textContent = early ? 'View early builds' : 'Get Scuttle';
+    }
+    return;
+  }
+  const chosen = assets.get(guess);
   const chosenTarget = TARGETS.find((target) => assets.get(target.slug) === chosen);
 
   if (chosen && chosenTarget) {

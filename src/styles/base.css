@@ -54,6 +54,11 @@ figure {
   margin: 0;
 }
 
+input, select {
+  font: inherit;
+  color: inherit;
+}
+
 button {
   font: inherit;
   color: inherit;

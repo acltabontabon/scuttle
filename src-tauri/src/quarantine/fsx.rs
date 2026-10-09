@@ -21,7 +21,7 @@ use std::path::Path;
 use std::time::SystemTime;
 
 /// What kind of thing is at a path, without following links.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EntryKind {
     File,
     Dir,
@@ -32,7 +32,7 @@ pub enum EntryKind {
 }
 
 /// What Scuttle can tell about an object cheaply enough to compare later.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Identity {
     /// `dev:ino` on Unix, volume serial and file index on Windows. Absent when
     /// the platform would not say.

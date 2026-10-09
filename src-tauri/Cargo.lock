@@ -4400,8 +4400,9 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scuttle"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
+ "base64 0.22.1",
  "blake3",
  "chrono",
  "dirs 6.0.0",
@@ -4410,6 +4411,7 @@ dependencies = [
  "image",
  "libc",
  "plist",
+ "quick-xml",
  "rayon",
  "rusqlite",
  "semver",

@@ -1,12 +1,14 @@
+import { OrganizationOffers } from '@/features/organization/Organization'
 import { useMemo, useState } from 'react'
 
 import { useStore } from '@/app/store'
 import { bytes, bytesParts, scatter } from '@/lib/format'
 import { Unavailable } from '@/components/Unavailable'
 import { CANCELLED_CAVEAT, GLANCE_CAVEAT } from '@/features/background/phrasing'
-import type { HiccupSummary } from '@/lib/types'
 import { Scuttle } from '@/visuals/Scuttle'
+import { Icon } from '@/visuals/Icon'
 import { Heap } from './Heap'
+import { ScanNotice } from './ScanNotice'
 
 import styles from './Findings.module.css'
 
@@ -20,6 +22,13 @@ import styles from './Findings.module.css'
  * come back at the far end of the drawer, not here.
  */
 export function Findings() {
+  return <div className={styles.withOrganization}>
+    <div className={styles.organization}><OrganizationOffers /></div>
+    <div className={styles.findingsBody}><FindingsBody /></div>
+  </div>
+}
+
+function FindingsBody() {
   const { findings, go, scan, rummage, refreshFindings, drawer } = useStore()
   const [retrying, setRetrying] = useState(false)
 
@@ -48,6 +57,20 @@ export function Findings() {
     )
   }
 
+  const hiccups = findings.hiccups.permission_denied + findings.hiccups.unreadable + findings.hiccups.vanished
+
+  if (findings.piles.length === 0 && hiccups > 0) {
+    return (
+      <div className={styles.incompleteEmpty}>
+        <Scuttle mood="shrug" size={84} />
+        <h1 className={styles.emptyTitle}>Nothing found in the areas checked.</h1>
+        <p className={styles.emptyLine}>Some places were skipped, so this isn&rsquo;t a complete look at your computer.</p>
+        <ScanNotice hiccups={findings.hiccups} />
+        <button className={styles.againLink} onClick={() => void rummage()}>Scan again</button>
+      </div>
+    )
+  }
+
   if (findings.piles.length === 0) {
     return (
       <NothingFound
@@ -61,10 +84,6 @@ export function Findings() {
   const suggested = findings.piles.reduce((n, pile) => n + pile.confident_count, 0)
   const suggestedBytes = findings.piles.reduce((n, pile) => n + pile.confident_bytes, 0)
   const held = drawer?.items.length ?? 0
-  const hiccups =
-    findings.hiccups.permission_denied +
-    findings.hiccups.unreadable +
-    findings.hiccups.vanished
 
   // Weight is carried by how big each heap is drawn, not by how many grid
   // cells it occupies. Giving the heaviest pile a double-width cell left a
@@ -83,35 +102,18 @@ export function Findings() {
 
   return (
     <div className={styles.floor}>
-      {/*
-        The masthead.
-
-        Two poles across the full width rather than one narrow column pushed
-        against the left edge: the total on one side, what to do about it on
-        the other, and a great deal of air between them. The route out of here
-        is set in the same typographic voice as everything else — a phrase
-        marked with a honey rule, not a rounded rectangle borrowed from an
-        operating system.
-      */}
       <header className={styles.mast}>
         <div className={styles.poleLeft}>
+          <p className={styles.eyebrow}>The collection · Your findings</p>
+          <h1 className={styles.headline}>Look what turned up.</h1>
           <p className={styles.total}>
             {findings.piles.some((pile) => pile.bytes_is_lower_bound) && <span className={styles.totalUnit}>at least </span>}
             {total.value}
             <span className={styles.totalUnit}>{total.unit}</span>
           </p>
-          <p className={styles.aside}>
-            worth reviewing, across {findings.piles.length}{' '}
-            {findings.piles.length === 1 ? 'pile' : 'piles'}. Nothing has been touched.
-          </p>
+          <p className={styles.aside}>worth a second look, across {findings.piles.length} {findings.piles.length === 1 ? 'category' : 'categories'}.</p>
+          <p className={styles.safety}><Icon name="shield" size={14} /> Nothing has been moved or deleted.</p>
         </div>
-
-        {/*
-            The suggestion, said in two short lines instead of a paragraph.
-            The old block ran to three sentences of instruction in the top
-            right and competed with the total for the eye; what a first-time
-            reader needs here is the size of the offer and a way into it.
-          */}
         <div className={styles.poleRight}>
           {suggested > 0 && reviewIn ? (
             <div className={styles.offer}>
@@ -125,7 +127,7 @@ export function Findings() {
                   go({ name: 'pile', category: reviewIn.category, preselect: 'suggested' })
                 }
               >
-                Review {suggested === 1 ? 'suggestion' : 'suggestions'}
+                Review {suggested === 1 ? 'suggestion' : 'suggestions'} <Icon name="arrow" size={16} />
               </button>
               {suggestedPiles.length > 1 && (
                 <p className={styles.offerNote}>
@@ -140,17 +142,13 @@ export function Findings() {
           )}
         </div>
       </header>
-
-      {/*
-          What produced these findings, when it was not an ordinary rummage.
-          Without this, an empty Copies pile after a background check reads as
-          "you have no duplicates" — when what actually happened is that
-          nothing opened a file to find out.
-        */}
       {findings.kind === 'glance' && <p className={styles.caveat}>{GLANCE_CAVEAT}</p>}
       {findings.cancelled && <p className={styles.caveat}>{CANCELLED_CAVEAT}</p>}
 
-      <p className={styles.lede}>Choose a pile to see what&rsquo;s inside.</p>
+      <div className={styles.lede}>
+        <h2>A place for everything</h2>
+        <p>Open a category. Take a look. You decide what stays.</p>
+      </div>
 
       <div className={styles.scatter}>
         {findings.piles.map((pile, index) => (
@@ -164,12 +162,6 @@ export function Findings() {
           </div>
         ))}
       </div>
-
-      {/*
-        The quiet end of the screen: what was looked at, how to look again,
-        what is waiting in the drawer, and anything the scan could not reach.
-        In normal flow, wrapping rather than overlapping.
-      */}
       <footer className={styles.foot}>
         <p className={styles.footRow}>
           <span className={styles.footFact}>
@@ -186,52 +178,9 @@ export function Findings() {
           )}
         </p>
 
-        {hiccups > 0 && <ScanNotice hiccups={findings.hiccups} total={hiccups} />}
+        <ScanNotice hiccups={findings.hiccups} />
       </footer>
 
-    </div>
-  )
-}
-
-/**
- * What the scan could not reach.
- *
- * "a floor rather than a total" was accurate and meant nothing to anyone who
- * had not read the code. This says what happened and what it implies, and
- * keeps the breakdown behind a toggle so the footer stays a footer.
- */
-function ScanNotice({ hiccups, total }: { hiccups: HiccupSummary; total: number }) {
-  const [open, setOpen] = useState(false)
-  const parts = [
-    { n: hiccups.permission_denied, label: 'needed permission Scuttle does not have' },
-    { n: hiccups.unreadable, label: 'could not be read' },
-    { n: hiccups.vanished, label: 'disappeared mid-scan' },
-  ].filter((part) => part.n > 0)
-
-  return (
-    <div className={styles.notice}>
-      <p className={styles.noticeLine}>
-        {total} {total === 1 ? 'location' : 'locations'} couldn&rsquo;t be scanned. Results
-        may be incomplete.
-        {parts.length > 0 && (
-          <button
-            className={styles.noticeToggle}
-            onClick={() => setOpen((on) => !on)}
-            aria-expanded={open}
-          >
-            {open ? 'Hide details' : 'Details'}
-          </button>
-        )}
-      </p>
-      {open && (
-        <ul className={styles.noticeList}>
-          {parts.map((part) => (
-            <li key={part.label}>
-              {part.n} {part.n === 1 ? 'location' : 'locations'} {part.label}
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   )
 }
@@ -256,8 +205,8 @@ function NothingFound({ seed, onRummage }: { seed: string; onRummage: () => void
   return (
     <div className={styles.empty}>
       <Scuttle mood="asleep" size={104} />
-      <p className={styles.emptyTitle}>Nothing interesting.</p>
-      <p className={styles.emptyLine}>Your computer is suspiciously tidy.</p>
+      <p className={styles.emptyTitle}>Nothing to clear out.</p>
+      <p className={styles.emptyLine}>Nothing needs a cleanup review in the areas checked.</p>
       {oddity && <p className={styles.sock}>{oddity}</p>}
       <button className={styles.againLink} onClick={onRummage} style={{ marginTop: 'var(--step)' }}>
         Rummage again

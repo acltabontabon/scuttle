@@ -60,6 +60,42 @@ pub trait PlatformService: Send + Sync {
     /// useful without being invasive: no blanket scan of the home directory.
     fn default_scan_roots(&self) -> Vec<KnownLocation>;
 
+    /// Loose personal files only; organization never recursively walks these.
+    fn organization_roots(&self) -> Vec<PathBuf> {
+        let home = self.home_dir();
+        if dirs::home_dir().as_ref() == Some(&home) {
+            [
+                dirs::desktop_dir(),
+                dirs::download_dir(),
+                dirs::document_dir(),
+            ]
+            .into_iter()
+            .flatten()
+            .collect()
+        } else {
+            ["Desktop", "Downloads", "Documents"]
+                .iter()
+                .map(|p| home.join(p))
+                .collect()
+        }
+    }
+
+    fn organization_pictures(&self) -> PathBuf {
+        if dirs::home_dir().as_ref() == Some(&self.home_dir()) {
+            dirs::picture_dir().unwrap_or_else(|| self.home_dir().join("Pictures"))
+        } else {
+            self.home_dir().join("Pictures")
+        }
+    }
+
+    fn organization_downloads(&self) -> PathBuf {
+        if dirs::home_dir().as_ref() == Some(&self.home_dir()) {
+            dirs::download_dir().unwrap_or_else(|| self.home_dir().join("Downloads"))
+        } else {
+            self.home_dir().join("Downloads")
+        }
+    }
+
     /// Places the OS or its screenshot tool writes captures to.
     fn screenshot_locations(&self) -> Vec<PathBuf>;
 
@@ -95,6 +131,11 @@ pub trait PlatformService: Send + Sync {
 
     /// Show the file to the user in their file manager.
     fn reveal(&self, path: &Path) -> crate::Result<()>;
+
+    /// Open a known directory, rather than selecting it in its parent.
+    fn open_folder(&self, path: &Path) -> crate::Result<()> {
+        self.reveal(path)
+    }
 
     /// Where quarantined items are held. Must be on the same volume as the
     /// user's home directory so that quarantining is usually a rename.

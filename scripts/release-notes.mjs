@@ -77,7 +77,7 @@ export function downloads(version) {
   const base = `https://github.com/${REPO}/releases/download/v${version}`;
   const file = (slug, ext) => `Scuttle-${version}-${slug}.${ext}`;
   return [
-    '## Give your disk a little breathing room',
+    '## Bring Scuttle home',
     '',
     'Choose your download. No account. No cloud scanning. Your files stay on your computer.',
     '',
@@ -132,6 +132,8 @@ export function limitations(version) {
     '| --- | --- | --- |',
     '| Rummage through leftovers, screenshots, installers, caches and duplicates. | See the evidence, confidence and risk behind each finding. | Review moves, keep items you want, and restore from the drawer. |',
     '',
+    '**Organization gives files a home in ordinary folders.** It does not free storage, and organized files never expire. Find Undo in Organization history; it checks each file and leaves changed files or conflicting original paths alone.',
+    '',
     '**The drawer keeps a moved copy on disk.** Moving something there does not free space. Only permanently removing it does. Caches and re-downloadable installers may expire after your chosen retention period; other items stay until you remove them.',
     '',
     '<details>',
@@ -163,19 +165,19 @@ export function releaseBody(version, section, { media = null, checksums = '' } =
     '',
     `<img src="https://raw.githubusercontent.com/${REPO}/v${version}/src-tauri/icons/128x128.png" width="80" alt="Scuttle">`,
     '',
-    '# Find the forgotten. Keep what matters.',
+    '# Find what’s out of place.<br>Decide where it belongs.',
     '',
-    '**Your computer leaves stuff everywhere. Scuttle finds it.**',
+    '**Make room. Gather scattered files. Keep the final say.**',
     '',
     `Scuttle ${version} · macOS & Windows · Free & open source`,
     '',
     '</div>',
     '',
   ];
-  if (media) parts.push(`![Scuttle in action: a rummage, reviewing findings, moving an item into the drawer and restoring it](https://raw.githubusercontent.com/${REPO}/v${version}/docs/media/${media})`, '');
+  if (media) parts.push(`![Scuttle: review what turned up and choose where it belongs](https://raw.githubusercontent.com/${REPO}/v${version}/docs/media/${media})`, '');
   const detailStart = section.includes('### Highlights') ? section.search(/^### (Fixed|Changed|Added)$/m) : -1;
   const summary = detailStart < 0 ? section : section.slice(0, detailStart).trim();
-  parts.push(downloads(version), '', '## What’s better in this release', '', summary);
+  parts.push('## What’s new', '', summary, '', downloads(version));
   if (detailStart >= 0) parts.push('', '<details>', '<summary><strong>All fixes & improvements</strong></summary>', '', section.slice(detailStart).trim(), '', '</details>');
   parts.push('', limitations(version));
   if (checksums.trim()) parts.push('', '<details>', '<summary><strong>SHA-256 checksums</strong></summary>', '', '```text', checksums.trim(), '```', '', '</details>');
@@ -202,7 +204,7 @@ function main() {
   // copy of docs/media so it cannot drift from what the release actually
   // looks like. A release cut before the recording exists simply opens with
   // the changelog rather than with a broken image.
-  const media = ['demo.gif', 'findings.png'].find((file) => existsSync(join(root, 'docs/media', file)));
+  const media = ['ui-findings.jpg', 'demo.gif', 'findings.png'].find((file) => existsSync(join(root, 'docs/media', file)));
   const checksums = checksumFile ? readFileSync(checksumFile, 'utf8') : '';
   process.stdout.write(releaseBody(version, section, { media, checksums }));
 }

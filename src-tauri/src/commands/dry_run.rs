@@ -13,8 +13,8 @@ use crate::scanning::{ScanContext, ScanOptions, ScanOutcome};
 pub struct DryRunRow {
     pub detector: String,
     pub category: Category,
-    /// Deliberately the full path: this is the one place detailed paths are
-    /// shown, and only because the user explicitly asked for them.
+    /// Full paths are shown in requested dry-run and cache-preview reports,
+    /// because the user explicitly asked for them.
     pub path: String,
     pub display_name: String,
     pub size: u64,
@@ -28,6 +28,7 @@ pub struct DryRunRow {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DryRunReport {
+    pub dependency_caches: Option<crate::dependency_cache::CacheReport>,
     pub roots: Vec<String>,
     pub developer_debris: bool,
     pub files_seen: u64,
@@ -111,6 +112,7 @@ pub(crate) fn build(
     }
 
     DryRunReport {
+        dependency_caches: None,
         roots: options
             .all_roots()
             .iter()

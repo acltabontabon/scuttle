@@ -367,3 +367,14 @@
 .developerPlaces { margin: var(--close) 0 var(--close); }
 .developerPlace { display: flex; justify-content: space-between; gap: var(--close); padding: var(--snug) 0; }
 .developerActions { display: flex; gap: var(--close); margin-top: var(--close); }
+
+/* Cache controls inherit the current paper and ink in both themes. */
+.cacheSelect {
+  max-width: 100%;
+  padding: var(--tight) var(--snug);
+  border: var(--hair) solid var(--rule);
+  border-radius: var(--round);
+  color: var(--ink);
+  background: var(--paper-raised);
+  font: inherit;
+}

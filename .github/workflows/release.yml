@@ -230,12 +230,12 @@ jobs:
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --draft \
-              --title "Scuttle ${TAG#v} · Find the forgotten. Keep what matters." \
+              --title "Scuttle ${TAG#v} · Give things a home." \
               --notes-file release-notes.md \
               --prerelease="$PRERELEASE"
           else
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
-              --title "Scuttle ${TAG#v} · Find the forgotten. Keep what matters." \
+              --title "Scuttle ${TAG#v} · Give things a home." \
               --notes-file release-notes.md
           fi
           # --clobber so a rerun replaces a partial upload instead of failing

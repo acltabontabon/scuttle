@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react'
 
+import { Organization, OrganizationHistory } from '@/features/organization/Organization'
 import { Detail } from '@/features/detail/Detail'
 import { MoveIndicator } from '@/features/move/MoveIndicator'
 import { Review } from '@/features/move/Review'
@@ -12,21 +13,19 @@ import { Space } from '@/features/space/Space'
 import { UpdateChip } from '@/features/updates/UpdateChip'
 import { platform } from '@/lib/platform'
 import { Mark } from '@/visuals/Mark'
+import { Icon } from '@/visuals/Icon'
 import { useStore, type View } from './store'
 
 import styles from './App.module.css'
 
 /**
- * `available` decides whether a section is worth offering yet. Settings has no
- * condition: on a fresh install nothing else is reachable, and a first-time
- * user who wants to choose where Scuttle looks *before* the first rummage
- * needs a way in.
+ * Scan, Drawer and Settings are always reachable. Findings and Space become
+ * useful after the first rummage, with Findings also active inside a category.
  */
 const NAV: { view: View; label: string; available: (state: NavState) => boolean }[] = [
+  { view: { name: 'home' }, label: 'Scan', available: () => true },
   { view: { name: 'findings' }, label: 'Findings', available: (s) => s.hasRummaged },
-  // Also reachable while something is on its way in, so the place it is going
-  // exists before the first item arrives.
-  { view: { name: 'drawer' }, label: 'Drawer', available: (s) => s.heldCount > 0 || s.moving },
+  { view: { name: 'drawer' }, label: 'Drawer', available: () => true },
   { view: { name: 'space' }, label: 'Space', available: (s) => s.hasRummaged },
   { view: { name: 'settings' }, label: 'Settings', available: () => true },
 ]
@@ -115,7 +114,11 @@ export function App() {
       case 'findings':
         return <Findings />
       case 'pile':
-        return <PileView category={view.category} preselect={view.preselect} />
+        return <PileView key={`${view.category}:${view.preselect ?? 'all'}`} category={view.category} preselect={view.preselect} />
+      case 'organize':
+        return <Organization key={view.kind} kind={view.kind} />
+      case 'organization_history':
+        return <OrganizationHistory />
       case 'drawer':
         return <Drawer />
       case 'space':
@@ -144,9 +147,8 @@ export function App() {
           onClick={() => go({ name: 'home' })}
           aria-label="Scuttle, back to the beginning"
         >
-          <Mark size={17} />
+          <Mark size={24} />
           Scuttle
-          {view.name !== 'home' && <span className={styles.wordmarkDot}>·</span>}
         </button>
 
         <div className={styles.barRight}>
@@ -160,9 +162,10 @@ export function App() {
               <button
                 key={label}
                 className={styles.navLink}
-                aria-current={view.name === target.name ? 'page' : undefined}
+                aria-current={view.name === target.name || (['pile', 'organize', 'organization_history'].includes(view.name) && target.name === 'findings') ? 'page' : undefined}
                 onClick={() => go(target)}
               >
+                <Icon name={target.name === 'home' ? 'scan' : target.name === 'pile' || target.name === 'organize' || target.name === 'organization_history' ? 'findings' : target.name} size={16} />
                 {label}
                 {target.name === 'drawer' && heldCount > 0 && (
                   <span className={styles.navCount}>{heldCount}</span>

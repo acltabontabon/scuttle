@@ -10,15 +10,15 @@
   /* ---- surfaces ---------------------------------------------------------
    * Warm paper, not white. The floor Scuttle empties its pockets onto.
    */
-  --paper: #f3ece0;
-  --paper-deep: #ebe2d3;
-  --paper-raised: #f8f3e9;
+  --paper: #f5f2eb;
+  --paper-deep: #eae5da;
+  --paper-raised: #fcfaf5;
   --hollow: #e2d7c4;
   /* Hairline separators. Distinct from --hollow because a recessed fill and a
      border want to move in opposite directions from the surface: in dark mode
      --hollow is darker than the paper, which made every rule in the interface
      invisible at 1.09:1. */
-  --rule: #d8cdb9;
+  --rule: #d2cabc;
 
   /* ---- ink ------------------------------------------------------------- */
   --ink: #2b2520;
@@ -92,8 +92,8 @@
    * Radii are small. Scuttle is not made of pills.
    */
   --round-tight: 3px;
-  --round: 6px;
-  --round-soft: 10px;
+  --round: 8px;
+  --round-soft: 12px;
   --round-drawer: 16px;
 
   /* ---- depth ------------------------------------------------------------

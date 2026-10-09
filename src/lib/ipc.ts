@@ -8,6 +8,8 @@
  *    `refused` specifically instead of matching on prose.
  */
 
+import type { OrganizationKind, OrganizationGrouping, OrganizationInventory, OrganizationPreference, OrganizationDestination, OrganizationPlan, OrganizationBatch } from '@/features/organization/types'
+
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
@@ -15,6 +17,7 @@ import type {
   BackgroundStatus,
   Candidate,
   DryRunReport,
+  DependencyCacheReport,
   Findings,
   HistoryEntry,
   IgnoredEntry,
@@ -51,6 +54,19 @@ export const EVENTS = {
 type WithScan<T> = T & { scan_id: string }
 
 export const api = {
+  organizationInventory: () => invoke<OrganizationInventory>('organization_inventory'),
+  organizationPreference: (kind: OrganizationKind) => invoke<OrganizationPreference>('organization_preference', { kind }),
+  chooseOrganizationDestination: () => invoke<OrganizationDestination | null>('choose_organization_destination'),
+  planOrganization: (kind: OrganizationKind, ids: string[], destinationId: string, grouping: OrganizationGrouping) => invoke<OrganizationPlan>('plan_organization', { kind, ids, destinationId, grouping }),
+  startOrganization: (planId: string) => invoke<OrganizationBatch>('start_organization', { planId }),
+  undoOrganization: (id: string) => invoke<OrganizationBatch>('undo_organization', { id }),
+  organizationStatus: (id: string) => invoke<OrganizationBatch>('organization_status', { id }),
+  organizationHistory: (offset = 0) => invoke<OrganizationBatch[]>('organization_history', { offset }),
+  cancelOrganization: (id: string) => invoke<void>('cancel_organization', { id }),
+  organizationThumbnail: (id: string) => invoke<string | null>('organization_thumbnail', { id }),
+  revealOrganization: (id: string) => invoke<void>('reveal_organization', { id }),
+  dependencyCachePreview: () => invoke<DependencyCacheReport>('dependency_cache_preview'),
+  cancelDependencyCachePreview: () => invoke<void>('cancel_dependency_cache_preview'),
   developerRoots: () => invoke<string[]>('developer_roots'),
   chooseDeveloperRoot: () => invoke<string | null>('choose_developer_root'),
   rummage: (options: { roots?: string[]; includeDeveloperDebris?: boolean } = {}) =>

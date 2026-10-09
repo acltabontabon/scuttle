@@ -50,6 +50,13 @@ const BURST_SIZE: usize = 3;
 /// A lone screenshot is only interesting once it has been ignored this long.
 const STALE_DAYS: u32 = 180;
 
+/// Conservative filename identification shared with loose-file organization.
+pub fn named_screenshot(path: &Path) -> bool {
+    let name = paths::file_name_lower(path);
+    paths::extension(path).is_some_and(|ext| IMAGE_EXTENSIONS.contains(&ext.as_str()))
+        && NAME_PATTERNS.iter().any(|pattern| name.contains(pattern))
+}
+
 pub struct ScreenshotDetector {
     candidates: Vec<Shot>,
     locations: Option<Vec<PathBuf>>,

@@ -487,6 +487,7 @@ export interface Settings {
   include_developer_debris: boolean
   developer_roots: string[]
   developer_stale_days: 14 | 30 | 60
+  dependency_caches: DependencyCachePreferences
   quarantine_retention_days: number
   heavy_threshold: number
   appearance: 'system' | 'light' | 'dark'
@@ -630,6 +631,7 @@ export interface DryRunRow {
 }
 
 export interface DryRunReport {
+  dependency_caches: DependencyCacheReport | null
   roots: string[]
   developer_debris: boolean
   files_seen: number
@@ -672,4 +674,44 @@ export function isScuttleError(value: unknown): value is ScuttleError {
     'code' in value &&
     'message' in value
   )
+}
+
+export type DependencyCacheKind = 'maven' | 'gradle' | 'npm' | 'pnpm' | 'yarn'
+export interface DependencyCacheLocation { kind: DependencyCacheKind; path: string }
+export interface DependencyCachePreferences {
+  enabled: boolean
+  retention_days: 90 | 180 | 365
+  locations: DependencyCacheLocation[]
+}
+export interface DependencyCacheEntry {
+  id: string
+  kind: DependencyCacheKind
+  repository: string
+  path: string
+  artifact: string
+  version: string | null
+  bytes: number
+  complete: boolean
+  metadata_fingerprint: string
+  newest_modified_unix: number | null
+  last_used_unix: number | null
+  origin: 'downloaded' | 'local' | 'unknown'
+  projects: string[]
+  decision: 'eligible' | 'kept' | 'insufficient_evidence'
+  reasons: string[]
+  explanations: string[]
+}
+export interface DependencyCacheReport {
+  policy_version: number
+  evaluated_unix: number
+  retention_days: number
+  complete: boolean
+  repositories: (DependencyCacheLocation & { present: boolean; entries: number; bytes: number; complete: boolean })[]
+  projects: { path: string; ecosystem: string; manifests: string[]; coverage_complete: boolean; notes: string[] }[]
+  entries: DependencyCacheEntry[]
+  bytes: number
+  kept: number
+  insufficient_evidence: number
+  eligible: number
+  notes: string[]
 }
