@@ -117,7 +117,7 @@ stat result rather than reopening each entry for its identity.
 Current adapters produce kept or insufficient-evidence results only. Do not
 turn incomplete coverage or modification dates into unused-dependency evidence.
 Supported layouts and remaining limits are described in
-[README](../README.md#dependency-cache-preview) and [safety.md](safety.md).
+[user guide](using-scuttle.md#dependency-cache-preview) and [safety.md](safety.md).
 
 ## Logging
 
